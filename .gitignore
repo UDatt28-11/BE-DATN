@@ -1,0 +1,41 @@
+# =========================
+# Laravel default ignores
+# =========================
+/vendor
+/node_modules
+
+# Environment files
+.env
+.env.backup
+.env.production
+
+# Laravel specific
+/public/storage
+/public/hot
+/public/build
+/storage/*.key
+/storage/pail
+/bootstrap/cache/*.php
+!bootstrap/cache/.gitignore
+
+# Logs & debug
+*.log
+.phpunit.result.cache
+/.phpunit.cache
+
+# IDE & editor folders
+/.idea
+/.vscode
+/.fleet
+/.nova
+/.zed
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Others
+/phpactor.json
+/auth.json
+Homestead.json
+Homestead.yaml
