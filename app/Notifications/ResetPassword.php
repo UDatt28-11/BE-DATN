@@ -34,16 +34,12 @@ class ResetPassword extends Notification
      */
     public function toMail($notifiable)
     {
-        $url = url(config('app.url') . route('password.reset', [
-            'token' => $this->token,
-            'email' => $notifiable->getEmailForPasswordReset(),
-        ], false));
+        $actionUrl = config('app.url') . '/api/user/reset-password/' . $this->token;
 
-        return (new MailMessage)
-            ->subject('🔐 Đặt lại mật khẩu cho tài khoản BookStay')
+        return (new \Illuminate\Notifications\Messages\MailMessage)
             ->view('vendor.notifications.email', [
-                'url' => $url,
-                'user' => $notifiable
+                'user' => $notifiable,
+                'actionUrl' => $actionUrl,
             ]);
     }
 }

@@ -23,13 +23,13 @@
                 Nhấn vào nút bên dưới để tạo mật khẩu mới:</p>
 
                 <p style="text-align: center; margin: 40px 0;">
-                    <a href="{{ $url }}" style="background-color: #2563eb; color: #fff; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">
+                    <a href="{{ $actionUrl  }}" style="background-color: #2563eb; color: #fff; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">
                         Đặt lại mật khẩu
                     </a>
                 </p>
 
                 <p>Nếu bạn không thực hiện yêu cầu này, vui lòng bỏ qua email này.</p>
-                <p>Liên kết sẽ hết hạn sau <strong>60 phút</strong> vì lý do bảo mật.</p>
+                <p>Liên kết sẽ hết hạn sau <strong>15 phút</strong> vì lý do bảo mật.</p>
 
                 <p>Trân trọng,<br><strong>Đội ngũ {{ $appName }} 💙</strong></p>
             </td>
