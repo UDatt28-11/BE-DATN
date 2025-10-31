@@ -7,6 +7,7 @@ use App\Http\Controllers\Admin\AuthController as AdminAuthController;
 use App\Http\Controllers\User\AuthController as UserAuthController;
 use App\Http\Controllers\Staff\AuthController as StaffAuthController;
 use App\Http\Controllers\User\ResetPasswordController;
+use App\Http\Controllers\User\VerifyEmailController;
 
 Route::prefix('admin')->group(function () {
     Route::post('login', [AdminAuthController::class, 'login']);
@@ -27,7 +28,10 @@ Route::prefix('staff')->group(function () {
 });
 
 Route::prefix('user')->group(function () {
-    Route::post('register', [UserAuthController::class, 'register']);
+    Route::post('/register', [UserAuthController::class, 'register']);
+    Route::get('/email/verify/{id}/{hash}', [VerifyEmailController::class, 'verify'])
+        ->middleware(['signed'])
+        ->name('verification.verify');
     Route::post('login', [UserAuthController::class, 'login']);
     Route::post('forgot-password', [UserAuthController::class, 'forgotPassword']);
     Route::post('reset-password', [UserAuthController::class, 'resetPassword']);

@@ -11,6 +11,10 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Validation\ValidationException;
+use Illuminate\Support\Facades\URL;
+use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Carbon;
+use App\Mail\VerifyEmailMail;
 
 class AuthController extends Controller
 {
@@ -50,16 +54,6 @@ class AuthController extends Controller
             'email' => 'required|email|unique:users,email',
             'password' => 'required|string|min:6|confirmed',
             'phone_number' => 'nullable|regex:/^[0-9]{9,11}$/|unique:users,phone_number',
-        ], [
-            'full_name.required' => 'Vui lòng nhập họ và tên.',
-            'email.required' => 'Vui lòng nhập email.',
-            'email.email' => 'Email không hợp lệ.',
-            'email.unique' => 'Email đã được sử dụng.',
-            'password.required' => 'Vui lòng nhập mật khẩu.',
-            'password.min' => 'Mật khẩu phải có ít nhất 6 ký tự.',
-            'password.confirmed' => 'Xác nhận mật khẩu không khớp.',
-            'phone_number.regex' => 'Số điện thoại không hợp lệ.',
-            'phone_number.unique' => 'Số điện thoại đã tồn tại.',
         ]);
 
         $data['password'] = Hash::make($data['password']);
@@ -67,10 +61,19 @@ class AuthController extends Controller
 
         $user = User::create($data);
 
+        // Tạo link xác minh hợp lệ trong 15 phút
+        $verifyUrl = URL::temporarySignedRoute(
+            'verification.verify',
+            Carbon::now()->addMinutes(15),
+            ['id' => $user->id, 'hash' => sha1($user->email)]
+        );
+
+        // Gửi email xác nhận
+        Mail::to($user->email)->send(new VerifyEmailMail($user, $verifyUrl));
+
         return response()->json([
-            'message' => 'Đăng ký thành công',
-            'user' => $user
-        ]);
+            'message' => 'Đăng ký thành công! Vui lòng kiểm tra email để xác nhận tài khoản.'
+        ], 201);
     }
 
     /**
