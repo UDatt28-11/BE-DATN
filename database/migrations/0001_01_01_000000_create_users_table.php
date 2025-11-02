@@ -10,6 +10,7 @@ return new class extends Migration
     {
         Schema::create('users', function (Blueprint $table) {
             $table->id();
+            $table->enum('role', ['admin', 'staff', 'user'])->default('user');
             $table->string('full_name');
             $table->string('email')->unique();
             $table->string('password'); // Laravel sẽ tự hash, không cần _hash
