@@ -2,12 +2,7 @@
 
 namespace App\Models;
 
-/*
- FILE GUARD – ADMIN BOOKING MODULE ONLY
- - KHÔNG chạm schema/migrations; dùng đúng tên cột từ migrations.
- - Guests FK: 'booking_details_id'.
- - Chỉ index/show/updateStatus; bắt buộc middleware/policy admin.
-*/
+
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -24,7 +19,12 @@ class BookingOrder extends Model
     protected $fillable = [
         'guest_id',
         'order_code',
+        'customer_name',
+        'customer_phone',
+        'customer_email',
         'total_amount',
+        'payment_method',
+        'notes',
         'status',
     ];
 

@@ -15,8 +15,11 @@ class BookingOrderResource extends JsonResource
         return [
             'id' => $this->id,
             'code' => $this->order_code,
-            'customer_name' => optional($this->guest)->full_name,
-            'customer_phone' => optional($this->guest)->phone_number,
+            'customer_name' => $this->customer_name ?? optional($this->guest)->full_name,
+            'customer_phone' => $this->customer_phone ?? optional($this->guest)->phone_number,
+            'customer_email' => $this->customer_email ?? optional($this->guest)->email,
+            'payment_method' => $this->payment_method,
+            'notes' => $this->notes,
             'status' => $this->status,
             'total_amount' => (int) round($this->total_amount),
             'checkin_date' => $firstCheckin ? (new \Carbon\Carbon($firstCheckin))->format('Y-m-d') : null,

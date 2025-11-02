@@ -2,12 +2,6 @@
 
 namespace App\Services\BookingOrder;
 
-/*
- FILE GUARD – ADMIN BOOKING MODULE ONLY
- - KHÔNG chạm schema/migrations; dùng đúng tên cột từ migrations.
- - Guests FK: 'booking_details_id'.
- - Chỉ index/show/updateStatus; bắt buộc middleware/policy admin.
-*/
 
 use App\Http\Resources\Admin\BookingOrderResource;
 use App\Models\BookingOrder;
@@ -35,6 +29,11 @@ class QueryService
                 'booking_orders.id',
                 'booking_orders.guest_id',
                 'booking_orders.order_code',
+                'booking_orders.customer_name',
+                'booking_orders.customer_phone',
+                'booking_orders.customer_email',
+                'booking_orders.payment_method',
+                'booking_orders.notes',
                 'booking_orders.total_amount',
                 'booking_orders.status',
                 'booking_orders.created_at',
@@ -69,6 +68,11 @@ class QueryService
             'booking_orders.id',
             'booking_orders.guest_id',
             'booking_orders.order_code',
+            'booking_orders.customer_name',
+            'booking_orders.customer_phone',
+            'booking_orders.customer_email',
+            'booking_orders.payment_method',
+            'booking_orders.notes',
             'booking_orders.total_amount',
             'booking_orders.status',
             'booking_orders.created_at'

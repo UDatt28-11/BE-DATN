@@ -9,7 +9,14 @@ Route::middleware([])
     ->group(function () {
         Route::get('/booking-orders', [\App\Http\Controllers\Api\Admin\BookingOrderController::class, 'index']);
         Route::get('/booking-orders/{id}', [\App\Http\Controllers\Api\Admin\BookingOrderController::class, 'show']);
+        Route::post('/booking-orders', [\App\Http\Controllers\Api\Admin\BookingOrderController::class, 'store']);
+        Route::put('/booking-orders/{id}', [\App\Http\Controllers\Api\Admin\BookingOrderController::class, 'update']);
         Route::patch('/booking-orders/{id}/status', [\App\Http\Controllers\Api\Admin\BookingOrderController::class, 'updateStatus']);
+        Route::delete('/booking-orders/{id}', [\App\Http\Controllers\Api\Admin\BookingOrderController::class, 'destroy']);
+        
+        // Route cho rooms
+        Route::get('/rooms', [\App\Http\Controllers\Api\Admin\RoomController::class, 'index']);
+        Route::get('/rooms/{id}', [\App\Http\Controllers\Api\Admin\RoomController::class, 'show']);
     });
 
 
