@@ -12,7 +12,7 @@ return new class extends Migration
             $table->id();
             $table->string('name')->unique(); // 'super_admin', 'owner', 'staff', 'guest'
             $table->text('description')->nullable();
-            // Bảng này thường không cần timestamps
+            $table->timestamps();
         });
     }
 

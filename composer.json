@@ -11,10 +11,13 @@
     "require": {
         "php": "^8.3",
         "laravel/framework": "^12.0",
+        "laravel/sanctum": "^4.2",
+        "laravel/socialite": "^5.23",
         "laravel/tinker": "^2.10.1",
         "yaza/laravel-google-drive-storage": "^4.1"
     },
     "require-dev": {
+        "barryvdh/laravel-ide-helper": "^3.6",
         "fakerphp/faker": "^1.23",
         "laravel/pail": "^1.2.2",
         "laravel/pint": "^1.24",
