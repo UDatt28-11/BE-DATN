@@ -11,6 +11,15 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
 
 /**
+ * @OA\SecurityScheme(
+ *     type="http",
+ *     description="Login with username and password to get the authentication token",
+ *     name="Token based based security",
+ *     in="header",
+ *     scheme="bearer",
+ *     bearerFormat="JWT",
+ *     securityScheme="bearerAuth",
+ * )
  * @OA\Tag(
  *     name="Reviews",
  *     description="API Endpoints for Review Management"
@@ -154,7 +163,8 @@ class ReviewController extends Controller
      *     operationId="createReview",
      *     tags={"Reviews"},
      *     summary="Tạo đánh giá",
-     *     description="Tạo đánh giá mới cho phòng hoặc property",
+     *     description="Tạo đánh giá mới cho phòng hoặc property (Yêu cầu đăng nhập)",
+     *     security={{"bearerAuth":{}}},
      *     @OA\RequestBody(
      *         required=true,
      *         description="Dữ liệu đánh giá",
@@ -176,6 +186,7 @@ class ReviewController extends Controller
      *             @OA\Property(property="data", type="object")
      *         )
      *     ),
+     *     @OA\Response(response=401, description="Unauthorized - Cần Bearer token"),
      *     @OA\Response(response=422, description="Validation Error")
      * )
      */

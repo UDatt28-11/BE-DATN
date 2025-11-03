@@ -12,6 +12,16 @@ Route::get('/', function () {
     return view('welcome');
 });
 
+// API Token Tester
+Route::get('/token-tester', function () {
+    return view('token-tester');
+});
+
+// Custom Swagger UI with Token Persistence
+Route::get('/api/documentation-enhanced', function () {
+    return view('swagger');
+});
+
 Route::get('/upload-form', function () {
     return view('upload');
 });

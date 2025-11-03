@@ -2506,7 +2506,7 @@
                     "Reviews"
                 ],
                 "summary": "Tạo đánh giá",
-                "description": "Tạo đánh giá mới cho phòng hoặc property",
+                "description": "Tạo đánh giá mới cho phòng hoặc property (Yêu cầu đăng nhập)",
                 "operationId": "createReview",
                 "requestBody": {
                     "description": "Dữ liệu đánh giá",
@@ -2582,10 +2582,18 @@
                             }
                         }
                     },
+                    "401": {
+                        "description": "Unauthorized - Cần Bearer token"
+                    },
                     "422": {
                         "description": "Validation Error"
                     }
-                }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
             }
         },
         "/reviews/{id}": {
@@ -3948,6 +3956,22 @@
                         }
                     }
                 }
+            }
+        }
+    },
+    "components": {
+        "securitySchemes": {
+            "bearerAuth": {
+                "type": "http",
+                "description": "Bearer token for API authentication",
+                "scheme": "bearer",
+                "bearerFormat": "JWT"
+            },
+            "sanctum": {
+                "type": "apiKey",
+                "description": "Enter token in format (Bearer <token>)",
+                "name": "Authorization",
+                "in": "header"
             }
         }
     },
