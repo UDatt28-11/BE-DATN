@@ -2,10 +2,23 @@
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\AuthController;
 use App\Http\Controllers\InvoiceController;
 use App\Http\Controllers\InvoiceItemController;
 use App\Http\Controllers\SupplyController;
 use App\Http\Controllers\SupplyLogController;
+use App\Http\Controllers\PromotionController;
+use App\Http\Controllers\ReviewController;
+
+// Authentication Routes (public)
+Route::post('/register', [AuthController::class, 'register']);
+Route::post('/login', [AuthController::class, 'login']);
+
+// Protected Routes (require authentication)
+Route::middleware('auth:sanctum')->group(function () {
+    Route::get('/me', [AuthController::class, 'me']);
+    Route::post('/logout', [AuthController::class, 'logout']);
+});
 
 // Invoice Management Routes
 Route::prefix('invoices')->group(function () {
@@ -66,4 +79,32 @@ Route::prefix('supply-logs')->group(function () {
     Route::get('/summary/movement', [SupplyLogController::class, 'getMovementSummary']);
     Route::get('/supply/{supplyId}', [SupplyLogController::class, 'getSupplyLogs']);
     Route::get('/{id}', [SupplyLogController::class, 'show'])->where('id', '[0-9]+');
+});
+
+// Promotion Management Routes
+Route::prefix('promotions')->group(function () {
+    Route::get('/', [PromotionController::class, 'index']);
+    Route::post('/', [PromotionController::class, 'store']);
+    Route::post('/validate', [PromotionController::class, 'validate']);
+    Route::get('/statistics/overview', [PromotionController::class, 'statistics']);
+    Route::get('/active', [PromotionController::class, 'activePromotions']);
+    Route::get('/{id}', [PromotionController::class, 'show'])->where('id', '[0-9]+');
+    Route::put('/{id}', [PromotionController::class, 'update'])->where('id', '[0-9]+');
+    Route::delete('/{id}', [PromotionController::class, 'destroy'])->where('id', '[0-9]+');
+});
+
+// Review Management Routes
+Route::prefix('reviews')->group(function () {
+    Route::get('/', [ReviewController::class, 'index']);
+    Route::post('/', [ReviewController::class, 'store']);
+    Route::get('/statistics/overview', [ReviewController::class, 'statistics']);
+    Route::get('/property/{propertyId}', [ReviewController::class, 'getPropertyReviews']);
+    Route::get('/room/{roomId}', [ReviewController::class, 'getRoomReviews']);
+    Route::get('/{id}', [ReviewController::class, 'show'])->where('id', '[0-9]+');
+    Route::put('/{id}', [ReviewController::class, 'update'])->where('id', '[0-9]+');
+    Route::delete('/{id}', [ReviewController::class, 'destroy'])->where('id', '[0-9]+');
+    Route::post('/{id}/approve', [ReviewController::class, 'approve'])->where('id', '[0-9]+');
+    Route::post('/{id}/reject', [ReviewController::class, 'reject'])->where('id', '[0-9]+');
+    Route::post('/{id}/mark-helpful', [ReviewController::class, 'markHelpful'])->where('id', '[0-9]+');
+    Route::post('/{id}/mark-not-helpful', [ReviewController::class, 'markNotHelpful'])->where('id', '[0-9]+');
 });

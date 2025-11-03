@@ -38,4 +38,14 @@ class Property extends Model
     {
         return $this->hasMany(RoomType::class);
     }
+
+    public function promotions(): HasMany
+    {
+        return $this->hasMany(Promotion::class);
+    }
+
+    public function reviews(): HasMany
+    {
+        return $this->hasMany(Review::class);
+    }
 }

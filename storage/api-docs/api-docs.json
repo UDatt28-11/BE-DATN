@@ -16,6 +16,322 @@
         }
     ],
     "paths": {
+        "/register": {
+            "post": {
+                "tags": [
+                    "Authentication"
+                ],
+                "summary": "Đăng ký tài khoản",
+                "description": "Đăng ký tài khoản mới",
+                "operationId": "registerUser",
+                "requestBody": {
+                    "description": "Dữ liệu đăng ký",
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "full_name",
+                                    "email",
+                                    "password",
+                                    "password_confirmation"
+                                ],
+                                "properties": {
+                                    "full_name": {
+                                        "description": "Tên đầy đủ",
+                                        "type": "string",
+                                        "example": "Nguyễn Văn A"
+                                    },
+                                    "email": {
+                                        "description": "Email",
+                                        "type": "string",
+                                        "format": "email",
+                                        "example": "user@example.com"
+                                    },
+                                    "password": {
+                                        "description": "Mật khẩu (ít nhất 8 ký tự)",
+                                        "type": "string",
+                                        "format": "password",
+                                        "example": "password123"
+                                    },
+                                    "password_confirmation": {
+                                        "description": "Xác nhận mật khẩu",
+                                        "type": "string",
+                                        "format": "password",
+                                        "example": "password123"
+                                    },
+                                    "phone_number": {
+                                        "description": "Số điện thoại (optional)",
+                                        "type": "string",
+                                        "example": "0987654321"
+                                    },
+                                    "address": {
+                                        "description": "Địa chỉ (optional)",
+                                        "type": "string",
+                                        "example": "123 Nguyễn Huệ, HCM"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Đăng ký thành công",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Đăng ký thành công"
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "user": {
+                                                    "properties": {
+                                                        "id": {
+                                                            "type": "integer",
+                                                            "example": 1
+                                                        },
+                                                        "full_name": {
+                                                            "type": "string",
+                                                            "example": "Nguyễn Văn A"
+                                                        },
+                                                        "email": {
+                                                            "type": "string",
+                                                            "example": "user@example.com"
+                                                        },
+                                                        "role": {
+                                                            "type": "string",
+                                                            "example": "user"
+                                                        }
+                                                    },
+                                                    "type": "object"
+                                                },
+                                                "token": {
+                                                    "type": "string",
+                                                    "example": "eyJ0eXAiOiJKV1QiLCJhbGc..."
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error"
+                    }
+                }
+            }
+        },
+        "/login": {
+            "post": {
+                "tags": [
+                    "Authentication"
+                ],
+                "summary": "Đăng nhập",
+                "description": "Đăng nhập với email và mật khẩu",
+                "operationId": "loginUser",
+                "requestBody": {
+                    "description": "Thông tin đăng nhập",
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "email",
+                                    "password"
+                                ],
+                                "properties": {
+                                    "email": {
+                                        "description": "Email",
+                                        "type": "string",
+                                        "format": "email",
+                                        "example": "user@example.com"
+                                    },
+                                    "password": {
+                                        "description": "Mật khẩu",
+                                        "type": "string",
+                                        "format": "password",
+                                        "example": "password123"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Đăng nhập thành công",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Đăng nhập thành công"
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "user": {
+                                                    "properties": {
+                                                        "id": {
+                                                            "type": "integer",
+                                                            "example": 1
+                                                        },
+                                                        "full_name": {
+                                                            "type": "string",
+                                                            "example": "Nguyễn Văn A"
+                                                        },
+                                                        "email": {
+                                                            "type": "string",
+                                                            "example": "user@example.com"
+                                                        },
+                                                        "role": {
+                                                            "type": "string",
+                                                            "example": "user"
+                                                        }
+                                                    },
+                                                    "type": "object"
+                                                },
+                                                "token": {
+                                                    "type": "string",
+                                                    "example": "eyJ0eXAiOiJKV1QiLCJhbGc..."
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Email hoặc mật khẩu không đúng"
+                    }
+                }
+            }
+        },
+        "/me": {
+            "get": {
+                "tags": [
+                    "Authentication"
+                ],
+                "summary": "Lấy thông tin người dùng hiện tại",
+                "description": "Lấy thông tin profile của người dùng đã đăng nhập",
+                "operationId": "getCurrentUser",
+                "responses": {
+                    "200": {
+                        "description": "Thông tin người dùng",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "id": {
+                                                    "type": "integer",
+                                                    "example": 1
+                                                },
+                                                "full_name": {
+                                                    "type": "string",
+                                                    "example": "Nguyễn Văn A"
+                                                },
+                                                "email": {
+                                                    "type": "string",
+                                                    "example": "user@example.com"
+                                                },
+                                                "phone_number": {
+                                                    "type": "string",
+                                                    "example": "0987654321"
+                                                },
+                                                "role": {
+                                                    "type": "string",
+                                                    "example": "user"
+                                                },
+                                                "status": {
+                                                    "type": "string",
+                                                    "example": "active"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/logout": {
+            "post": {
+                "tags": [
+                    "Authentication"
+                ],
+                "summary": "Đăng xuất",
+                "description": "Đăng xuất tài khoản hiện tại",
+                "operationId": "logoutUser",
+                "responses": {
+                    "200": {
+                        "description": "Đăng xuất thành công",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Đăng xuất thành công"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/invoices": {
             "get": {
                 "tags": [
@@ -1266,6 +1582,1595 @@
                 }
             }
         },
+        "/promotions": {
+            "get": {
+                "tags": [
+                    "Promotions"
+                ],
+                "summary": "Danh sách mã giảm giá",
+                "description": "Lấy danh sách tất cả mã giảm giá với hỗ trợ lọc, tìm kiếm và phân trang",
+                "operationId": "getPromotions",
+                "parameters": [
+                    {
+                        "name": "property_id",
+                        "in": "query",
+                        "description": "Lọc theo property",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "is_active",
+                        "in": "query",
+                        "description": "Lọc theo trạng thái (true/false)",
+                        "required": false,
+                        "schema": {
+                            "type": "boolean"
+                        }
+                    },
+                    {
+                        "name": "search",
+                        "in": "query",
+                        "description": "Tìm kiếm theo mã hoặc mô tả",
+                        "required": false,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "page",
+                        "in": "query",
+                        "description": "Trang (mặc định 1, 15 kết quả/trang)",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Danh sách mã giảm giá",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "tags": [
+                    "Promotions"
+                ],
+                "summary": "Tạo mã giảm giá",
+                "description": "Tạo mã giảm giá mới. Lưu ý: room_ids bắt buộc khi applicable_to='specific_rooms', room_type_ids bắt buộc khi applicable_to='specific_room_types'",
+                "operationId": "createPromotion",
+                "requestBody": {
+                    "description": "Dữ liệu mã giảm giá",
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "property_id",
+                                    "code",
+                                    "discount_type",
+                                    "discount_value",
+                                    "start_date",
+                                    "end_date",
+                                    "applicable_to"
+                                ],
+                                "properties": {
+                                    "property_id": {
+                                        "description": "ID property",
+                                        "type": "integer",
+                                        "example": 1
+                                    },
+                                    "code": {
+                                        "description": "Mã giảm giá",
+                                        "type": "string",
+                                        "example": "SUMMER2024"
+                                    },
+                                    "description": {
+                                        "description": "Mô tả mã giảm",
+                                        "type": "string",
+                                        "example": "Giảm giá mua hè 20%"
+                                    },
+                                    "discount_type": {
+                                        "description": "Loại giảm giá",
+                                        "type": "string",
+                                        "enum": [
+                                            "percentage",
+                                            "fixed_amount"
+                                        ],
+                                        "example": "percentage"
+                                    },
+                                    "discount_value": {
+                                        "description": "Giá trị giảm (%)",
+                                        "type": "number",
+                                        "example": 20
+                                    },
+                                    "max_discount_amount": {
+                                        "description": "Giảm tối đa (VNĐ)",
+                                        "type": "number",
+                                        "example": 500
+                                    },
+                                    "min_purchase_amount": {
+                                        "description": "Mua tối thiểu (VNĐ)",
+                                        "type": "number",
+                                        "example": 1000
+                                    },
+                                    "max_usage_limit": {
+                                        "description": "Lượt dùng tối đa",
+                                        "type": "integer",
+                                        "example": 100
+                                    },
+                                    "max_usage_per_user": {
+                                        "description": "Lượt dùng per user",
+                                        "type": "integer",
+                                        "example": 1
+                                    },
+                                    "start_date": {
+                                        "description": "Ngày bắt đầu",
+                                        "type": "string",
+                                        "format": "date",
+                                        "example": "2025-10-04"
+                                    },
+                                    "end_date": {
+                                        "description": "Ngày kết thúc",
+                                        "type": "string",
+                                        "format": "date",
+                                        "example": "2026-01-02"
+                                    },
+                                    "is_active": {
+                                        "description": "Kích hoạt (0 hoặc 1)",
+                                        "type": "integer",
+                                        "example": 1
+                                    },
+                                    "applicable_to": {
+                                        "description": "Áp dụng cho",
+                                        "type": "string",
+                                        "enum": [
+                                            "all",
+                                            "specific_rooms",
+                                            "specific_room_types"
+                                        ],
+                                        "example": "all"
+                                    },
+                                    "room_ids": {
+                                        "description": "IDs phòng (bắt buộc nếu applicable_to='specific_rooms', bỏ qua nếu applicable_to='all')",
+                                        "type": "array",
+                                        "items": {
+                                            "description": "ID phòng",
+                                            "type": "integer"
+                                        }
+                                    },
+                                    "room_type_ids": {
+                                        "description": "IDs loại phòng (bắt buộc nếu applicable_to='specific_room_types', bỏ qua nếu applicable_to='all')",
+                                        "type": "array",
+                                        "items": {
+                                            "description": "ID loại phòng",
+                                            "type": "integer"
+                                        }
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Tạo thành công",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Mã giảm giá đã được tạo thành công"
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "id": {
+                                                    "type": "integer",
+                                                    "example": 1
+                                                },
+                                                "property_id": {
+                                                    "type": "integer",
+                                                    "example": 1
+                                                },
+                                                "code": {
+                                                    "type": "string",
+                                                    "example": "SUMMER2024"
+                                                },
+                                                "description": {
+                                                    "type": "string",
+                                                    "example": "Giảm giá mua hè 20%"
+                                                },
+                                                "discount_type": {
+                                                    "type": "string",
+                                                    "example": "percentage"
+                                                },
+                                                "discount_value": {
+                                                    "type": "number",
+                                                    "example": 20
+                                                },
+                                                "max_discount_amount": {
+                                                    "type": "number",
+                                                    "example": 500
+                                                },
+                                                "min_purchase_amount": {
+                                                    "type": "number",
+                                                    "example": 1000
+                                                },
+                                                "max_usage_limit": {
+                                                    "type": "integer",
+                                                    "example": 100
+                                                },
+                                                "max_usage_per_user": {
+                                                    "type": "integer",
+                                                    "example": 1
+                                                },
+                                                "usage_count": {
+                                                    "type": "integer",
+                                                    "example": 0
+                                                },
+                                                "start_date": {
+                                                    "type": "string",
+                                                    "format": "date",
+                                                    "example": "2025-10-04"
+                                                },
+                                                "end_date": {
+                                                    "type": "string",
+                                                    "format": "date",
+                                                    "example": "2026-01-02"
+                                                },
+                                                "is_active": {
+                                                    "type": "integer",
+                                                    "example": 1
+                                                },
+                                                "applicable_to": {
+                                                    "type": "string",
+                                                    "example": "all"
+                                                },
+                                                "created_at": {
+                                                    "type": "string",
+                                                    "format": "date-time"
+                                                },
+                                                "updated_at": {
+                                                    "type": "string",
+                                                    "format": "date-time"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error"
+                    }
+                }
+            }
+        },
+        "/promotions/{id}": {
+            "get": {
+                "tags": [
+                    "Promotions"
+                ],
+                "summary": "Chi tiết mã giảm giá",
+                "description": "Lấy chi tiết một mã giảm giá",
+                "operationId": "getPromotion",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "ID mã giảm giá",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Chi tiết mã giảm giá",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "id": {
+                                                    "type": "integer",
+                                                    "example": 1
+                                                },
+                                                "property_id": {
+                                                    "type": "integer",
+                                                    "example": 1
+                                                },
+                                                "code": {
+                                                    "type": "string",
+                                                    "example": "SUMMER2024"
+                                                },
+                                                "description": {
+                                                    "type": "string",
+                                                    "example": "Giảm giá mua hè 20%"
+                                                },
+                                                "discount_type": {
+                                                    "type": "string",
+                                                    "example": "percentage"
+                                                },
+                                                "discount_value": {
+                                                    "type": "number",
+                                                    "example": 20
+                                                },
+                                                "max_discount_amount": {
+                                                    "type": "number",
+                                                    "example": 500
+                                                },
+                                                "min_purchase_amount": {
+                                                    "type": "number",
+                                                    "example": 1000
+                                                },
+                                                "max_usage_limit": {
+                                                    "type": "integer",
+                                                    "example": 100
+                                                },
+                                                "max_usage_per_user": {
+                                                    "type": "integer",
+                                                    "example": 1
+                                                },
+                                                "usage_count": {
+                                                    "type": "integer",
+                                                    "example": 0
+                                                },
+                                                "start_date": {
+                                                    "type": "string",
+                                                    "format": "date",
+                                                    "example": "2025-10-04"
+                                                },
+                                                "end_date": {
+                                                    "type": "string",
+                                                    "format": "date",
+                                                    "example": "2026-01-02"
+                                                },
+                                                "is_active": {
+                                                    "type": "integer",
+                                                    "example": 1
+                                                },
+                                                "applicable_to": {
+                                                    "type": "string",
+                                                    "example": "all"
+                                                },
+                                                "created_at": {
+                                                    "type": "string",
+                                                    "format": "date-time"
+                                                },
+                                                "updated_at": {
+                                                    "type": "string",
+                                                    "format": "date-time"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Không tìm thấy"
+                    }
+                }
+            },
+            "put": {
+                "tags": [
+                    "Promotions"
+                ],
+                "summary": "Cập nhật mã giảm giá",
+                "description": "Cập nhật thông tin mã giảm giá. Lưu ý: room_ids bắt buộc khi applicable_to='specific_rooms', room_type_ids bắt buộc khi applicable_to='specific_room_types'",
+                "operationId": "updatePromotion",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "ID mã giảm giá",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "code": {
+                                        "description": "Mã giảm giá (optional)",
+                                        "type": "string",
+                                        "example": "SUMMER2024"
+                                    },
+                                    "description": {
+                                        "description": "Mô tả (optional)",
+                                        "type": "string",
+                                        "example": "Giảm giá mua hè 20%"
+                                    },
+                                    "discount_type": {
+                                        "description": "Loại giảm (optional)",
+                                        "type": "string",
+                                        "enum": [
+                                            "percentage",
+                                            "fixed_amount"
+                                        ]
+                                    },
+                                    "discount_value": {
+                                        "description": "Giá trị giảm (optional)",
+                                        "type": "number",
+                                        "example": 20
+                                    },
+                                    "max_discount_amount": {
+                                        "description": "Giảm tối đa (optional)",
+                                        "type": "number",
+                                        "example": 500
+                                    },
+                                    "min_purchase_amount": {
+                                        "description": "Mua tối thiểu (optional)",
+                                        "type": "number",
+                                        "example": 1000
+                                    },
+                                    "max_usage_limit": {
+                                        "description": "Lượt dùng tối đa (optional)",
+                                        "type": "integer",
+                                        "example": 100
+                                    },
+                                    "max_usage_per_user": {
+                                        "description": "Lượt dùng per user (optional)",
+                                        "type": "integer",
+                                        "example": 1
+                                    },
+                                    "start_date": {
+                                        "description": "Ngày bắt đầu (optional)",
+                                        "type": "string",
+                                        "format": "date",
+                                        "example": "2025-10-04"
+                                    },
+                                    "end_date": {
+                                        "description": "Ngày kết thúc (optional)",
+                                        "type": "string",
+                                        "format": "date",
+                                        "example": "2026-01-02"
+                                    },
+                                    "is_active": {
+                                        "description": "Kích hoạt (0 hoặc 1, optional)",
+                                        "type": "integer",
+                                        "example": 1
+                                    },
+                                    "applicable_to": {
+                                        "description": "Áp dụng cho (optional)",
+                                        "type": "string",
+                                        "enum": [
+                                            "all",
+                                            "specific_rooms",
+                                            "specific_room_types"
+                                        ]
+                                    },
+                                    "room_ids": {
+                                        "description": "IDs phòng (bắt buộc nếu applicable_to='specific_rooms', bỏ qua nếu applicable_to='all')",
+                                        "type": "array",
+                                        "items": {
+                                            "description": "ID phòng",
+                                            "type": "integer"
+                                        }
+                                    },
+                                    "room_type_ids": {
+                                        "description": "IDs loại phòng (bắt buộc nếu applicable_to='specific_room_types', bỏ qua nếu applicable_to='all')",
+                                        "type": "array",
+                                        "items": {
+                                            "description": "ID loại phòng",
+                                            "type": "integer"
+                                        }
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Cập nhật thành công",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Cập nhật thành công"
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "id": {
+                                                    "type": "integer",
+                                                    "example": 1
+                                                },
+                                                "property_id": {
+                                                    "type": "integer",
+                                                    "example": 1
+                                                },
+                                                "code": {
+                                                    "type": "string",
+                                                    "example": "SUMMER2024"
+                                                },
+                                                "description": {
+                                                    "type": "string",
+                                                    "example": "Giảm giá mua hè 20%"
+                                                },
+                                                "discount_type": {
+                                                    "type": "string",
+                                                    "example": "percentage"
+                                                },
+                                                "discount_value": {
+                                                    "type": "number",
+                                                    "example": 20
+                                                },
+                                                "max_discount_amount": {
+                                                    "type": "number",
+                                                    "example": 500
+                                                },
+                                                "min_purchase_amount": {
+                                                    "type": "number",
+                                                    "example": 1000
+                                                },
+                                                "max_usage_limit": {
+                                                    "type": "integer",
+                                                    "example": 100
+                                                },
+                                                "max_usage_per_user": {
+                                                    "type": "integer",
+                                                    "example": 1
+                                                },
+                                                "usage_count": {
+                                                    "type": "integer",
+                                                    "example": 0
+                                                },
+                                                "start_date": {
+                                                    "type": "string",
+                                                    "format": "date",
+                                                    "example": "2025-10-04"
+                                                },
+                                                "end_date": {
+                                                    "type": "string",
+                                                    "format": "date",
+                                                    "example": "2026-01-02"
+                                                },
+                                                "is_active": {
+                                                    "type": "integer",
+                                                    "example": 1
+                                                },
+                                                "applicable_to": {
+                                                    "type": "string",
+                                                    "example": "all"
+                                                },
+                                                "created_at": {
+                                                    "type": "string",
+                                                    "format": "date-time"
+                                                },
+                                                "updated_at": {
+                                                    "type": "string",
+                                                    "format": "date-time"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "tags": [
+                    "Promotions"
+                ],
+                "summary": "Xóa mã giảm giá",
+                "description": "Xóa một mã giảm giá",
+                "operationId": "deletePromotion",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "ID mã giảm giá",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Xóa thành công",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Xóa thành công"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Không tìm thấy"
+                    }
+                }
+            }
+        },
+        "/promotions/validate": {
+            "post": {
+                "tags": [
+                    "Promotions"
+                ],
+                "summary": "Kiểm tra mã giảm giá",
+                "description": "Kiểm tra mã giảm giá có hợp lệ không",
+                "operationId": "validatePromotion",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "code",
+                                    "total_amount"
+                                ],
+                                "properties": {
+                                    "code": {
+                                        "type": "string",
+                                        "example": "SUMMER2025"
+                                    },
+                                    "total_amount": {
+                                        "type": "number",
+                                        "example": 5000000
+                                    },
+                                    "room_id": {
+                                        "type": "integer",
+                                        "example": 1
+                                    },
+                                    "property_id": {
+                                        "type": "integer",
+                                        "example": 1
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Kết quả kiểm tra",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Mã không hợp lệ"
+                    }
+                }
+            }
+        },
+        "/promotions/statistics/overview": {
+            "get": {
+                "tags": [
+                    "Promotions"
+                ],
+                "summary": "Thống kê mã giảm giá",
+                "description": "Lấy thống kê về mã giảm giá",
+                "operationId": "getPromotionStats",
+                "parameters": [
+                    {
+                        "name": "property_id",
+                        "in": "query",
+                        "description": "Lọc theo property",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Thống kê",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/promotions/active": {
+            "get": {
+                "tags": [
+                    "Promotions"
+                ],
+                "summary": "Danh sách mã giảm giá đang hoạt động",
+                "description": "Lấy danh sách mã giảm giá đang hoạt động",
+                "operationId": "getActivePromotions",
+                "parameters": [
+                    {
+                        "name": "property_id",
+                        "in": "query",
+                        "description": "Lọc theo property",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "page",
+                        "in": "query",
+                        "description": "Trang (mặc định 1, 10 kết quả/trang)",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Danh sách mã giảm giá đang hoạt động",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/reviews": {
+            "get": {
+                "tags": [
+                    "Reviews"
+                ],
+                "summary": "Danh sách đánh giá",
+                "description": "Lấy danh sách tất cả đánh giá với hỗ trợ lọc, tìm kiếm và phân trang",
+                "operationId": "getReviews",
+                "parameters": [
+                    {
+                        "name": "property_id",
+                        "in": "query",
+                        "description": "Lọc theo property",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "room_id",
+                        "in": "query",
+                        "description": "Lọc theo phòng",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "status",
+                        "in": "query",
+                        "description": "Lọc theo trạng thái (pending, approved, rejected)",
+                        "required": false,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "rating",
+                        "in": "query",
+                        "description": "Lọc theo rating (1-5)",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "verified_only",
+                        "in": "query",
+                        "description": "Chỉ lấy đánh giá từ khách đã booking",
+                        "required": false,
+                        "schema": {
+                            "type": "boolean"
+                        }
+                    },
+                    {
+                        "name": "search",
+                        "in": "query",
+                        "description": "Tìm kiếm theo tiêu đề hoặc nội dung",
+                        "required": false,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "page",
+                        "in": "query",
+                        "description": "Trang (mặc định 1, 15 kết quả/trang)",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Danh sách đánh giá",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "tags": [
+                    "Reviews"
+                ],
+                "summary": "Tạo đánh giá",
+                "description": "Tạo đánh giá mới cho phòng hoặc property",
+                "operationId": "createReview",
+                "requestBody": {
+                    "description": "Dữ liệu đánh giá",
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "booking_details_id",
+                                    "rating",
+                                    "title"
+                                ],
+                                "properties": {
+                                    "booking_details_id": {
+                                        "description": "ID chi tiết đặt phòng",
+                                        "type": "integer",
+                                        "example": 1
+                                    },
+                                    "rating": {
+                                        "description": "Điểm đánh giá",
+                                        "type": "integer",
+                                        "maximum": 5,
+                                        "minimum": 1,
+                                        "example": 5
+                                    },
+                                    "title": {
+                                        "description": "Tiêu đề đánh giá",
+                                        "type": "string",
+                                        "example": "Tuyệt vời"
+                                    },
+                                    "comment": {
+                                        "description": "Nội dung đánh giá",
+                                        "type": "string",
+                                        "example": "Phòng rất sạch, view đẹp"
+                                    },
+                                    "photos": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "string"
+                                        },
+                                        "example": [
+                                            "photo1.jpg",
+                                            "photo2.jpg"
+                                        ]
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Tạo thành công",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Đánh giá đã được tạo"
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error"
+                    }
+                }
+            }
+        },
+        "/reviews/{id}": {
+            "get": {
+                "tags": [
+                    "Reviews"
+                ],
+                "summary": "Chi tiết đánh giá",
+                "description": "Lấy chi tiết một đánh giá",
+                "operationId": "getReview",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "ID đánh giá",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Chi tiết đánh giá",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Không tìm thấy"
+                    }
+                }
+            },
+            "put": {
+                "tags": [
+                    "Reviews"
+                ],
+                "summary": "Cập nhật đánh giá",
+                "description": "Cập nhật thông tin đánh giá",
+                "operationId": "updateReview",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "ID đánh giá",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "rating": {
+                                        "type": "integer",
+                                        "maximum": 5,
+                                        "minimum": 1,
+                                        "example": 4
+                                    },
+                                    "title": {
+                                        "type": "string",
+                                        "example": "Rất tốt"
+                                    },
+                                    "comment": {
+                                        "type": "string",
+                                        "example": "Phòng thoải mái"
+                                    },
+                                    "photos": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "string"
+                                        }
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Cập nhật thành công",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Cập nhật thành công"
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "tags": [
+                    "Reviews"
+                ],
+                "summary": "Xóa đánh giá",
+                "description": "Xóa một đánh giá",
+                "operationId": "deleteReview",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "ID đánh giá",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Xóa thành công",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Đánh giá đã được xóa"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Không tìm thấy"
+                    }
+                }
+            }
+        },
+        "/reviews/{id}/approve": {
+            "post": {
+                "tags": [
+                    "Reviews"
+                ],
+                "summary": "Phê duyệt đánh giá",
+                "description": "Phê duyệt một đánh giá chưa duyệt",
+                "operationId": "approveReview",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "ID đánh giá",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": false,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "admin_notes": {
+                                        "description": "Ghi chú của admin",
+                                        "type": "string",
+                                        "example": "Đánh giá hợp lệ"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Phê duyệt thành công",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Đánh giá đã được phê duyệt"
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/reviews/{id}/reject": {
+            "post": {
+                "tags": [
+                    "Reviews"
+                ],
+                "summary": "Từ chối đánh giá",
+                "description": "Từ chối một đánh giá",
+                "operationId": "rejectReview",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "ID đánh giá",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": false,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "rejection_reason": {
+                                        "description": "Lý do từ chối",
+                                        "type": "string",
+                                        "example": "Vi phạm chính sách"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Từ chối thành công",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Đánh giá đã bị từ chối"
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/reviews/{id}/mark-helpful": {
+            "post": {
+                "tags": [
+                    "Reviews"
+                ],
+                "summary": "Đánh dấu hữu ích",
+                "description": "Đánh dấu đánh giá này là hữu ích",
+                "operationId": "markReviewHelpful",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "ID đánh giá",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Thành công",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Cảm ơn bạn đã đánh giá đánh giá này"
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/reviews/{id}/mark-not-helpful": {
+            "post": {
+                "tags": [
+                    "Reviews"
+                ],
+                "summary": "Đánh dấu không hữu ích",
+                "description": "Đánh dấu đánh giá này là không hữu ích",
+                "operationId": "markReviewNotHelpful",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "ID đánh giá",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Thành công",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Cảm ơn bạn đã đánh giá đánh giá này"
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/reviews/property/{propertyId}": {
+            "get": {
+                "tags": [
+                    "Reviews"
+                ],
+                "summary": "Đánh giá theo property",
+                "description": "Lấy tất cả đánh giá của một property",
+                "operationId": "getPropertyReviews",
+                "parameters": [
+                    {
+                        "name": "propertyId",
+                        "in": "path",
+                        "description": "ID property",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "rating",
+                        "in": "query",
+                        "description": "Lọc theo rating (1-5)",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "status",
+                        "in": "query",
+                        "description": "Lọc theo trạng thái",
+                        "required": false,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "page",
+                        "in": "query",
+                        "description": "Trang",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Danh sách đánh giá",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/reviews/room/{roomId}": {
+            "get": {
+                "tags": [
+                    "Reviews"
+                ],
+                "summary": "Đánh giá theo phòng",
+                "description": "Lấy tất cả đánh giá của một phòng",
+                "operationId": "getRoomReviews",
+                "parameters": [
+                    {
+                        "name": "roomId",
+                        "in": "path",
+                        "description": "ID phòng",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "rating",
+                        "in": "query",
+                        "description": "Lọc theo rating (1-5)",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "status",
+                        "in": "query",
+                        "description": "Lọc theo trạng thái",
+                        "required": false,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "page",
+                        "in": "query",
+                        "description": "Trang",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Danh sách đánh giá",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/reviews/statistics/overview": {
+            "get": {
+                "tags": [
+                    "Reviews"
+                ],
+                "summary": "Thống kê đánh giá",
+                "description": "Lấy thống kê về đánh giá",
+                "operationId": "getReviewStats",
+                "parameters": [
+                    {
+                        "name": "property_id",
+                        "in": "query",
+                        "description": "Lọc theo property",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "date_from",
+                        "in": "query",
+                        "description": "Từ ngày (YYYY-MM-DD)",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    },
+                    {
+                        "name": "date_to",
+                        "in": "query",
+                        "description": "Đến ngày (YYYY-MM-DD)",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Thống kê",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/supplies": {
             "get": {
                 "tags": [
@@ -2048,12 +3953,24 @@
     },
     "tags": [
         {
+            "name": "Authentication",
+            "description": "API Endpoints for Authentication"
+        },
+        {
             "name": "Invoices",
             "description": "API Endpoints for Invoice Management"
         },
         {
             "name": "Invoice Items",
             "description": "API Endpoints for Invoice Item Management"
+        },
+        {
+            "name": "Promotions",
+            "description": "API Endpoints for Promotion Management"
+        },
+        {
+            "name": "Reviews",
+            "description": "API Endpoints for Review Management"
         },
         {
             "name": "Supplies",
