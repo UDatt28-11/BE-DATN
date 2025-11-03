@@ -1,0 +1,855 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quản lý Hóa đơn và Vật tư</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        .sidebar {
+            min-height: 100vh;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .sidebar .nav-link {
+            color: rgba(255,255,255,0.8);
+            padding: 12px 20px;
+            border-radius: 8px;
+            margin: 4px 0;
+            transition: all 0.3s;
+        }
+        .sidebar .nav-link:hover, .sidebar .nav-link.active {
+            color: white;
+            background: rgba(255,255,255,0.1);
+            transform: translateX(5px);
+        }
+        .main-content {
+            background: #f8f9fa;
+            min-height: 100vh;
+        }
+        .card {
+            border: none;
+            box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+            border-radius: 12px;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            border-radius: 8px;
+        }
+        .table th {
+            background: #f8f9fa;
+            border-top: none;
+            font-weight: 600;
+            color: #495057;
+        }
+        .badge {
+            font-size: 0.75em;
+            padding: 0.5em 0.75em;
+        }
+        .form-control, .form-select {
+            border-radius: 8px;
+            border: 1px solid #e9ecef;
+        }
+        .form-control:focus, .form-select:focus {
+            border-color: #667eea;
+            box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // API Service
+        const ApiService = {
+            baseURL: 'http://127.0.0.1:8000/api',
+            
+            async request(endpoint, options = {}) {
+                const url = `${this.baseURL}${endpoint}`;
+                const config = {
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json',
+                        ...options.headers
+                    },
+                    ...options
+                };
+                
+                try {
+                    const response = await fetch(url, config);
+                    const data = await response.json();
+                    
+                    if (!response.ok) {
+                        throw new Error(data.message || 'Có lỗi xảy ra');
+                    }
+                    
+                    return data;
+                } catch (error) {
+                    console.error('API Error:', error);
+                    throw error;
+                }
+            },
+
+            // Supplies API
+            async getSupplies() {
+                return this.request('/supplies');
+            },
+
+            async createSupply(supplyData) {
+                return this.request('/supplies', {
+                    method: 'POST',
+                    body: JSON.stringify(supplyData)
+                });
+            },
+
+            async updateSupply(id, supplyData) {
+                return this.request(`/supplies/${id}`, {
+                    method: 'PUT',
+                    body: JSON.stringify(supplyData)
+                });
+            },
+
+            async deleteSupply(id) {
+                return this.request(`/supplies/${id}`, {
+                    method: 'DELETE'
+                });
+            },
+
+            // Invoices API
+            async getInvoices() {
+                return this.request('/invoices');
+            },
+
+            async getInvoice(id) {
+                return this.request(`/invoices/${id}`);
+            },
+
+            async markInvoicePaid(id, paymentData = {}) {
+                return this.request(`/invoices/${id}/mark-paid`, {
+                    method: 'POST',
+                    body: JSON.stringify(paymentData)
+                });
+            },
+
+            // Invoice Items API
+            async getInvoiceItems(invoiceId) {
+                return this.request(`/invoices/${invoiceId}/items`);
+            },
+
+            async addPenaltyItem(invoiceId, itemData) {
+                return this.request(`/invoices/${invoiceId}/items/penalty`, {
+                    method: 'POST',
+                    body: JSON.stringify(itemData)
+                });
+            },
+
+            async addRegularItem(invoiceId, itemData) {
+                return this.request(`/invoices/${invoiceId}/items/regular`, {
+                    method: 'POST',
+                    body: JSON.stringify(itemData)
+                });
+            },
+
+            async updateInvoiceItem(id, itemData) {
+                return this.request(`/invoice-items/${id}`, {
+                    method: 'PUT',
+                    body: JSON.stringify(itemData)
+                });
+            },
+
+            async deleteInvoiceItem(id) {
+                return this.request(`/invoice-items/${id}`, {
+                    method: 'DELETE'
+                });
+            }
+        };
+
+        // SuppliesTable Component
+        const SuppliesTable = ({ supplies, onEdit, onDelete, onAdd }) => {
+            const [loading, setLoading] = useState(false);
+
+            const handleDelete = async (id) => {
+                if (window.confirm('Bạn có chắc chắn muốn xóa vật tư này?')) {
+                    setLoading(true);
+                    try {
+                        await ApiService.deleteSupply(id);
+                        onDelete(id);
+                        alert('Xóa vật tư thành công!');
+                    } catch (error) {
+                        alert('Lỗi: ' + error.message);
+                    } finally {
+                        setLoading(false);
+                    }
+                }
+            };
+
+            return (
+                <div className="card">
+                    <div className="card-header d-flex justify-content-between align-items-center">
+                        <h5 className="mb-0">
+                            <i className="fas fa-boxes me-2"></i>
+                            Danh sách Vật tư
+                        </h5>
+                        <button className="btn btn-primary" onClick={onAdd}>
+                            <i className="fas fa-plus me-2"></i>
+                            Thêm Vật tư
+                        </button>
+                    </div>
+                    <div className="card-body p-0">
+                        <div className="table-responsive">
+                            <table className="table table-hover mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>ID</th>
+                                        <th>Tên Vật tư</th>
+                                        <th>Số lượng tồn kho</th>
+                                        <th>Giá thiệt hại</th>
+                                        <th>Phòng</th>
+                                        <th>Trạng thái</th>
+                                        <th>Thao tác</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {supplies.map(supply => (
+                                        <tr key={supply.id}>
+                                            <td>{supply.id}</td>
+                                            <td>
+                                                <strong>{supply.name}</strong>
+                                            </td>
+                                            <td>
+                                                <span className={`badge ${supply.quantity_in_stock > 10 ? 'bg-success' : supply.quantity_in_stock > 5 ? 'bg-warning' : 'bg-danger'}`}>
+                                                    {supply.quantity_in_stock}
+                                                </span>
+                                            </td>
+                                            <td>
+                                                {new Intl.NumberFormat('vi-VN', {
+                                                    style: 'currency',
+                                                    currency: 'VND'
+                                                }).format(supply.price_on_damage)}
+                                            </td>
+                                            <td>Phòng {supply.room_id}</td>
+                                            <td>
+                                                <span className={`badge ${supply.quantity_in_stock > 5 ? 'bg-success' : 'bg-danger'}`}>
+                                                    {supply.quantity_in_stock > 5 ? 'Đủ hàng' : 'Sắp hết'}
+                                                </span>
+                                            </td>
+                                            <td>
+                                                <div className="btn-group" role="group">
+                                                    <button 
+                                                        className="btn btn-sm btn-outline-primary"
+                                                        onClick={() => onEdit(supply)}
+                                                        disabled={loading}
+                                                    >
+                                                        <i className="fas fa-edit"></i>
+                                                    </button>
+                                                    <button 
+                                                        className="btn btn-sm btn-outline-danger"
+                                                        onClick={() => handleDelete(supply.id)}
+                                                        disabled={loading}
+                                                    >
+                                                        <i className="fas fa-trash"></i>
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // SupplyForm Component
+        const SupplyForm = ({ supply, onSave, onCancel }) => {
+            const [formData, setFormData] = useState({
+                name: '',
+                quantity_in_stock: 0,
+                price_on_damage: 0,
+                room_id: 1
+            });
+
+            useEffect(() => {
+                if (supply) {
+                    setFormData(supply);
+                }
+            }, [supply]);
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                try {
+                    if (supply) {
+                        await ApiService.updateSupply(supply.id, formData);
+                    } else {
+                        await ApiService.createSupply(formData);
+                    }
+                    onSave();
+                } catch (error) {
+                    alert('Lỗi: ' + error.message);
+                }
+            };
+
+            return (
+                <div className="card">
+                    <div className="card-header">
+                        <h5 className="mb-0">
+                            <i className="fas fa-edit me-2"></i>
+                            {supply ? 'Chỉnh sửa Vật tư' : 'Thêm Vật tư mới'}
+                        </h5>
+                    </div>
+                    <div className="card-body">
+                        <form onSubmit={handleSubmit}>
+                            <div className="row">
+                                <div className="col-md-6 mb-3">
+                                    <label className="form-label">Tên vật tư</label>
+                                    <input
+                                        type="text"
+                                        className="form-control"
+                                        value={formData.name}
+                                        onChange={(e) => setFormData({...formData, name: e.target.value})}
+                                        required
+                                    />
+                                </div>
+                                <div className="col-md-6 mb-3">
+                                    <label className="form-label">Số lượng tồn kho</label>
+                                    <input
+                                        type="number"
+                                        className="form-control"
+                                        value={formData.quantity_in_stock}
+                                        onChange={(e) => setFormData({...formData, quantity_in_stock: parseInt(e.target.value)})}
+                                        min="0"
+                                        required
+                                    />
+                                </div>
+                                <div className="col-md-6 mb-3">
+                                    <label className="form-label">Giá thiệt hại (VNĐ)</label>
+                                    <input
+                                        type="number"
+                                        className="form-control"
+                                        value={formData.price_on_damage}
+                                        onChange={(e) => setFormData({...formData, price_on_damage: parseFloat(e.target.value)})}
+                                        min="0"
+                                        step="1000"
+                                        required
+                                    />
+                                </div>
+                                <div className="col-md-6 mb-3">
+                                    <label className="form-label">Phòng</label>
+                                    <select
+                                        className="form-select"
+                                        value={formData.room_id}
+                                        onChange={(e) => setFormData({...formData, room_id: parseInt(e.target.value)})}
+                                        required
+                                    >
+                                        <option value={1}>Phòng 1</option>
+                                        <option value={2}>Phòng 2</option>
+                                        <option value={3}>Phòng 3</option>
+                                        <option value={4}>Phòng 4</option>
+                                        <option value={5}>Phòng 5</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div className="d-flex gap-2">
+                                <button type="submit" className="btn btn-primary">
+                                    <i className="fas fa-save me-2"></i>
+                                    {supply ? 'Cập nhật' : 'Thêm mới'}
+                                </button>
+                                <button type="button" className="btn btn-secondary" onClick={onCancel}>
+                                    <i className="fas fa-times me-2"></i>
+                                    Hủy
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            );
+        };
+
+        // InvoiceDetails Component
+        const InvoiceDetails = ({ invoiceId, onBack }) => {
+            const [invoice, setInvoice] = useState(null);
+            const [invoiceItems, setInvoiceItems] = useState([]);
+            const [loading, setLoading] = useState(true);
+            const [showAddForm, setShowAddForm] = useState(false);
+
+            useEffect(() => {
+                loadInvoiceDetails();
+            }, [invoiceId]);
+
+            const loadInvoiceDetails = async () => {
+                try {
+                    setLoading(true);
+                    const [invoiceData, itemsData] = await Promise.all([
+                        ApiService.getInvoice(invoiceId),
+                        ApiService.getInvoiceItems(invoiceId)
+                    ]);
+                    setInvoice(invoiceData.data);
+                    setInvoiceItems(itemsData.data || []);
+                } catch (error) {
+                    alert('Lỗi: ' + error.message);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const handleMarkPaid = async () => {
+                try {
+                    await ApiService.markInvoicePaid(invoiceId, {
+                        payment_method: 'bank_transfer',
+                        payment_notes: 'Thanh toán qua ngân hàng'
+                    });
+                    alert('Đánh dấu thanh toán thành công!');
+                    loadInvoiceDetails();
+                } catch (error) {
+                    alert('Lỗi: ' + error.message);
+                }
+            };
+
+            const handleAddItem = async (itemData) => {
+                try {
+                    await ApiService.addPenaltyItem(invoiceId, itemData);
+                    alert('Thêm phí phát sinh thành công!');
+                    setShowAddForm(false);
+                    loadInvoiceDetails();
+                } catch (error) {
+                    alert('Lỗi: ' + error.message);
+                }
+            };
+
+            if (loading) {
+                return (
+                    <div className="text-center py-5">
+                        <div className="spinner-border text-primary" role="status">
+                            <span className="visually-hidden">Loading...</span>
+                        </div>
+                        <p className="mt-3">Đang tải...</p>
+                    </div>
+                );
+            }
+
+            return (
+                <div>
+                    <div className="d-flex justify-content-between align-items-center mb-4">
+                        <h4>
+                            <i className="fas fa-file-invoice me-2"></i>
+                            Chi tiết Hóa đơn #{invoice.id}
+                        </h4>
+                        <button className="btn btn-outline-secondary" onClick={onBack}>
+                            <i className="fas fa-arrow-left me-2"></i>
+                            Quay lại
+                        </button>
+                    </div>
+
+                    {/* Invoice Info */}
+                    <div className="row mb-4">
+                        <div className="col-md-6">
+                            <div className="card">
+                                <div className="card-body">
+                                    <h6 className="card-title">Thông tin Hóa đơn</h6>
+                                    <p><strong>Mã đơn:</strong> {invoice.booking_order?.order_code}</p>
+                                    <p><strong>Ngày tạo:</strong> {new Date(invoice.issue_date).toLocaleDateString('vi-VN')}</p>
+                                    <p><strong>Hạn thanh toán:</strong> {new Date(invoice.due_date).toLocaleDateString('vi-VN')}</p>
+                                    <p><strong>Tổng tiền:</strong> 
+                                        <span className="text-primary fw-bold ms-2">
+                                            {new Intl.NumberFormat('vi-VN', {
+                                                style: 'currency',
+                                                currency: 'VND'
+                                            }).format(invoice.total_amount)}
+                                        </span>
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="col-md-6">
+                            <div className="card">
+                                <div className="card-body">
+                                    <h6 className="card-title">Trạng thái</h6>
+                                    <div className="d-flex align-items-center mb-3">
+                                        <span className={`badge ${invoice.status === 'paid' ? 'bg-success' : invoice.status === 'pending' ? 'bg-warning' : 'bg-danger'} me-2`}>
+                                            {invoice.status === 'paid' ? 'Đã thanh toán' : invoice.status === 'pending' ? 'Chờ thanh toán' : 'Đã hủy'}
+                                        </span>
+                                    </div>
+                                    {invoice.status === 'pending' && (
+                                        <button className="btn btn-success" onClick={handleMarkPaid}>
+                                            <i className="fas fa-check me-2"></i>
+                                            Đánh dấu đã thanh toán
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Invoice Items */}
+                    <div className="card">
+                        <div className="card-header d-flex justify-content-between align-items-center">
+                            <h5 className="mb-0">
+                                <i className="fas fa-list me-2"></i>
+                                Chi tiết Hóa đơn
+                            </h5>
+                            <button 
+                                className="btn btn-primary"
+                                onClick={() => setShowAddForm(true)}
+                            >
+                                <i className="fas fa-plus me-2"></i>
+                                Thêm phí phát sinh
+                            </button>
+                        </div>
+                        <div className="card-body p-0">
+                            <div className="table-responsive">
+                                <table className="table table-hover mb-0">
+                                    <thead>
+                                        <tr>
+                                            <th>Mô tả</th>
+                                            <th>Số lượng</th>
+                                            <th>Đơn giá</th>
+                                            <th>Thành tiền</th>
+                                            <th>Loại</th>
+                                            <th>Thao tác</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {invoiceItems.map(item => (
+                                            <tr key={item.id}>
+                                                <td>{item.description}</td>
+                                                <td>{item.quantity}</td>
+                                                <td>
+                                                    {new Intl.NumberFormat('vi-VN', {
+                                                        style: 'currency',
+                                                        currency: 'VND'
+                                                    }).format(item.unit_price)}
+                                                </td>
+                                                <td>
+                                                    <strong>
+                                                        {new Intl.NumberFormat('vi-VN', {
+                                                            style: 'currency',
+                                                            currency: 'VND'
+                                                        }).format(item.total_line)}
+                                                    </strong>
+                                                </td>
+                                                <td>
+                                                    <span className={`badge ${
+                                                        item.item_type === 'room_charge' ? 'bg-primary' :
+                                                        item.item_type === 'service_charge' ? 'bg-info' :
+                                                        item.item_type === 'damage_fee' ? 'bg-warning' : 'bg-secondary'
+                                                    }`}>
+                                                        {item.item_type === 'room_charge' ? 'Phí phòng' :
+                                                         item.item_type === 'service_charge' ? 'Dịch vụ' :
+                                                         item.item_type === 'damage_fee' ? 'Thiệt hại' : 'Khác'}
+                                                    </span>
+                                                </td>
+                                                <td>
+                                                    <button className="btn btn-sm btn-outline-danger">
+                                                        <i className="fas fa-trash"></i>
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Add Item Form Modal */}
+                    {showAddForm && (
+                        <div className="modal show d-block" style={{backgroundColor: 'rgba(0,0,0,0.5)'}}>
+                            <div className="modal-dialog">
+                                <div className="modal-content">
+                                    <div className="modal-header">
+                                        <h5 className="modal-title">Thêm phí phát sinh</h5>
+                                        <button type="button" className="btn-close" onClick={() => setShowAddForm(false)}></button>
+                                    </div>
+                                    <div className="modal-body">
+                                        <InvoiceItemForm onSubmit={handleAddItem} />
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        // InvoiceItemForm Component
+        const InvoiceItemForm = ({ onSubmit }) => {
+            const [formData, setFormData] = useState({
+                description: '',
+                quantity: 1,
+                unit_price: 0,
+                item_type: 'damage_fee'
+            });
+
+            const handleSubmit = (e) => {
+                e.preventDefault();
+                onSubmit(formData);
+            };
+
+            return (
+                <form onSubmit={handleSubmit}>
+                    <div className="mb-3">
+                        <label className="form-label">Mô tả</label>
+                        <input
+                            type="text"
+                            className="form-control"
+                            value={formData.description}
+                            onChange={(e) => setFormData({...formData, description: e.target.value})}
+                            placeholder="VD: Phí làm hỏng khăn tắm"
+                            required
+                        />
+                    </div>
+                    <div className="row">
+                        <div className="col-md-4 mb-3">
+                            <label className="form-label">Số lượng</label>
+                            <input
+                                type="number"
+                                className="form-control"
+                                value={formData.quantity}
+                                onChange={(e) => setFormData({...formData, quantity: parseInt(e.target.value)})}
+                                min="1"
+                                required
+                            />
+                        </div>
+                        <div className="col-md-4 mb-3">
+                            <label className="form-label">Đơn giá (VNĐ)</label>
+                            <input
+                                type="number"
+                                className="form-control"
+                                value={formData.unit_price}
+                                onChange={(e) => setFormData({...formData, unit_price: parseFloat(e.target.value)})}
+                                min="0"
+                                step="1000"
+                                required
+                            />
+                        </div>
+                        <div className="col-md-4 mb-3">
+                            <label className="form-label">Loại phí</label>
+                            <select
+                                className="form-select"
+                                value={formData.item_type}
+                                onChange={(e) => setFormData({...formData, item_type: e.target.value})}
+                            >
+                                <option value="damage_fee">Thiệt hại</option>
+                                <option value="service_charge">Dịch vụ</option>
+                                <option value="other">Khác</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div className="d-flex gap-2">
+                        <button type="submit" className="btn btn-primary">
+                            <i className="fas fa-plus me-2"></i>
+                            Thêm phí
+                        </button>
+                        <button type="button" className="btn btn-secondary" onClick={() => onSubmit(null)}>
+                            Hủy
+                        </button>
+                    </div>
+                </form>
+            );
+        };
+
+        // Main App Component
+        const App = () => {
+            const [currentView, setCurrentView] = useState('supplies');
+            const [supplies, setSupplies] = useState([]);
+            const [invoices, setInvoices] = useState([]);
+            const [loading, setLoading] = useState(true);
+            const [showSupplyForm, setShowSupplyForm] = useState(false);
+            const [editingSupply, setEditingSupply] = useState(null);
+            const [selectedInvoiceId, setSelectedInvoiceId] = useState(null);
+
+            useEffect(() => {
+                loadData();
+            }, []);
+
+            const loadData = async () => {
+                try {
+                    setLoading(true);
+                    const [suppliesData, invoicesData] = await Promise.all([
+                        ApiService.getSupplies(),
+                        ApiService.getInvoices()
+                    ]);
+                    setSupplies(suppliesData.data || []);
+                    setInvoices(invoicesData.data || []);
+                } catch (error) {
+                    alert('Lỗi tải dữ liệu: ' + error.message);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const handleSupplyEdit = (supply) => {
+                setEditingSupply(supply);
+                setShowSupplyForm(true);
+            };
+
+            const handleSupplyAdd = () => {
+                setEditingSupply(null);
+                setShowSupplyForm(true);
+            };
+
+            const handleSupplySave = () => {
+                setShowSupplyForm(false);
+                setEditingSupply(null);
+                loadData();
+            };
+
+            const handleSupplyDelete = (id) => {
+                setSupplies(supplies.filter(s => s.id !== id));
+            };
+
+            const handleInvoiceSelect = (invoiceId) => {
+                setSelectedInvoiceId(invoiceId);
+                setCurrentView('invoice-details');
+            };
+
+            const handleBackToSupplies = () => {
+                setCurrentView('supplies');
+                setSelectedInvoiceId(null);
+            };
+
+            if (loading) {
+                return (
+                    <div className="text-center py-5">
+                        <div className="spinner-border text-primary" role="status">
+                            <span className="visually-hidden">Loading...</span>
+                        </div>
+                        <p className="mt-3">Đang tải dữ liệu...</p>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="container-fluid">
+                    <div className="row">
+                        {/* Sidebar */}
+                        <div className="col-md-2 sidebar p-0">
+                            <div className="p-3">
+                                <h4 className="text-white mb-4">
+                                    <i className="fas fa-hotel me-2"></i>
+                                    Homestay Manager
+                                </h4>
+                                <nav className="nav flex-column">
+                                    <button 
+                                        className={`nav-link ${currentView === 'supplies' ? 'active' : ''}`}
+                                        onClick={() => setCurrentView('supplies')}
+                                    >
+                                        <i className="fas fa-boxes me-2"></i>
+                                        Quản lý Vật tư
+                                    </button>
+                                    <button 
+                                        className={`nav-link ${currentView === 'invoices' ? 'active' : ''}`}
+                                        onClick={() => setCurrentView('invoices')}
+                                    >
+                                        <i className="fas fa-file-invoice me-2"></i>
+                                        Quản lý Hóa đơn
+                                    </button>
+                                </nav>
+                            </div>
+                        </div>
+
+                        {/* Main Content */}
+                        <div className="col-md-10 main-content p-4">
+                            {currentView === 'supplies' && (
+                                <div>
+                                    <h2 className="mb-4">
+                                        <i className="fas fa-boxes me-2"></i>
+                                        Quản lý Vật tư
+                                    </h2>
+                                    {showSupplyForm ? (
+                                        <SupplyForm 
+                                            supply={editingSupply}
+                                            onSave={handleSupplySave}
+                                            onCancel={() => setShowSupplyForm(false)}
+                                        />
+                                    ) : (
+                                        <SuppliesTable 
+                                            supplies={supplies}
+                                            onEdit={handleSupplyEdit}
+                                            onDelete={handleSupplyDelete}
+                                            onAdd={handleSupplyAdd}
+                                        />
+                                    )}
+                                </div>
+                            )}
+
+                            {currentView === 'invoices' && !selectedInvoiceId && (
+                                <div>
+                                    <h2 className="mb-4">
+                                        <i className="fas fa-file-invoice me-2"></i>
+                                        Quản lý Hóa đơn
+                                    </h2>
+                                    <div className="card">
+                                        <div className="card-body p-0">
+                                            <div className="table-responsive">
+                                                <table className="table table-hover mb-0">
+                                                    <thead>
+                                                        <tr>
+                                                            <th>ID</th>
+                                                            <th>Mã đơn</th>
+                                                            <th>Ngày tạo</th>
+                                                            <th>Tổng tiền</th>
+                                                            <th>Trạng thái</th>
+                                                            <th>Thao tác</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {invoices.map(invoice => (
+                                                            <tr key={invoice.id}>
+                                                                <td>{invoice.id}</td>
+                                                                <td>{invoice.booking_order?.order_code}</td>
+                                                                <td>{new Date(invoice.issue_date).toLocaleDateString('vi-VN')}</td>
+                                                                <td>
+                                                                    {new Intl.NumberFormat('vi-VN', {
+                                                                        style: 'currency',
+                                                                        currency: 'VND'
+                                                                    }).format(invoice.total_amount)}
+                                                                </td>
+                                                                <td>
+                                                                    <span className={`badge ${invoice.status === 'paid' ? 'bg-success' : invoice.status === 'pending' ? 'bg-warning' : 'bg-danger'}`}>
+                                                                        {invoice.status === 'paid' ? 'Đã thanh toán' : invoice.status === 'pending' ? 'Chờ thanh toán' : 'Đã hủy'}
+                                                                    </span>
+                                                                </td>
+                                                                <td>
+                                                                    <button 
+                                                                        className="btn btn-sm btn-primary"
+                                                                        onClick={() => handleInvoiceSelect(invoice.id)}
+                                                                    >
+                                                                        <i className="fas fa-eye me-1"></i>
+                                                                        Xem chi tiết
+                                                                    </button>
+                                                                </td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {selectedInvoiceId && (
+                                <InvoiceDetails 
+                                    invoiceId={selectedInvoiceId}
+                                    onBack={handleBackToSupplies}
+                                />
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // Render App
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+</body>
+</html>

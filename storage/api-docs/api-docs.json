@@ -1,0 +1,2067 @@
+{
+    "openapi": "3.0.0",
+    "info": {
+        "title": "BE-DATN-kien API Documentation",
+        "description": "Hệ thống quản lý hóa đơn và vật tư cho homestay booking",
+        "contact": {
+            "name": "BE-DATN-kien Team",
+            "email": "support@homestay.local"
+        },
+        "version": "1.0.0"
+    },
+    "servers": [
+        {
+            "url": "http://127.0.0.1:8000/api",
+            "description": "Development Server"
+        }
+    ],
+    "paths": {
+        "/invoices": {
+            "get": {
+                "tags": [
+                    "Invoices"
+                ],
+                "summary": "Danh sách hóa đơn",
+                "description": "Lấy danh sách tất cả hóa đơn với hỗ trợ lọc, tìm kiếm và phân trang",
+                "operationId": "getInvoices",
+                "parameters": [
+                    {
+                        "name": "status",
+                        "in": "query",
+                        "description": "Lọc theo trạng thái (pending, approved, cancelled)",
+                        "required": false,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "payment_status",
+                        "in": "query",
+                        "description": "Lọc theo trạng thái thanh toán (paid, unpaid, overdue)",
+                        "required": false,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "search",
+                        "in": "query",
+                        "description": "Tìm kiếm theo mã hóa đơn",
+                        "required": false,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "date_from",
+                        "in": "query",
+                        "description": "Lọc từ ngày (YYYY-MM-DD)",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    },
+                    {
+                        "name": "date_to",
+                        "in": "query",
+                        "description": "Lọc đến ngày (YYYY-MM-DD)",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    },
+                    {
+                        "name": "page",
+                        "in": "query",
+                        "description": "Trang (mặc định 1, 15 kết quả/trang)",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Danh sách hóa đơn",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "tags": [
+                    "Invoices"
+                ],
+                "summary": "Tạo hóa đơn mới",
+                "description": "Tạo hóa đơn mới trực tiếp (không từ đơn đặt phòng)",
+                "operationId": "storeInvoice",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "booking_order_id",
+                                    "issue_date",
+                                    "due_date",
+                                    "total_amount"
+                                ],
+                                "properties": {
+                                    "booking_order_id": {
+                                        "type": "integer",
+                                        "example": 1
+                                    },
+                                    "issue_date": {
+                                        "type": "string",
+                                        "format": "date",
+                                        "example": "2025-11-03"
+                                    },
+                                    "due_date": {
+                                        "type": "string",
+                                        "format": "date",
+                                        "example": "2025-11-10"
+                                    },
+                                    "total_amount": {
+                                        "type": "number",
+                                        "format": "float",
+                                        "example": 5000000
+                                    },
+                                    "status": {
+                                        "type": "string",
+                                        "enum": [
+                                            "pending",
+                                            "paid",
+                                            "overdue",
+                                            "cancelled"
+                                        ]
+                                    },
+                                    "calculation_method": {
+                                        "type": "string",
+                                        "enum": [
+                                            "automatic",
+                                            "manual"
+                                        ]
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Hóa đơn được tạo thành công"
+                    },
+                    "400": {
+                        "description": "Lỗi xác thực"
+                    }
+                }
+            }
+        },
+        "/invoices/create-from-booking": {
+            "post": {
+                "tags": [
+                    "Invoices"
+                ],
+                "summary": "Tạo hóa đơn từ đơn đặt phòng",
+                "description": "Tạo hóa đơn mới dựa trên đơn đặt phòng",
+                "operationId": "createInvoiceFromBooking",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "booking_order_id"
+                                ],
+                                "properties": {
+                                    "booking_order_id": {
+                                        "type": "integer",
+                                        "example": 1
+                                    },
+                                    "due_date": {
+                                        "type": "string",
+                                        "format": "date",
+                                        "example": "2025-12-20"
+                                    },
+                                    "notes": {
+                                        "type": "string",
+                                        "example": "Ghi chú hóa đơn"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Hóa đơn được tạo thành công",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        },
+                                        "message": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Lỗi xác thực"
+                    }
+                }
+            }
+        },
+        "/invoices/{id}": {
+            "get": {
+                "tags": [
+                    "Invoices"
+                ],
+                "summary": "Chi tiết hóa đơn",
+                "description": "Lấy thông tin chi tiết của một hóa đơn",
+                "operationId": "getInvoice",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "ID hóa đơn",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Chi tiết hóa đơn",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Hóa đơn không tìm thấy"
+                    }
+                }
+            },
+            "put": {
+                "tags": [
+                    "Invoices"
+                ],
+                "summary": "Cập nhật hóa đơn",
+                "description": "Cập nhật thông tin hóa đơn",
+                "operationId": "updateInvoice",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "due_date": {
+                                        "type": "string",
+                                        "format": "date"
+                                    },
+                                    "status": {
+                                        "type": "string",
+                                        "enum": [
+                                            "pending",
+                                            "paid",
+                                            "overdue",
+                                            "cancelled"
+                                        ]
+                                    },
+                                    "calculation_method": {
+                                        "type": "string",
+                                        "enum": [
+                                            "automatic",
+                                            "manual"
+                                        ]
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Cập nhật thành công"
+                    }
+                }
+            },
+            "delete": {
+                "tags": [
+                    "Invoices"
+                ],
+                "summary": "Xóa hóa đơn",
+                "description": "Xóa một hóa đơn (chỉ pending hoặc cancelled)",
+                "operationId": "deleteInvoice",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Xóa thành công"
+                    },
+                    "400": {
+                        "description": "Không thể xóa hóa đơn này"
+                    }
+                }
+            }
+        },
+        "/invoices/{id}/mark-paid": {
+            "patch": {
+                "tags": [
+                    "Invoices"
+                ],
+                "summary": "Đánh dấu hóa đơn là đã thanh toán",
+                "description": "Cập nhật trạng thái hóa đơn sang đã thanh toán",
+                "operationId": "markInvoiceAsPaid",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "payment_method": {
+                                        "type": "string",
+                                        "example": "bank_transfer"
+                                    },
+                                    "payment_notes": {
+                                        "type": "string",
+                                        "example": "Thanh toán qua ngân hàng"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Cập nhật thành công"
+                    }
+                }
+            }
+        },
+        "/invoices/{id}/status": {
+            "patch": {
+                "tags": [
+                    "Invoices"
+                ],
+                "summary": "Cập nhật trạng thái hóa đơn",
+                "description": "Cập nhật trạng thái của hóa đơn",
+                "operationId": "updateInvoiceStatus",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "status"
+                                ],
+                                "properties": {
+                                    "status": {
+                                        "type": "string",
+                                        "enum": [
+                                            "pending",
+                                            "paid",
+                                            "overdue",
+                                            "cancelled"
+                                        ]
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Cập nhật thành công"
+                    }
+                }
+            }
+        },
+        "/invoices/statistics/overview": {
+            "get": {
+                "tags": [
+                    "Invoices"
+                ],
+                "summary": "Thống kê hóa đơn",
+                "description": "Lấy thống kê về hóa đơn (số lượng, doanh thu)",
+                "operationId": "getInvoiceStatistics",
+                "responses": {
+                    "200": {
+                        "description": "Thống kê hóa đơn",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "total_invoices": {
+                                                    "type": "integer"
+                                                },
+                                                "paid_invoices": {
+                                                    "type": "integer"
+                                                },
+                                                "unpaid_invoices": {
+                                                    "type": "integer"
+                                                },
+                                                "overdue_invoices": {
+                                                    "type": "integer"
+                                                },
+                                                "total_revenue": {
+                                                    "type": "number"
+                                                },
+                                                "pending_revenue": {
+                                                    "type": "number"
+                                                },
+                                                "overdue_revenue": {
+                                                    "type": "number"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/invoices/config/calculation": {
+            "get": {
+                "tags": [
+                    "Invoices"
+                ],
+                "summary": "Lấy cấu hình tính hóa đơn",
+                "description": "Lấy cấu hình tính toán hóa đơn (thuế, phí...).",
+                "operationId": "getCalculationConfig",
+                "responses": {
+                    "200": {
+                        "description": "Cấu hình tính toán"
+                    }
+                }
+            },
+            "post": {
+                "tags": [
+                    "Invoices"
+                ],
+                "summary": "Cập nhật cấu hình tính hóa đơn",
+                "description": "Cập nhật cấu hình tính toán hóa đơn",
+                "operationId": "setCalculationConfig",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "calculation_method": {
+                                        "type": "string",
+                                        "enum": [
+                                            "automatic",
+                                            "manual"
+                                        ]
+                                    },
+                                    "auto_calculate": {
+                                        "type": "boolean"
+                                    },
+                                    "tax_rate": {
+                                        "type": "number",
+                                        "example": 10
+                                    },
+                                    "service_charge_rate": {
+                                        "type": "number",
+                                        "example": 5
+                                    },
+                                    "late_fee_percent": {
+                                        "type": "number",
+                                        "example": 2
+                                    },
+                                    "late_fee_per_day": {
+                                        "type": "number",
+                                        "example": 50000
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Cập nhật thành công"
+                    }
+                }
+            }
+        },
+        "/invoices/config/refund-policies": {
+            "get": {
+                "tags": [
+                    "Invoices"
+                ],
+                "summary": "Lấy các chính sách hoàn tiền",
+                "description": "Lấy danh sách các chính sách hoàn tiền",
+                "operationId": "getRefundPolicyConfig",
+                "responses": {
+                    "200": {
+                        "description": "Danh sách chính sách hoàn tiền"
+                    }
+                }
+            },
+            "post": {
+                "tags": [
+                    "Invoices"
+                ],
+                "summary": "Tạo chính sách hoàn tiền",
+                "description": "Tạo chính sách hoàn tiền mới",
+                "operationId": "createRefundPolicy",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "name",
+                                    "refund_percent",
+                                    "days_before_checkin"
+                                ],
+                                "properties": {
+                                    "name": {
+                                        "type": "string",
+                                        "example": "Hoàn 100%"
+                                    },
+                                    "refund_percent": {
+                                        "type": "number",
+                                        "example": 100
+                                    },
+                                    "days_before_checkin": {
+                                        "type": "integer",
+                                        "example": 7
+                                    },
+                                    "penalty_percent": {
+                                        "type": "number",
+                                        "example": 0
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Chính sách được tạo thành công"
+                    }
+                }
+            }
+        },
+        "/invoices/config/refund-policies/{policyId}": {
+            "put": {
+                "tags": [
+                    "Invoices"
+                ],
+                "summary": "Cập nhật chính sách hoàn tiền",
+                "description": "Cập nhật thông tin chính sách hoàn tiền",
+                "operationId": "updateRefundPolicy",
+                "parameters": [
+                    {
+                        "name": "policyId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "name": {
+                                        "type": "string",
+                                        "example": "Hoàn 100%"
+                                    },
+                                    "refund_percent": {
+                                        "type": "number",
+                                        "example": 100
+                                    },
+                                    "days_before_checkin": {
+                                        "type": "integer",
+                                        "example": 7
+                                    },
+                                    "penalty_percent": {
+                                        "type": "number",
+                                        "example": 0
+                                    },
+                                    "is_active": {
+                                        "type": "boolean",
+                                        "example": true
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Chính sách được cập nhật thành công"
+                    }
+                }
+            }
+        },
+        "/invoices/{id}/discounts": {
+            "post": {
+                "tags": [
+                    "Invoices"
+                ],
+                "summary": "Áp dụng giảm giá cho hóa đơn",
+                "description": "Áp dụng giảm giá (phần trăm hoặc số tiền cố định) cho hóa đơn",
+                "operationId": "applyDiscount",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "discount_type",
+                                    "discount_value"
+                                ],
+                                "properties": {
+                                    "discount_type": {
+                                        "type": "string",
+                                        "enum": [
+                                            "percentage",
+                                            "fixed_amount"
+                                        ]
+                                    },
+                                    "discount_value": {
+                                        "type": "number",
+                                        "example": 10
+                                    },
+                                    "reason": {
+                                        "type": "string",
+                                        "example": "Khuyến mãi đặc biệt"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Giảm giá được áp dụng"
+                    }
+                }
+            }
+        },
+        "/invoices/{id}/discounts/{discountId}": {
+            "delete": {
+                "tags": [
+                    "Invoices"
+                ],
+                "summary": "Xóa giảm giá",
+                "description": "Xóa giảm giá khỏi hóa đơn",
+                "operationId": "removeDiscount",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "discountId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Giảm giá được xóa"
+                    }
+                }
+            }
+        },
+        "/invoices/{id}/apply-refund-policy": {
+            "post": {
+                "tags": [
+                    "Invoices"
+                ],
+                "summary": "Áp dụng chính sách hoàn tiền",
+                "description": "Áp dụng chính sách hoàn tiền cho hóa đơn",
+                "operationId": "applyRefundPolicy",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "refund_policy_id"
+                                ],
+                                "properties": {
+                                    "refund_policy_id": {
+                                        "type": "integer",
+                                        "example": 1
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Chính sách hoàn tiền được áp dụng"
+                    }
+                }
+            }
+        },
+        "/invoices/{id}/split": {
+            "post": {
+                "tags": [
+                    "Invoices"
+                ],
+                "summary": "Tách hóa đơn",
+                "description": "Tách hóa đơn thành nhiều hóa đơn",
+                "operationId": "splitInvoice",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "items_for_new_invoice"
+                                ],
+                                "properties": {
+                                    "items_for_new_invoice": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "integer"
+                                        },
+                                        "example": [
+                                            1,
+                                            2,
+                                            3
+                                        ]
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Hóa đơn được tách thành công"
+                    }
+                }
+            }
+        },
+        "/invoices/merge": {
+            "post": {
+                "tags": [
+                    "Invoices"
+                ],
+                "summary": "Gộp nhiều hóa đơn",
+                "description": "Gộp nhiều hóa đơn thành một",
+                "operationId": "mergeInvoices",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "invoice_ids",
+                                    "target_invoice_id"
+                                ],
+                                "properties": {
+                                    "invoice_ids": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "integer"
+                                        },
+                                        "example": [
+                                            1,
+                                            2,
+                                            3
+                                        ]
+                                    },
+                                    "target_invoice_id": {
+                                        "type": "integer",
+                                        "example": 1
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Hóa đơn được gộp thành công"
+                    }
+                }
+            }
+        },
+        "/invoices/{invoiceId}/items": {
+            "get": {
+                "tags": [
+                    "Invoice Items"
+                ],
+                "summary": "Danh sách hạng mục hóa đơn",
+                "description": "Lấy danh sách tất cả hạng mục trong một hóa đơn",
+                "operationId": "getInvoiceItems",
+                "parameters": [
+                    {
+                        "name": "invoiceId",
+                        "in": "path",
+                        "description": "ID của hóa đơn",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Danh sách hạng mục",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "object"
+                                            }
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/invoices/{invoiceId}/items/penalty": {
+            "post": {
+                "tags": [
+                    "Invoice Items"
+                ],
+                "summary": "Thêm phí phát sinh vào hóa đơn",
+                "description": "Thêm phí phát sinh, phí hư hại vào hóa đơn",
+                "operationId": "addPenaltyItem",
+                "parameters": [
+                    {
+                        "name": "invoiceId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "description",
+                                    "quantity",
+                                    "unit_price"
+                                ],
+                                "properties": {
+                                    "description": {
+                                        "type": "string",
+                                        "example": "Phí hư hại thiết bị"
+                                    },
+                                    "quantity": {
+                                        "type": "integer",
+                                        "example": 1
+                                    },
+                                    "unit_price": {
+                                        "type": "number",
+                                        "format": "float",
+                                        "example": 500000
+                                    },
+                                    "item_type": {
+                                        "type": "string",
+                                        "enum": [
+                                            "damage_fee",
+                                            "other"
+                                        ]
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Phí được thêm thành công"
+                    }
+                }
+            }
+        },
+        "/invoices/{invoiceId}/items/regular": {
+            "get": {
+                "tags": [
+                    "Invoice Items"
+                ],
+                "summary": "Danh sách hạng mục thường trong hóa đơn",
+                "description": "Lấy danh sách tất cả hạng mục thường (phòng, dịch vụ) trong một hóa đơn",
+                "operationId": "getRegularItems",
+                "parameters": [
+                    {
+                        "name": "invoiceId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Danh sách hạng mục thường",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "object"
+                                            }
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "tags": [
+                    "Invoice Items"
+                ],
+                "summary": "Thêm hạng mục vào hóa đơn",
+                "description": "Thêm hạng mục (phòng, dịch vụ, khác) vào hóa đơn",
+                "operationId": "addRegularItem",
+                "parameters": [
+                    {
+                        "name": "invoiceId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "item_name",
+                                    "quantity",
+                                    "unit_price",
+                                    "item_type"
+                                ],
+                                "properties": {
+                                    "item_name": {
+                                        "type": "string",
+                                        "example": "Phòng Deluxe"
+                                    },
+                                    "description": {
+                                        "type": "string",
+                                        "example": "2 đêm"
+                                    },
+                                    "quantity": {
+                                        "type": "integer",
+                                        "example": 2
+                                    },
+                                    "unit_price": {
+                                        "type": "number",
+                                        "format": "float",
+                                        "example": 1500000
+                                    },
+                                    "item_type": {
+                                        "type": "string",
+                                        "enum": [
+                                            "room_charge",
+                                            "service_charge",
+                                            "damage_fee",
+                                            "other"
+                                        ]
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Hạng mục được thêm thành công"
+                    }
+                }
+            }
+        },
+        "/invoice-items/{id}": {
+            "put": {
+                "tags": [
+                    "Invoice Items"
+                ],
+                "summary": "Cập nhật hạng mục hóa đơn",
+                "description": "Cập nhật thông tin hạng mục hóa đơn",
+                "operationId": "updateInvoiceItem",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "item_name": {
+                                        "type": "string"
+                                    },
+                                    "description": {
+                                        "type": "string"
+                                    },
+                                    "quantity": {
+                                        "type": "integer"
+                                    },
+                                    "unit_price": {
+                                        "type": "number"
+                                    },
+                                    "item_type": {
+                                        "type": "string",
+                                        "enum": [
+                                            "room_charge",
+                                            "service_charge",
+                                            "damage_fee",
+                                            "other"
+                                        ]
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Cập nhật thành công"
+                    }
+                }
+            },
+            "delete": {
+                "tags": [
+                    "Invoice Items"
+                ],
+                "summary": "Xóa hạng mục hóa đơn",
+                "description": "Xóa một hạng mục khỏi hóa đơn",
+                "operationId": "deleteInvoiceItem",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Xóa thành công"
+                    }
+                }
+            }
+        },
+        "/invoices/{invoiceId}/items/penalties": {
+            "get": {
+                "tags": [
+                    "Invoice Items"
+                ],
+                "summary": "Danh sách phí phát sinh trong hóa đơn",
+                "description": "Lấy danh sách tất cả phí phát sinh trong một hóa đơn",
+                "operationId": "getPenaltyItems",
+                "parameters": [
+                    {
+                        "name": "invoiceId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Danh sách phí phát sinh",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "object"
+                                            }
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/supplies": {
+            "get": {
+                "tags": [
+                    "Supplies"
+                ],
+                "summary": "Danh sách vật tư",
+                "description": "Lấy danh sách tất cả vật tư với hỗ trợ lọc, tìm kiếm và phân trang",
+                "operationId": "getSupplies",
+                "parameters": [
+                    {
+                        "name": "category",
+                        "in": "query",
+                        "description": "Lọc theo danh mục",
+                        "required": false,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "status",
+                        "in": "query",
+                        "description": "Lọc theo trạng thái (active, inactive, discontinued)",
+                        "required": false,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "stock_status",
+                        "in": "query",
+                        "description": "Lọc theo tình trạng kho (low_stock, out_of_stock, in_stock)",
+                        "required": false,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "search",
+                        "in": "query",
+                        "description": "Tìm kiếm theo tên",
+                        "required": false,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "page",
+                        "in": "query",
+                        "description": "Trang (15 kết quả/trang)",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Danh sách vật tư",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "tags": [
+                    "Supplies"
+                ],
+                "summary": "Tạo vật tư mới",
+                "description": "Tạo một vật tư mới với thông tin chi tiết",
+                "operationId": "storeSupply",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "name",
+                                    "category",
+                                    "unit",
+                                    "current_stock",
+                                    "min_stock_level",
+                                    "unit_price"
+                                ],
+                                "properties": {
+                                    "name": {
+                                        "type": "string",
+                                        "example": "Nước rửa bát"
+                                    },
+                                    "description": {
+                                        "type": "string",
+                                        "example": "Nước rửa bát chuyên dụng"
+                                    },
+                                    "category": {
+                                        "type": "string",
+                                        "example": "Dụng cụ vệ sinh"
+                                    },
+                                    "unit": {
+                                        "type": "string",
+                                        "example": "Chai"
+                                    },
+                                    "current_stock": {
+                                        "type": "integer",
+                                        "example": 50
+                                    },
+                                    "min_stock_level": {
+                                        "type": "integer",
+                                        "example": 10
+                                    },
+                                    "max_stock_level": {
+                                        "type": "integer",
+                                        "example": 100
+                                    },
+                                    "unit_price": {
+                                        "type": "number",
+                                        "format": "float",
+                                        "example": 50000
+                                    },
+                                    "supplier": {
+                                        "type": "string",
+                                        "example": "Công ty XYZ"
+                                    },
+                                    "supplier_contact": {
+                                        "type": "string",
+                                        "example": "0123456789"
+                                    },
+                                    "status": {
+                                        "type": "string",
+                                        "enum": [
+                                            "active",
+                                            "inactive",
+                                            "discontinued"
+                                        ]
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Vật tư được tạo thành công"
+                    },
+                    "400": {
+                        "description": "Lỗi xác thực"
+                    }
+                }
+            }
+        },
+        "/supplies/{id}": {
+            "get": {
+                "tags": [
+                    "Supplies"
+                ],
+                "summary": "Chi tiết vật tư",
+                "description": "Lấy thông tin chi tiết của một vật tư",
+                "operationId": "getSupply",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Chi tiết vật tư",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Vật tư không tìm thấy"
+                    }
+                }
+            },
+            "put": {
+                "tags": [
+                    "Supplies"
+                ],
+                "summary": "Cập nhật vật tư",
+                "description": "Cập nhật thông tin vật tư",
+                "operationId": "updateSupply",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "name": {
+                                        "type": "string"
+                                    },
+                                    "description": {
+                                        "type": "string"
+                                    },
+                                    "category": {
+                                        "type": "string"
+                                    },
+                                    "unit": {
+                                        "type": "string"
+                                    },
+                                    "min_stock_level": {
+                                        "type": "integer"
+                                    },
+                                    "max_stock_level": {
+                                        "type": "integer"
+                                    },
+                                    "unit_price": {
+                                        "type": "number"
+                                    },
+                                    "status": {
+                                        "type": "string",
+                                        "enum": [
+                                            "active",
+                                            "inactive",
+                                            "discontinued"
+                                        ]
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Cập nhật thành công"
+                    }
+                }
+            },
+            "delete": {
+                "tags": [
+                    "Supplies"
+                ],
+                "summary": "Xóa vật tư",
+                "description": "Xóa một vật tư",
+                "operationId": "deleteSupply",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Xóa thành công"
+                    },
+                    "400": {
+                        "description": "Không thể xóa vật tư này"
+                    }
+                }
+            }
+        },
+        "/supplies/status/low-stock": {
+            "get": {
+                "tags": [
+                    "Supplies"
+                ],
+                "summary": "Danh sách vật tư cạn kiệt",
+                "description": "Lấy danh sách vật tư có số lượng cạn kiệt",
+                "operationId": "getLowStockItems",
+                "responses": {
+                    "200": {
+                        "description": "Danh sách vật tư cạn kiệt",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "object"
+                                            }
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/supplies/status/out-of-stock": {
+            "get": {
+                "tags": [
+                    "Supplies"
+                ],
+                "summary": "Danh sách vật tư hết hàng",
+                "description": "Lấy danh sách vật tư đã hết hàng",
+                "operationId": "getOutOfStockItems",
+                "responses": {
+                    "200": {
+                        "description": "Danh sách vật tư hết hàng",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "object"
+                                            }
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/supplies/{id}/adjust-stock": {
+            "patch": {
+                "tags": [
+                    "Supplies"
+                ],
+                "summary": "Điều chỉnh số lượng vật tư",
+                "description": "Điều chỉnh (nhập, xuất, điều chỉnh) số lượng vật tư",
+                "operationId": "adjustStock",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "action_type",
+                                    "quantity",
+                                    "reason"
+                                ],
+                                "properties": {
+                                    "action_type": {
+                                        "type": "string",
+                                        "enum": [
+                                            "in",
+                                            "out",
+                                            "adjustment"
+                                        ]
+                                    },
+                                    "quantity": {
+                                        "type": "integer",
+                                        "example": 10
+                                    },
+                                    "reason": {
+                                        "type": "string",
+                                        "example": "Kiểm kho định kỳ"
+                                    },
+                                    "notes": {
+                                        "type": "string",
+                                        "example": "Ghi chú thêm"
+                                    },
+                                    "reference_type": {
+                                        "type": "string"
+                                    },
+                                    "reference_id": {
+                                        "type": "integer"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Điều chỉnh thành công"
+                    }
+                }
+            }
+        },
+        "/supplies/statistics/overview": {
+            "get": {
+                "tags": [
+                    "Supplies"
+                ],
+                "summary": "Thống kê vật tư",
+                "description": "Lấy thống kê về vật tư (số lượng, giá trị)",
+                "operationId": "getSupplyStatistics",
+                "responses": {
+                    "200": {
+                        "description": "Thống kê vật tư",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "total_supplies": {
+                                                    "type": "integer"
+                                                },
+                                                "active_supplies": {
+                                                    "type": "integer"
+                                                },
+                                                "low_stock_count": {
+                                                    "type": "integer"
+                                                },
+                                                "out_of_stock_count": {
+                                                    "type": "integer"
+                                                },
+                                                "total_value": {
+                                                    "type": "number"
+                                                },
+                                                "categories": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "object"
+                                                    }
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/supply-logs": {
+            "get": {
+                "tags": [
+                    "Supply Logs"
+                ],
+                "summary": "Danh sách lịch sử vật tư",
+                "description": "Lấy danh sách tất cả lịch sử vật tư (nhập, xuất, điều chỉnh) với hỗ trợ lọc",
+                "operationId": "getSupplyLogs",
+                "parameters": [
+                    {
+                        "name": "action_type",
+                        "in": "query",
+                        "description": "Lọc theo loại hành động (in, out, adjustment)",
+                        "required": false,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "supply_id",
+                        "in": "query",
+                        "description": "Lọc theo ID vật tư",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "performed_by",
+                        "in": "query",
+                        "description": "Lọc theo người thực hiện",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "date_from",
+                        "in": "query",
+                        "description": "Lọc từ ngày (YYYY-MM-DD)",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    },
+                    {
+                        "name": "date_to",
+                        "in": "query",
+                        "description": "Lọc đến ngày (YYYY-MM-DD)",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    },
+                    {
+                        "name": "page",
+                        "in": "query",
+                        "description": "Trang (20 kết quả/trang)",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Danh sách lịch sử vật tư",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/supply-logs/{id}": {
+            "get": {
+                "tags": [
+                    "Supply Logs"
+                ],
+                "summary": "Chi tiết lịch sử vật tư",
+                "description": "Lấy thông tin chi tiết của một bản ghi lịch sử vật tư",
+                "operationId": "getSupplyLog",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Chi tiết lịch sử vật tư",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/supply-logs/supply/{supplyId}": {
+            "get": {
+                "tags": [
+                    "Supply Logs"
+                ],
+                "summary": "Lịch sử vật tư theo ID",
+                "description": "Lấy toàn bộ lịch sử nhập/xuất/điều chỉnh của một vật tư",
+                "operationId": "getSupplyHistoryLogs",
+                "parameters": [
+                    {
+                        "name": "supplyId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Lịch sử vật tư",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "object"
+                                            }
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/supply-logs/activities/recent": {
+            "get": {
+                "tags": [
+                    "Supply Logs"
+                ],
+                "summary": "Hoạt động vật tư gần đây",
+                "description": "Lấy danh sách hoạt động vật tư gần đây nhất",
+                "operationId": "getRecentActivities",
+                "parameters": [
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "description": "Số bản ghi tối đa (mặc định 10)",
+                        "required": false,
+                        "schema": {
+                            "type": "integer",
+                            "default": 10
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Hoạt động gần đây",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "object"
+                                            }
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/supply-logs/summary/movement": {
+            "get": {
+                "tags": [
+                    "Supply Logs"
+                ],
+                "summary": "Tóm tắt vận động vật tư",
+                "description": "Lấy tóm tắt vận động vật tư (nhập, xuất, điều chỉnh) theo khoảng thời gian",
+                "operationId": "getMovementSummary",
+                "parameters": [
+                    {
+                        "name": "date_from",
+                        "in": "query",
+                        "description": "Từ ngày (YYYY-MM-DD)",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    },
+                    {
+                        "name": "date_to",
+                        "in": "query",
+                        "description": "Đến ngày (YYYY-MM-DD)",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Tóm tắt vận động",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "total_inbound": {
+                                                    "type": "integer"
+                                                },
+                                                "total_outbound": {
+                                                    "type": "integer"
+                                                },
+                                                "total_adjustments": {
+                                                    "type": "integer"
+                                                },
+                                                "total_transfers": {
+                                                    "type": "integer"
+                                                },
+                                                "inbound_value": {
+                                                    "type": "number"
+                                                },
+                                                "outbound_value": {
+                                                    "type": "number"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "tags": [
+        {
+            "name": "Invoices",
+            "description": "API Endpoints for Invoice Management"
+        },
+        {
+            "name": "Invoice Items",
+            "description": "API Endpoints for Invoice Item Management"
+        },
+        {
+            "name": "Supplies",
+            "description": "API Endpoints for Supply Management"
+        },
+        {
+            "name": "Supply Logs",
+            "description": "API Endpoints for Supply Log Management"
+        }
+    ]
+}
