@@ -97,6 +97,140 @@
                 ]
             }
         },
+        "/api/{role}/google/redirect": {
+            "get": {
+                "tags": [
+                    "Google Login"
+                ],
+                "summary": "Lấy URL đăng nhập Google (tự động redirect sang Google)",
+                "description": "Trả về URL mà frontend dùng để redirect người dùng sang trang đăng nhập Google. Role có thể là user, staff hoặc admin.",
+                "operationId": "d6a24013533955bf075ef7ec1f9f05f4",
+                "parameters": [
+                    {
+                        "name": "role",
+                        "in": "path",
+                        "description": "Vai trò của người dùng (user, staff, admin)",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "enum": [
+                                "user",
+                                "staff",
+                                "admin"
+                            ]
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "URL redirect thành công",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "url": {
+                                            "type": "string",
+                                            "example": "https://accounts.google.com/o/oauth2/auth?..."
+                                        },
+                                        "role": {
+                                            "type": "string",
+                                            "example": "user"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Role không hợp lệ"
+                    }
+                }
+            }
+        },
+        "/api/{role}/google/callback": {
+            "get": {
+                "tags": [
+                    "Google Login"
+                ],
+                "summary": "Xử lý callback từ Google sau khi đăng nhập",
+                "description": "Sau khi người dùng đăng nhập Google, Google sẽ redirect về URL này. Hệ thống sẽ tự động tạo tài khoản nếu chưa có, và trả về token đăng nhập.",
+                "operationId": "eaddd784e4d989f51053d994aeb74fac",
+                "parameters": [
+                    {
+                        "name": "role",
+                        "in": "path",
+                        "description": "Vai trò của người dùng (user, staff, admin)",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "enum": [
+                                "user",
+                                "staff",
+                                "admin"
+                            ]
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Đăng nhập thành công",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "status": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Đăng nhập Google thành công!"
+                                        },
+                                        "user": {
+                                            "properties": {
+                                                "id": {
+                                                    "type": "integer",
+                                                    "example": 1
+                                                },
+                                                "name": {
+                                                    "type": "string",
+                                                    "example": "Nguyễn Văn A"
+                                                },
+                                                "email": {
+                                                    "type": "string",
+                                                    "example": "vana@gmail.com"
+                                                },
+                                                "role": {
+                                                    "type": "string",
+                                                    "example": "user"
+                                                },
+                                                "avatar": {
+                                                    "type": "string",
+                                                    "example": "https://lh3.googleusercontent.com/a/..."
+                                                }
+                                            },
+                                            "type": "object"
+                                        },
+                                        "token": {
+                                            "type": "string",
+                                            "example": "2|Kq0d8gZyR3YhF..."
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Role không hợp lệ"
+                    },
+                    "500": {
+                        "description": "Lỗi hệ thống hoặc lỗi xác thực Google"
+                    }
+                }
+            }
+        },
         "/api/staff/register": {
             "post": {
                 "tags": [
@@ -518,6 +652,10 @@
         }
     },
     "tags": [
+        {
+            "name": "Google Login",
+            "description": "Đăng nhập và đăng ký bằng tài khoản Google cho các vai trò khác nhau (user, staff, admin)"
+        },
         {
             "name": "Admin Auth",
             "description": "Admin Auth"
