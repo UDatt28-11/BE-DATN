@@ -46,6 +46,7 @@ class InvoiceController extends Controller
      *     tags={"Invoices"},
      *     summary="Danh sách hóa đơn",
      *     description="Lấy danh sách tất cả hóa đơn với hỗ trợ lọc, tìm kiếm và phân trang",
+     *     security={{"bearerAuth":{}}},
      *     @OA\Parameter(
      *         name="status",
      *         in="query",
