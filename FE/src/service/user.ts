@@ -12,6 +12,7 @@ export interface UserResponse {
   gender: 'male' | 'female' | 'other' | null;
   address: string | null;
   status: 'active' | 'locked';
+  role: string;
   preferred_language: string;
   email_verified_at: string | null;
   created_at: string | null;

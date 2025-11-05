@@ -186,11 +186,49 @@ const ListUser: React.FC = () => {
           {status === "active" ? "Hoạt động" : "Đã khóa"}
         </Tag>
       ),
+
       filters: [
         { text: "Hoạt động", value: "active" },
         { text: "Đã khóa", value: "locked" },
       ],
       onFilter: (value, record) => record.status === value,
+    },
+    {
+      title: "Role",
+      dataIndex: "role",
+      key: "role",
+      render: (role: any, record: any) => {
+        // Normalize role from multiple possible API shapes
+        const extractRole = (val: any, rec: any) => {
+          if (!val && rec) {
+            // Try common alternatives
+            if (rec.role) return rec.role;
+            if (rec.roles && Array.isArray(rec.roles) && rec.roles.length) return rec.roles[0];
+            if (rec.role && typeof rec.role === 'object') return rec.role.name || rec.role.type || '';
+          }
+          return val;
+        };
+
+        const raw = extractRole(role, record) ?? '';
+        const r = String(raw).toLowerCase();
+
+        const color = r === 'admin' ? 'green' : r === 'staff' || r === 'host' ? 'orange' : 'blue';
+        const label = r === 'admin' ? 'Quản trị' : r === 'staff' || r === 'host' ? 'Nhân viên' : 'Người dùng';
+
+        return <Tag color={color}>{label}</Tag>;
+      },
+
+      // Role-specific filters
+      filters: [
+        { text: "Quản trị", value: "admin" },
+        { text: "Nhân viên", value: "staff" },
+        { text: "Người dùng", value: "user" },
+      ],
+      onFilter: (value, record: any) => {
+        const rolesArr = (record as any).roles;
+        const raw = record.role ?? (rolesArr && Array.isArray(rolesArr) && rolesArr[0]) ?? '';
+        return String(raw).toLowerCase() === String(value).toLowerCase();
+      },
     },
     {
       title: "Ngày tạo",
