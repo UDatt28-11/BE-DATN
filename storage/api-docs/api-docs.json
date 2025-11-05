@@ -324,78 +324,9 @@
                         }
                     }
                 }
-            },
-            "post": {
-                "tags": [
-                    "Invoices"
-                ],
-                "summary": "Tạo hóa đơn mới",
-                "description": "Tạo hóa đơn mới trực tiếp (không từ đơn đặt phòng)",
-                "operationId": "storeInvoice",
-                "requestBody": {
-                    "required": true,
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "required": [
-                                    "booking_order_id",
-                                    "issue_date",
-                                    "due_date",
-                                    "total_amount"
-                                ],
-                                "properties": {
-                                    "booking_order_id": {
-                                        "type": "integer",
-                                        "example": 1
-                                    },
-                                    "issue_date": {
-                                        "type": "string",
-                                        "format": "date",
-                                        "example": "2025-11-03"
-                                    },
-                                    "due_date": {
-                                        "type": "string",
-                                        "format": "date",
-                                        "example": "2025-11-10"
-                                    },
-                                    "total_amount": {
-                                        "type": "number",
-                                        "format": "float",
-                                        "example": 5000000
-                                    },
-                                    "status": {
-                                        "type": "string",
-                                        "enum": [
-                                            "pending",
-                                            "paid",
-                                            "overdue",
-                                            "cancelled"
-                                        ]
-                                    },
-                                    "calculation_method": {
-                                        "type": "string",
-                                        "enum": [
-                                            "automatic",
-                                            "manual"
-                                        ]
-                                    }
-                                },
-                                "type": "object"
-                            }
-                        }
-                    }
-                },
-                "responses": {
-                    "201": {
-                        "description": "Hóa đơn được tạo thành công"
-                    },
-                    "400": {
-                        "description": "Lỗi xác thực"
-                    }
-                }
             }
         },
-        "/api/invoices/create-from-booking": {
+        "/invoices/create-from-booking": {
             "post": {
                 "tags": [
                     "Invoices"
@@ -503,7 +434,227 @@
                         "description": "Hóa đơn không tìm thấy"
                     }
                 }
-            },
+            }
+        },
+        "/invoices/{id}/mark-paid": {
+            "patch": {
+                "tags": [
+                    "Invoices"
+                ],
+                "summary": "Đánh dấu hóa đơn là đã thanh toán",
+                "description": "Cập nhật trạng thái hóa đơn sang đã thanh toán",
+                "operationId": "markInvoiceAsPaid",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "payment_method": {
+                                        "type": "string",
+                                        "example": "bank_transfer"
+                                    },
+                                    "payment_notes": {
+                                        "type": "string",
+                                        "example": "Thanh toán qua ngân hàng"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Cập nhật thành công"
+                    }
+                }
+            }
+        },
+        "/invoices/{id}/status": {
+            "patch": {
+                "tags": [
+                    "Invoices"
+                ],
+                "summary": "Cập nhật trạng thái hóa đơn",
+                "description": "Cập nhật trạng thái của hóa đơn",
+                "operationId": "updateInvoiceStatus",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "status"
+                                ],
+                                "properties": {
+                                    "status": {
+                                        "type": "string",
+                                        "enum": [
+                                            "pending",
+                                            "paid",
+                                            "overdue",
+                                            "cancelled"
+                                        ]
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Cập nhật thành công"
+                    }
+                }
+            }
+        },
+        "/invoices/statistics/overview": {
+            "get": {
+                "tags": [
+                    "Invoices"
+                ],
+                "summary": "Thống kê hóa đơn",
+                "description": "Lấy thống kê về hóa đơn (số lượng, doanh thu)",
+                "operationId": "getInvoiceStatistics",
+                "responses": {
+                    "200": {
+                        "description": "Thống kê hóa đơn",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "total_invoices": {
+                                                    "type": "integer"
+                                                },
+                                                "paid_invoices": {
+                                                    "type": "integer"
+                                                },
+                                                "unpaid_invoices": {
+                                                    "type": "integer"
+                                                },
+                                                "overdue_invoices": {
+                                                    "type": "integer"
+                                                },
+                                                "total_revenue": {
+                                                    "type": "number"
+                                                },
+                                                "pending_revenue": {
+                                                    "type": "number"
+                                                },
+                                                "overdue_revenue": {
+                                                    "type": "number"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/invoices": {
+            "post": {
+                "tags": [
+                    "Invoices"
+                ],
+                "summary": "Tạo hóa đơn mới",
+                "description": "Tạo hóa đơn mới trực tiếp (không từ đơn đặt phòng)",
+                "operationId": "storeInvoice",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "booking_order_id",
+                                    "issue_date",
+                                    "due_date",
+                                    "total_amount"
+                                ],
+                                "properties": {
+                                    "booking_order_id": {
+                                        "type": "integer",
+                                        "example": 1
+                                    },
+                                    "issue_date": {
+                                        "type": "string",
+                                        "format": "date",
+                                        "example": "2025-11-03"
+                                    },
+                                    "due_date": {
+                                        "type": "string",
+                                        "format": "date",
+                                        "example": "2025-11-10"
+                                    },
+                                    "total_amount": {
+                                        "type": "number",
+                                        "format": "float",
+                                        "example": 5000000
+                                    },
+                                    "status": {
+                                        "type": "string",
+                                        "enum": [
+                                            "pending",
+                                            "paid",
+                                            "overdue",
+                                            "cancelled"
+                                        ]
+                                    },
+                                    "calculation_method": {
+                                        "type": "string",
+                                        "enum": [
+                                            "automatic",
+                                            "manual"
+                                        ]
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Hóa đơn được tạo thành công"
+                    },
+                    "400": {
+                        "description": "Lỗi xác thực"
+                    }
+                }
+            }
+        },
+        "/invoices/{id}": {
             "put": {
                 "tags": [
                     "Invoices"
@@ -585,154 +736,7 @@
                 }
             }
         },
-        "/api/invoices/{id}/mark-paid": {
-            "patch": {
-                "tags": [
-                    "Invoices"
-                ],
-                "summary": "Đánh dấu hóa đơn là đã thanh toán",
-                "description": "Cập nhật trạng thái hóa đơn sang đã thanh toán",
-                "operationId": "markInvoiceAsPaid",
-                "parameters": [
-                    {
-                        "name": "id",
-                        "in": "path",
-                        "required": true,
-                        "schema": {
-                            "type": "string"
-                        }
-                    }
-                ],
-                "requestBody": {
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "properties": {
-                                    "payment_method": {
-                                        "type": "string",
-                                        "example": "bank_transfer"
-                                    },
-                                    "payment_notes": {
-                                        "type": "string",
-                                        "example": "Thanh toán qua ngân hàng"
-                                    }
-                                },
-                                "type": "object"
-                            }
-                        }
-                    }
-                },
-                "responses": {
-                    "200": {
-                        "description": "Cập nhật thành công"
-                    }
-                }
-            }
-        },
-        "/api/invoices/{id}/status": {
-            "patch": {
-                "tags": [
-                    "Invoices"
-                ],
-                "summary": "Cập nhật trạng thái hóa đơn",
-                "description": "Cập nhật trạng thái của hóa đơn",
-                "operationId": "updateInvoiceStatus",
-                "parameters": [
-                    {
-                        "name": "id",
-                        "in": "path",
-                        "required": true,
-                        "schema": {
-                            "type": "string"
-                        }
-                    }
-                ],
-                "requestBody": {
-                    "required": true,
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "required": [
-                                    "status"
-                                ],
-                                "properties": {
-                                    "status": {
-                                        "type": "string",
-                                        "enum": [
-                                            "pending",
-                                            "paid",
-                                            "overdue",
-                                            "cancelled"
-                                        ]
-                                    }
-                                },
-                                "type": "object"
-                            }
-                        }
-                    }
-                },
-                "responses": {
-                    "200": {
-                        "description": "Cập nhật thành công"
-                    }
-                }
-            }
-        },
-        "/api/invoices/statistics/overview": {
-            "get": {
-                "tags": [
-                    "Invoices"
-                ],
-                "summary": "Thống kê hóa đơn",
-                "description": "Lấy thống kê về hóa đơn (số lượng, doanh thu)",
-                "operationId": "getInvoiceStatistics",
-                "responses": {
-                    "200": {
-                        "description": "Thống kê hóa đơn",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "properties": {
-                                        "success": {
-                                            "type": "boolean",
-                                            "example": true
-                                        },
-                                        "data": {
-                                            "properties": {
-                                                "total_invoices": {
-                                                    "type": "integer"
-                                                },
-                                                "paid_invoices": {
-                                                    "type": "integer"
-                                                },
-                                                "unpaid_invoices": {
-                                                    "type": "integer"
-                                                },
-                                                "overdue_invoices": {
-                                                    "type": "integer"
-                                                },
-                                                "total_revenue": {
-                                                    "type": "number"
-                                                },
-                                                "pending_revenue": {
-                                                    "type": "number"
-                                                },
-                                                "overdue_revenue": {
-                                                    "type": "number"
-                                                }
-                                            },
-                                            "type": "object"
-                                        }
-                                    },
-                                    "type": "object"
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/invoices/config/calculation": {
+        "/invoices/config/calculation": {
             "get": {
                 "tags": [
                     "Invoices"
@@ -797,7 +801,7 @@
                 }
             }
         },
-        "/api/invoices/config/refund-policies": {
+        "/invoices/config/refund-policies": {
             "get": {
                 "tags": [
                     "Invoices"
@@ -858,7 +862,7 @@
                 }
             }
         },
-        "/api/invoices/config/refund-policies/{policyId}": {
+        "/invoices/config/refund-policies/{policyId}": {
             "put": {
                 "tags": [
                     "Invoices"
@@ -915,7 +919,7 @@
                 }
             }
         },
-        "/api/invoices/{id}/discounts": {
+        "/invoices/{id}/discounts": {
             "post": {
                 "tags": [
                     "Invoices"
@@ -971,7 +975,7 @@
                 }
             }
         },
-        "/api/invoices/{id}/discounts/{discountId}": {
+        "/invoices/{id}/discounts/{discountId}": {
             "delete": {
                 "tags": [
                     "Invoices"
@@ -1004,7 +1008,7 @@
                 }
             }
         },
-        "/api/invoices/{id}/apply-refund-policy": {
+        "/invoices/{id}/apply-refund-policy": {
             "post": {
                 "tags": [
                     "Invoices"
@@ -1048,7 +1052,7 @@
                 }
             }
         },
-        "/api/invoices/{id}/split": {
+        "/invoices/{id}/split": {
             "post": {
                 "tags": [
                     "Invoices"
@@ -1099,7 +1103,7 @@
                 }
             }
         },
-        "/api/invoices/merge": {
+        "/invoices/merge": {
             "post": {
                 "tags": [
                     "Invoices"
@@ -1145,7 +1149,7 @@
                 }
             }
         },
-        "/api/invoices/{invoiceId}/items": {
+        "/invoices/{invoiceId}/items": {
             "get": {
                 "tags": [
                     "Invoice Items"
@@ -1190,7 +1194,7 @@
                 }
             }
         },
-        "/api/invoices/{invoiceId}/items/penalty": {
+        "/invoices/{invoiceId}/items/penalty": {
             "post": {
                 "tags": [
                     "Invoice Items"
@@ -1252,7 +1256,7 @@
                 }
             }
         },
-        "/api/invoices/{invoiceId}/items/regular": {
+        "/invoices/{invoiceId}/items/regular": {
             "get": {
                 "tags": [
                     "Invoice Items"
@@ -1363,7 +1367,7 @@
                 }
             }
         },
-        "/api/invoice-items/{id}": {
+        "/invoice-items/{id}": {
             "put": {
                 "tags": [
                     "Invoice Items"
@@ -1443,7 +1447,7 @@
                 }
             }
         },
-        "/api/invoices/{invoiceId}/items/penalties": {
+        "/invoices/{invoiceId}/items/penalties": {
             "get": {
                 "tags": [
                     "Invoice Items"
@@ -1487,7 +1491,7 @@
                 }
             }
         },
-        "/api/promotions": {
+        "/promotions": {
             "get": {
                 "tags": [
                     "Promotions"
@@ -1778,7 +1782,7 @@
                 }
             }
         },
-        "/api/promotions/{id}": {
+        "/promotions/{id}": {
             "get": {
                 "tags": [
                     "Promotions"
@@ -2152,7 +2156,7 @@
                 }
             }
         },
-        "/api/promotions/validate": {
+        "/promotions/validate": {
             "post": {
                 "tags": [
                     "Promotions"
@@ -2218,7 +2222,7 @@
                 }
             }
         },
-        "/api/promotions/statistics/overview": {
+        "/promotions/statistics/overview": {
             "get": {
                 "tags": [
                     "Promotions"
@@ -2260,7 +2264,7 @@
                 }
             }
         },
-        "/api/promotions/active": {
+        "/promotions/active": {
             "get": {
                 "tags": [
                     "Promotions"
@@ -2311,7 +2315,7 @@
                 }
             }
         },
-        "/api/reviews": {
+        "/reviews": {
             "get": {
                 "tags": [
                     "Reviews"
@@ -2501,7 +2505,7 @@
                 ]
             }
         },
-        "/api/reviews/{id}": {
+        "/reviews/{id}": {
             "get": {
                 "tags": [
                     "Reviews"
@@ -2666,7 +2670,7 @@
                 }
             }
         },
-        "/api/reviews/{id}/approve": {
+        "/reviews/{id}/approve": {
             "post": {
                 "tags": [
                     "Reviews"
@@ -2729,7 +2733,7 @@
                 }
             }
         },
-        "/api/reviews/{id}/reject": {
+        "/reviews/{id}/reject": {
             "post": {
                 "tags": [
                     "Reviews"
@@ -2792,7 +2796,7 @@
                 }
             }
         },
-        "/api/reviews/{id}/mark-helpful": {
+        "/reviews/{id}/mark-helpful": {
             "post": {
                 "tags": [
                     "Reviews"
@@ -2838,7 +2842,7 @@
                 }
             }
         },
-        "/api/reviews/{id}/mark-not-helpful": {
+        "/reviews/{id}/mark-not-helpful": {
             "post": {
                 "tags": [
                     "Reviews"
@@ -2884,7 +2888,7 @@
                 }
             }
         },
-        "/api/reviews/property/{propertyId}": {
+        "/reviews/property/{propertyId}": {
             "get": {
                 "tags": [
                     "Reviews"
@@ -2953,7 +2957,7 @@
                 }
             }
         },
-        "/api/reviews/room/{roomId}": {
+        "/reviews/room/{roomId}": {
             "get": {
                 "tags": [
                     "Reviews"
@@ -3022,7 +3026,7 @@
                 }
             }
         },
-        "/api/reviews/statistics/overview": {
+        "/reviews/statistics/overview": {
             "get": {
                 "tags": [
                     "Reviews"
@@ -3240,7 +3244,7 @@
                 ]
             }
         },
-        "/api/supplies": {
+        "/supplies": {
             "get": {
                 "tags": [
                     "Supplies"
@@ -3403,7 +3407,7 @@
                 }
             }
         },
-        "/api/supplies/{id}": {
+        "/supplies/{id}": {
             "get": {
                 "tags": [
                     "Supplies"
@@ -3536,7 +3540,7 @@
                 }
             }
         },
-        "/api/supplies/status/low-stock": {
+        "/supplies/status/low-stock": {
             "get": {
                 "tags": [
                     "Supplies"
@@ -3570,7 +3574,7 @@
                 }
             }
         },
-        "/api/supplies/status/out-of-stock": {
+        "/supplies/status/out-of-stock": {
             "get": {
                 "tags": [
                     "Supplies"
@@ -3604,7 +3608,7 @@
                 }
             }
         },
-        "/api/supplies/{id}/adjust-stock": {
+        "/supplies/{id}/adjust-stock": {
             "patch": {
                 "tags": [
                     "Supplies"
@@ -3672,7 +3676,7 @@
                 }
             }
         },
-        "/api/supplies/statistics/overview": {
+        "/supplies/statistics/overview": {
             "get": {
                 "tags": [
                     "Supplies"
@@ -3726,7 +3730,7 @@
                 }
             }
         },
-        "/api/supply-logs": {
+        "/supply-logs": {
             "get": {
                 "tags": [
                     "Supply Logs"
@@ -3815,7 +3819,7 @@
                 }
             }
         },
-        "/api/supply-logs/{id}": {
+        "/supply-logs/{id}": {
             "get": {
                 "tags": [
                     "Supply Logs"
@@ -3856,7 +3860,7 @@
                 }
             }
         },
-        "/api/supply-logs/supply/{supplyId}": {
+        "/supply-logs/supply/{supplyId}": {
             "get": {
                 "tags": [
                     "Supply Logs"
@@ -3900,7 +3904,7 @@
                 }
             }
         },
-        "/api/supply-logs/activities/recent": {
+        "/supply-logs/activities/recent": {
             "get": {
                 "tags": [
                     "Supply Logs"
@@ -3946,7 +3950,7 @@
                 }
             }
         },
-        "/api/supply-logs/summary/movement": {
+        "/supply-logs/summary/movement": {
             "get": {
                 "tags": [
                     "Supply Logs"
@@ -4292,12 +4296,6 @@
                 "in": "header",
                 "bearerFormat": "JWT",
                 "scheme": "bearer"
-            },
-            "sanctum": {
-                "type": "apiKey",
-                "description": "Nhập token dạng: Bearer {token}",
-                "name": "Authorization",
-                "in": "header"
             }
         }
     },
@@ -4341,11 +4339,6 @@
         {
             "name": "User Auth",
             "description": "User Auth"
-        }
-    ],
-    "security": [
-        {
-            "sanctum": []
         }
     ]
 }
