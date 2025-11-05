@@ -289,6 +289,7 @@ class SupplyController extends Controller
             'description' => 'nullable|string|max:1000',
             'category' => 'sometimes|required|string|max:100',
             'unit' => 'sometimes|required|string|max:50',
+            'current_stock' => 'sometimes|required|integer|min:0',
             'min_stock_level' => 'sometimes|required|integer|min:0',
             'max_stock_level' => 'nullable|integer|min:0',
             'unit_price' => 'sometimes|required|numeric|min:0',
@@ -299,8 +300,9 @@ class SupplyController extends Controller
 
         $supply = Supply::findOrFail($id);
         $supply->update($request->only([
-            'name', 'description', 'category', 'unit', 'min_stock_level',
-            'max_stock_level', 'unit_price', 'supplier', 'supplier_contact', 'status'
+            'name', 'description', 'category', 'unit', 'current_stock',
+            'min_stock_level', 'max_stock_level', 'unit_price', 
+            'supplier', 'supplier_contact', 'status'
         ]));
 
         return response()->json([
