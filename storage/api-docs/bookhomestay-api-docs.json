@@ -97,6 +97,104 @@
                 ]
             }
         },
+        "/api/admin/properties": {
+            "get": {
+                "tags": [
+                    "Properties"
+                ],
+                "summary": "Lấy danh sách properties (phân trang)",
+                "operationId": "fbce6b59103639c315c320cd3ee3d7de",
+                "responses": {
+                    "200": {
+                        "description": "Thành công"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/login": {
+            "post": {
+                "tags": [
+                    "Authentication"
+                ],
+                "summary": "Đăng nhập (Admin, Staff, User)",
+                "description": "Xác thực người dùng và trả về token + role",
+                "operationId": "a3b306d14572d1f4bd6c064b3233e7b8",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "email": {
+                                        "type": "string",
+                                        "example": "admin@example.com"
+                                    },
+                                    "password": {
+                                        "type": "string",
+                                        "example": "secret123"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Đăng nhập thành công",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "message": {
+                                            "type": "string"
+                                        },
+                                        "user": {
+                                            "type": "object"
+                                        },
+                                        "token": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Thông tin không chính xác"
+                    },
+                    "422": {
+                        "description": "Validation error"
+                    }
+                }
+            }
+        },
+        "/api/logout": {
+            "post": {
+                "tags": [
+                    "Authentication"
+                ],
+                "summary": "Đăng xuất",
+                "description": "Xóa token hiện tại",
+                "operationId": "fe8f3429cd6979b3b4517e186505f9f9",
+                "responses": {
+                    "200": {
+                        "description": "Đăng xuất thành công"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/{role}/google/redirect": {
             "get": {
                 "tags": [
@@ -392,7 +490,7 @@
                 "tags": [
                     "User Auth"
                 ],
-                "summary": "Register a new user",
+                "summary": "Đăng ký người dùng",
                 "operationId": "797719db7fc6fd52f9b242f4aae9fbc0",
                 "requestBody": {
                     "required": true,
@@ -428,117 +526,12 @@
                 },
                 "responses": {
                     "201": {
-                        "description": "User registered",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "properties": {
-                                        "message": {
-                                            "type": "string"
-                                        },
-                                        "user": {
-                                            "type": "object"
-                                        }
-                                    },
-                                    "type": "object"
-                                }
-                            }
-                        }
+                        "description": "Đăng ký thành công"
                     },
                     "422": {
                         "description": "Validation error"
                     }
                 }
-            }
-        },
-        "/api/user/login": {
-            "post": {
-                "tags": [
-                    "User Auth"
-                ],
-                "summary": "User login",
-                "operationId": "2f17cb8a1efc5b9a7c772afe77354b8d",
-                "requestBody": {
-                    "required": true,
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "properties": {
-                                    "email": {
-                                        "type": "string",
-                                        "example": "user@example.com"
-                                    },
-                                    "password": {
-                                        "type": "string",
-                                        "example": "secret123"
-                                    }
-                                },
-                                "type": "object"
-                            }
-                        }
-                    }
-                },
-                "responses": {
-                    "200": {
-                        "description": "Successful login",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "properties": {
-                                        "message": {
-                                            "type": "string"
-                                        },
-                                        "user": {
-                                            "type": "object"
-                                        },
-                                        "token": {
-                                            "type": "string"
-                                        }
-                                    },
-                                    "type": "object"
-                                }
-                            }
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized - invalid credentials"
-                    },
-                    "422": {
-                        "description": "Validation error"
-                    }
-                }
-            }
-        },
-        "/api/user/logout": {
-            "post": {
-                "tags": [
-                    "User Auth"
-                ],
-                "summary": "Logout user",
-                "description": "Invalidate current access token",
-                "operationId": "5f31405506572410baee3da0e578e588",
-                "responses": {
-                    "200": {
-                        "description": "Logged out",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "properties": {
-                                        "message": {
-                                            "type": "string"
-                                        }
-                                    },
-                                    "type": "object"
-                                }
-                            }
-                        }
-                    }
-                },
-                "security": [
-                    {
-                        "bearerAuth": []
-                    }
-                ]
             }
         },
         "/api/user/forgot-password": {
@@ -546,34 +539,16 @@
                 "tags": [
                     "User Auth"
                 ],
-                "summary": "Gửi email chứa liên kết đặt lại mật khẩu",
-                "description": "Người dùng nhập email, hệ thống sẽ gửi một liên kết đặt lại mật khẩu có chứa token hợp lệ qua email.",
+                "summary": "Quên mật khẩu",
                 "operationId": "3bf0ede80ef09bc9d356e6563e667022",
-                "parameters": [
-                    {
-                        "name": "Accept",
-                        "in": "header",
-                        "description": "Định dạng phản hồi, luôn là application/json",
-                        "required": true,
-                        "schema": {
-                            "type": "string",
-                            "default": "application/json"
-                        }
-                    }
-                ],
                 "requestBody": {
-                    "description": "Email người dùng cần khôi phục mật khẩu",
                     "required": true,
                     "content": {
                         "application/json": {
                             "schema": {
-                                "required": [
-                                    "email"
-                                ],
                                 "properties": {
                                     "email": {
                                         "type": "string",
-                                        "format": "email",
                                         "example": "user@example.com"
                                     }
                                 },
@@ -584,13 +559,10 @@
                 },
                 "responses": {
                     "200": {
-                        "description": "Email khôi phục mật khẩu đã được gửi thành công."
+                        "description": "Email đã được gửi"
                     },
                     "422": {
-                        "description": "Email không tồn tại hoặc không hợp lệ."
-                    },
-                    "500": {
-                        "description": "Lỗi hệ thống hoặc lỗi khi gửi email."
+                        "description": "Email không tồn tại"
                     }
                 }
             }
@@ -600,36 +572,25 @@
                 "tags": [
                     "User Auth"
                 ],
-                "summary": "Đặt lại mật khẩu bằng token",
-                "description": "Người dùng gửi token + email + mật khẩu mới để đặt lại mật khẩu.",
+                "summary": "Đặt lại mật khẩu",
                 "operationId": "71c0e3259bb3f4d4bafa8265740fe823",
                 "requestBody": {
                     "required": true,
                     "content": {
                         "application/json": {
                             "schema": {
-                                "required": [
-                                    "token",
-                                    "email",
-                                    "password",
-                                    "password_confirmation"
-                                ],
                                 "properties": {
                                     "token": {
-                                        "type": "string",
-                                        "example": "abc123"
+                                        "type": "string"
                                     },
                                     "email": {
-                                        "type": "string",
-                                        "example": "user@example.com"
+                                        "type": "string"
                                     },
                                     "password": {
-                                        "type": "string",
-                                        "example": "newpassword"
+                                        "type": "string"
                                     },
                                     "password_confirmation": {
-                                        "type": "string",
-                                        "example": "newpassword"
+                                        "type": "string"
                                     }
                                 },
                                 "type": "object"
@@ -639,13 +600,10 @@
                 },
                 "responses": {
                     "200": {
-                        "description": "Đặt lại mật khẩu thành công."
+                        "description": "Đặt lại thành công"
                     },
                     "400": {
-                        "description": "Token không hợp lệ hoặc đã hết hạn."
-                    },
-                    "422": {
-                        "description": "Dữ liệu không hợp lệ."
+                        "description": "Token không hợp lệ"
                     }
                 }
             }
@@ -661,6 +619,14 @@
             "description": "Admin Auth"
         },
         {
+            "name": "Properties",
+            "description": "Properties"
+        },
+        {
+            "name": "Authentication",
+            "description": "Authentication"
+        },
+        {
             "name": "Staff Auth",
             "description": "Staff Auth"
         },
@@ -673,7 +639,7 @@
         "securitySchemes": {
             "sanctum": {
                 "type": "apiKey",
-                "description": "Nhập token dạng: Bearer {token}",
+                "description": "7|FsRGNf1kvCkJ5OcN6sonlOA26dAMieZhDXdvoQqKb47b44c5",
                 "name": "Authorization",
                 "in": "header"
             }

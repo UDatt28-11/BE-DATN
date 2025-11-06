@@ -9,31 +9,24 @@ use Symfony\Component\HttpFoundation\Response;
 
 class RoleMiddleware
 {
-    /**
-     * Kiểm tra vai trò và trạng thái tài khoản của người dùng.
-     * Dùng: middleware(['auth:sanctum', 'role:admin'])
-     * Hoặc: middleware(['auth:sanctum', 'role:admin,staff'])
-     */
     public function handle(Request $request, Closure $next, ...$roles): Response
     {
-        // Nếu chưa đăng nhập
-        if (!Auth::check()) {
+        // DÙNG GUARD 'sanctum' THAY VÌ MẶC ĐỊNH
+        if (!Auth::guard('sanctum')->check()) {
             return response()->json(['message' => 'Chưa đăng nhập.'], 401);
         }
 
-        $user = Auth::user();
+        $user = Auth::guard('sanctum')->user();
 
-        //  Kiểm tra role (ví dụ: admin, staff, user)
         if (!in_array($user->role, $roles)) {
             return response()->json(['message' => 'Bạn không có quyền truy cập.'], 403);
         }
 
-        //  Nếu là user và bị khóa
         if ($user->role === 'user' && $user->status === 'locked') {
             return response()->json([
-                'message' => 'Tài khoản của bạn đã bị quản trị viên khóa.',
-                'ly_do_block' => $user->ly_do_block ?? null,
-                'block_den_ngay' => $user->block_den_ngay ?? null,
+                'message' => 'Tài khoản của bạn đã bị khóa.',
+                'ly_do_block' => $user->ly_do_block,
+                'block_den_ngay' => $user->block_den_ngay,
             ], 403);
         }
 

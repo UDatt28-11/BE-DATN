@@ -44,7 +44,7 @@ class User extends Authenticatable
         'password',
         'remember_token',
     ];
-    // Check phân quyền 
+    // Check phân quyền
     public function isAdmin()
     {
         return $this->role === 'admin';
@@ -71,4 +71,9 @@ class User extends Authenticatable
             'password' => 'hashed',
         ];
     }
+    public function roles()
+    {
+        return $this->belongsToMany(Role::class, 'user_roles');
+    }
+
 }

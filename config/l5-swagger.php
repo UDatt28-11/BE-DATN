@@ -68,7 +68,7 @@ return [
             'securitySchemes' => [
                 'sanctum' => [
                     'type' => 'apiKey',
-                    'description' => 'Nhập token dạng: Bearer {token}',
+                    'description' => '7|FsRGNf1kvCkJ5OcN6sonlOA26dAMieZhDXdvoQqKb47b44c5',
                     'name' => 'Authorization',
                     'in' => 'header',
                 ],
