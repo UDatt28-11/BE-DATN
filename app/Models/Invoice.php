@@ -59,6 +59,11 @@ class Invoice extends Model
             ->withPivot('applied_discount_amount');
     }
 
+    public function payments(): HasMany
+    {
+        return $this->hasMany(Payment::class);
+    }
+
     // Scopes
     public function scopePaid($query)
     {

@@ -139,58 +139,58 @@ class ReviewController extends Controller
                 'bookingDetail:id,booking_order_id,room_id'
             ]);
 
-            // Filter by property
-            if ($request->has('property_id')) {
-                $query->where('property_id', $request->property_id);
-            }
+        // Filter by property
+        if ($request->has('property_id')) {
+            $query->where('property_id', $request->property_id);
+        }
 
-            // Filter by room
-            if ($request->has('room_id')) {
-                $query->where('room_id', $request->room_id);
-            }
+        // Filter by room
+        if ($request->has('room_id')) {
+            $query->where('room_id', $request->room_id);
+        }
 
-            // Filter by status
-            if ($request->has('status')) {
-                $query->where('status', $request->status);
-            }
+        // Filter by status
+        if ($request->has('status')) {
+            $query->where('status', $request->status);
+        }
 
-            // Filter by rating
-            if ($request->has('rating')) {
-                $query->where('rating', $request->rating);
-            }
+        // Filter by rating
+        if ($request->has('rating')) {
+            $query->where('rating', $request->rating);
+        }
 
-            // Filter verified purchases only
-            if ($request->boolean('verified_only', false)) {
-                $query->where('is_verified_purchase', true);
-            }
+        // Filter verified purchases only
+        if ($request->boolean('verified_only', false)) {
+            $query->where('is_verified_purchase', true);
+        }
 
-            // Filter by date range
-            if ($request->has('date_from') && $request->has('date_to')) {
-                $query->whereBetween('reviewed_at', [
-                    $request->date_from,
-                    $request->date_to
-                ]);
-            }
+        // Filter by date range
+        if ($request->has('date_from') && $request->has('date_to')) {
+            $query->whereBetween('reviewed_at', [
+                $request->date_from,
+                $request->date_to
+            ]);
+        }
 
-            // Search in comment and title
+        // Search in comment and title
             if ($request->has('search') && !empty($request->search)) {
-                $search = $request->search;
-                $query->where(function ($q) use ($search) {
+            $search = $request->search;
+            $query->where(function ($q) use ($search) {
                     $q->where('title', 'like', '%' . $search . '%')
                         ->orWhere('comment', 'like', '%' . $search . '%');
-                });
-            }
+            });
+        }
 
-            // Sort options
-            $sortBy = $request->get('sort_by', 'reviewed_at');
-            $sortOrder = $request->get('sort_order', 'desc');
-            $query->orderBy($sortBy, $sortOrder);
+        // Sort options
+        $sortBy = $request->get('sort_by', 'reviewed_at');
+        $sortOrder = $request->get('sort_order', 'desc');
+        $query->orderBy($sortBy, $sortOrder);
 
             // Paginate results
             $reviews = $query->paginate($perPage);
 
-            return response()->json([
-                'success' => true,
+        return response()->json([
+            'success' => true,
                 'data' => $reviews->items(),
                 'meta' => [
                     'pagination' => [

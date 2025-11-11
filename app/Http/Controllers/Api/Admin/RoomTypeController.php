@@ -84,11 +84,15 @@ class RoomTypeController extends Controller
             // Validate query parameters
             $request->validate([
                 'property_id' => 'sometimes|integer|exists:properties,id',
+                'status' => 'sometimes|string|in:active,inactive',
                 'search' => 'sometimes|string|max:255',
+                'sort_by' => 'sometimes|string|in:id,name,status,created_at,updated_at',
+                'sort_order' => 'sometimes|string|in:asc,desc',
                 'page' => 'sometimes|integer|min:1',
                 'per_page' => 'sometimes|integer|min:1|max:100',
             ], [
                 'property_id.exists' => 'Property không tồn tại.',
+                'status.in' => 'Trạng thái không hợp lệ. Chỉ chấp nhận: active, inactive.',
                 'per_page.max' => 'Số lượng bản ghi mỗi trang không được vượt quá 100.',
             ]);
 
@@ -100,13 +104,20 @@ class RoomTypeController extends Controller
                 $query->where('property_id', $request->property_id);
             }
 
+            // Filter by status
+            if ($request->has('status')) {
+                $query->where('status', $request->status);
+            }
+
             // Search by name
             if ($request->has('search') && !empty($request->search)) {
                 $query->where('name', 'like', '%' . $request->search . '%');
             }
 
-            // Sort by latest
-            $query->latest();
+            // Sorting
+            $sortBy = $request->get('sort_by', 'created_at');
+            $sortOrder = $request->get('sort_order', 'desc');
+            $query->orderBy($sortBy, $sortOrder);
 
             // Paginate results
             $roomTypes = $query->paginate($perPage);
@@ -234,16 +245,16 @@ class RoomTypeController extends Controller
         try {
             // Authorization is handled by route middleware (role:admin)
             
-            $validatedData = $request->validated();
-            $imageUrl = null;
+        $validatedData = $request->validated();
+        $imageUrl = null;
 
             // Handle file upload
-            if ($request->hasFile('image_file')) {
+        if ($request->hasFile('image_file')) {
                 $imageUrl = $this->storeLocalFile($request->file('image_file'));
-            }
+                }
 
-            $validatedData['image_url'] = $imageUrl;
-            $roomType = RoomType::create($validatedData);
+        $validatedData['image_url'] = $imageUrl;
+        $roomType = RoomType::create($validatedData);
 
             Log::info('RoomType created', [
                 'room_type_id' => $roomType->id,
@@ -323,17 +334,17 @@ class RoomTypeController extends Controller
         try {
             // Authorization is handled by route middleware (role:admin)
             
-            $validatedData = $request->validated();
+        $validatedData = $request->validated();
             $imageUrl = $roomType->image_url;
 
             // Handle file upload (replace old file if new file is uploaded)
-            if ($request->hasFile('image_file')) {
+        if ($request->hasFile('image_file')) {
                 $this->deleteLocalFile($roomType->image_url);
                 $imageUrl = $this->storeLocalFile($request->file('image_file'));
-            }
+                }
 
-            $validatedData['image_url'] = $imageUrl;
-            $roomType->update($validatedData);
+        $validatedData['image_url'] = $imageUrl;
+        $roomType->update($validatedData);
 
             Log::info('RoomType updated', [
                 'room_type_id' => $roomType->id,
@@ -404,10 +415,10 @@ class RoomTypeController extends Controller
             $roomTypeName = $roomType->name;
 
             // Delete associated image file
-            $this->deleteLocalFile($roomType->image_url);
+        $this->deleteLocalFile($roomType->image_url);
 
             // Delete room type
-            $roomType->delete();
+        $roomType->delete();
 
             Log::info('RoomType deleted', [
                 'room_type_id' => $roomTypeId,
@@ -429,6 +440,83 @@ class RoomTypeController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Có lỗi xảy ra khi xóa loại phòng: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Update room type status
+     */
+    public function updateStatus(Request $request, RoomType $roomType): JsonResponse
+    {
+        try {
+            $validatedData = $request->validate([
+                'status' => 'required|string|in:active,inactive',
+            ], [
+                'status.required' => 'Vui lòng chọn trạng thái.',
+                'status.in' => 'Trạng thái không hợp lệ. Chỉ chấp nhận: active, inactive.',
+            ]);
+
+            $roomType->update(['status' => $validatedData['status']]);
+
+            Log::info('RoomType status updated', [
+                'room_type_id' => $roomType->id,
+                'status' => $roomType->status,
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Cập nhật trạng thái thành công',
+                'data' => $roomType->load('property:id,name'),
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Dữ liệu không hợp lệ',
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Exception $e) {
+            Log::error('RoomTypeController@updateStatus failed', [
+                'room_type_id' => $roomType->id,
+                'message' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi cập nhật trạng thái.',
+            ], 500);
+        }
+    }
+
+    /**
+     * Get room type with amenities
+     */
+    public function showWithAmenities(RoomType $roomType): JsonResponse
+    {
+        try {
+            $roomType->load([
+                'property:id,name',
+                'rooms.amenities:id,name,type,icon_url'
+            ]);
+
+            $amenities = $roomType->rooms->flatMap->amenities->unique('id')->values();
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'room_type' => $roomType,
+                    'amenities' => $amenities,
+                ],
+            ]);
+        } catch (\Exception $e) {
+            Log::error('RoomTypeController@showWithAmenities failed', [
+                'room_type_id' => $roomType->id,
+                'message' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi lấy thông tin loại phòng.',
             ], 500);
         }
     }

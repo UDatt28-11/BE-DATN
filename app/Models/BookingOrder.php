@@ -15,6 +15,7 @@ class BookingOrder extends Model
 
     protected $fillable = [
         'guest_id',
+        'staff_id',
         'order_code',
         'total_amount',
         'status',
@@ -36,6 +37,11 @@ class BookingOrder extends Model
     public function guest(): BelongsTo
     {
         return $this->belongsTo(User::class, 'guest_id');
+    }
+
+    public function staff(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'staff_id');
     }
 
     public function invoices(): HasMany
@@ -83,6 +89,30 @@ class BookingOrder extends Model
         ->withPivot('applied_discount_amount')
         ->withTimestamps();
         // ->using(PromotionUsage::class); // Optional: nếu có pivot model
+    }
+
+    public function vouchers(): BelongsToMany
+    {
+        return $this->belongsToMany(Voucher::class, 'user_vouchers', 'booking_order_id', 'voucher_id')
+            ->withPivot('user_id', 'claimed_at', 'used_at')
+            ->withTimestamps();
+    }
+
+    public function userVouchers(): HasMany
+    {
+        return $this->hasMany(UserVoucher::class, 'booking_order_id');
+    }
+
+    public function payments(): HasManyThrough
+    {
+        return $this->hasManyThrough(
+            Payment::class,
+            Invoice::class,
+            'booking_order_id', // FK trên invoices
+            'invoice_id',       // FK trên payments
+            'id',               // PK của booking_orders
+            'id'                // PK của invoices
+        );
     }
 
     // === ACCESSORS ===

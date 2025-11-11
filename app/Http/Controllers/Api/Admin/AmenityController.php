@@ -105,11 +105,15 @@ class AmenityController extends Controller
                 'property_id' => 'sometimes|integer|exists:properties,id',
                 'type' => 'sometimes|string|in:basic,advanced,safety',
                 'search' => 'sometimes|string|max:255',
+                'sort_by' => 'sometimes|string|in:id,name,type,created_at,updated_at',
+                'sort_order' => 'sometimes|string|in:asc,desc',
                 'page' => 'sometimes|integer|min:1',
                 'per_page' => 'sometimes|integer|min:1|max:100',
             ], [
                 'property_id.exists' => 'Property không tồn tại.',
                 'type.in' => 'Loại tiện ích không hợp lệ. Chỉ chấp nhận: basic, advanced, safety.',
+                'sort_by.in' => 'Trường sắp xếp không hợp lệ.',
+                'sort_order.in' => 'Thứ tự sắp xếp không hợp lệ. Chỉ chấp nhận: asc, desc.',
                 'per_page.max' => 'Số lượng bản ghi mỗi trang không được vượt quá 100.',
             ]);
 
@@ -131,8 +135,10 @@ class AmenityController extends Controller
                 $query->where('name', 'like', '%' . $request->search . '%');
             }
 
-            // Sort by latest
-            $query->latest();
+            // Sorting
+            $sortBy = $request->get('sort_by', 'created_at');
+            $sortOrder = $request->get('sort_order', 'desc');
+            $query->orderBy($sortBy, $sortOrder);
 
             // Paginate results
             $amenities = $query->paginate($perPage);
@@ -211,16 +217,16 @@ class AmenityController extends Controller
             // Authorization is handled by route middleware (role:admin)
             // Additional policy check if needed: $this->authorize('create', Amenity::class);
             
-            $validatedData = $request->validated();
-            $iconUrl = null;
+        $validatedData = $request->validated();
+        $iconUrl = null;
 
             // Handle file upload
-            if ($request->hasFile('icon_file')) {
+        if ($request->hasFile('icon_file')) {
                 $iconUrl = $this->storeLocalFile($request->file('icon_file'));
-            }
+        }
 
-            $validatedData['icon_url'] = $iconUrl;
-            $amenity = Amenity::create($validatedData);
+        $validatedData['icon_url'] = $iconUrl;
+        $amenity = Amenity::create($validatedData);
 
             Log::info('Amenity created', [
                 'amenity_id' => $amenity->id,
@@ -353,17 +359,17 @@ class AmenityController extends Controller
             // Authorization is handled by route middleware (role:admin)
             // Additional policy check if needed: $this->authorize('update', $amenity);
             
-            $validatedData = $request->validated();
-            $iconUrl = $amenity->icon_url;
+        $validatedData = $request->validated();
+        $iconUrl = $amenity->icon_url;
 
             // Handle file upload (replace old file if new file is uploaded)
-            if ($request->hasFile('icon_file')) {
-                $this->deleteLocalFile($amenity->icon_url);
+        if ($request->hasFile('icon_file')) {
+            $this->deleteLocalFile($amenity->icon_url);
                 $iconUrl = $this->storeLocalFile($request->file('icon_file'));
-            }
+        }
 
-            $validatedData['icon_url'] = $iconUrl;
-            $amenity->update($validatedData);
+        $validatedData['icon_url'] = $iconUrl;
+        $amenity->update($validatedData);
 
             Log::info('Amenity updated', [
                 'amenity_id' => $amenity->id,
@@ -435,10 +441,10 @@ class AmenityController extends Controller
             $amenityName = $amenity->name;
 
             // Delete associated icon file
-            $this->deleteLocalFile($amenity->icon_url);
+        $this->deleteLocalFile($amenity->icon_url);
 
             // Delete amenity (relationships will be handled by database cascade)
-            $amenity->delete();
+        $amenity->delete();
 
             Log::info('Amenity deleted', [
                 'amenity_id' => $amenityId,

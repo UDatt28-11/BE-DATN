@@ -5,6 +5,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 class RoomType extends Model
 {
@@ -16,6 +17,7 @@ class RoomType extends Model
         'name',
         'description',
         'image_url',
+        'status',
     ];
 
     public function property(): BelongsTo {
@@ -24,5 +26,11 @@ class RoomType extends Model
 
     public function rooms(): HasMany {
         return $this->hasMany(Room::class);
+    }
+
+    public function promotions(): BelongsToMany
+    {
+        return $this->belongsToMany(Promotion::class, 'promotion_room_type', 'room_type_id', 'promotion_id')
+            ->withTimestamps();
     }
 }

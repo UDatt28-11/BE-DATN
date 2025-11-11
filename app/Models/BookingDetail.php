@@ -41,4 +41,14 @@ class BookingDetail extends Model
     {
         return $this->hasMany(BookingService::class);
     }
+
+    public function checkedInGuests(): HasMany
+    {
+        return $this->hasMany(CheckedInGuest::class, 'booking_details_id');
+    }
+
+    public function review(): HasMany
+    {
+        return $this->hasMany(Review::class, 'booking_details_id');
+    }
 }

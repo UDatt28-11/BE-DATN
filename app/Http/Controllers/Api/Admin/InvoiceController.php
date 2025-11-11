@@ -89,6 +89,23 @@ class InvoiceController extends Controller
     {
         Log::info('Invoices#index called', ['query' => $request->all()]);
         try {
+            $request->validate([
+                'status' => 'sometimes|string',
+                'payment_status' => 'sometimes|string|in:paid,unpaid,overdue',
+                'search' => 'sometimes|string|max:255',
+                'date_from' => 'sometimes|date',
+                'date_to' => 'sometimes|date|after_or_equal:date_from',
+                'sort_by' => 'sometimes|string|in:id,invoice_number,total_amount,status,created_at,updated_at',
+                'sort_order' => 'sometimes|string|in:asc,desc',
+                'page' => 'sometimes|integer|min:1',
+                'per_page' => 'sometimes|integer|min:1|max:100',
+            ], [
+                'payment_status.in' => 'Trạng thái thanh toán không hợp lệ. Chỉ chấp nhận: paid, unpaid, overdue.',
+                'sort_by.in' => 'Trường sắp xếp không hợp lệ.',
+                'sort_order.in' => 'Thứ tự sắp xếp không hợp lệ. Chỉ chấp nhận: asc, desc.',
+                'per_page.max' => 'Số lượng bản ghi mỗi trang không được vượt quá 100.',
+            ]);
+
             $query = Invoice::with(['bookingOrder', 'invoiceItems']);
 
             if ($request->has('status')) {
@@ -116,12 +133,27 @@ class InvoiceController extends Controller
                 $query->whereDate('created_at', '<=', $request->date_to);
             }
 
-            $invoices = $query->orderBy('created_at', 'desc')->paginate(15);
+            // Sorting
+            $sortBy = $request->get('sort_by', 'created_at');
+            $sortOrder = $request->get('sort_order', 'desc');
+            $query->orderBy($sortBy, $sortOrder);
+
+            // Pagination
+            $perPage = (int) ($request->get('per_page', 15));
+            $invoices = $query->paginate($perPage);
 
             Log::info('Invoices#index success', ['count' => $invoices->count()]);
             return response()->json([
                 'success' => true,
-                'data' => $invoices
+                'data' => $invoices->items(),
+                'meta' => [
+                    'pagination' => [
+                        'current_page' => $invoices->currentPage(),
+                        'per_page' => $invoices->perPage(),
+                        'total' => $invoices->total(),
+                        'last_page' => $invoices->lastPage(),
+                    ],
+                ],
             ]);
         } catch (\Throwable $e) {
             Log::error('Invoices#index failed', [

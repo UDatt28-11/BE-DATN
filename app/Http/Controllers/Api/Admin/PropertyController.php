@@ -92,17 +92,19 @@ class PropertyController extends Controller
             $request->validate([
                 'owner_id' => 'sometimes|integer|exists:users,id',
                 'status' => 'sometimes|string|in:active,inactive,pending_approval',
+                'verification_status' => 'sometimes|string|in:pending,verified,rejected',
                 'search' => 'sometimes|string|max:255',
                 'page' => 'sometimes|integer|min:1',
                 'per_page' => 'sometimes|integer|min:1|max:100',
             ], [
                 'owner_id.exists' => 'Owner không tồn tại.',
                 'status.in' => 'Trạng thái không hợp lệ.',
+                'verification_status.in' => 'Trạng thái xác minh không hợp lệ.',
                 'per_page.max' => 'Số lượng bản ghi mỗi trang không được vượt quá 100.',
             ]);
 
             $perPage = (int) ($request->get('per_page', self::DEFAULT_PER_PAGE));
-            $query = Property::query()->with('owner:id,full_name');
+            $query = Property::query()->with(['owner:id,full_name', 'verifier:id,full_name']);
 
             // Filter by owner_id
             if ($request->has('owner_id')) {
@@ -112,6 +114,11 @@ class PropertyController extends Controller
             // Filter by status
             if ($request->has('status')) {
                 $query->where('status', $request->status);
+            }
+
+            // Filter by verification_status
+            if ($request->has('verification_status')) {
+                $query->where('verification_status', $request->verification_status);
             }
 
             // Search by name or address
@@ -201,7 +208,7 @@ class PropertyController extends Controller
         try {
             // Authorization is handled by route middleware (role:admin)
             
-            $property = Property::create($request->validated());
+        $property = Property::create($request->validated());
 
             Log::info('Property created', [
                 'property_id' => $property->id,
@@ -270,7 +277,7 @@ class PropertyController extends Controller
             
             return response()->json([
                 'success' => true,
-                'data' => $property->load('owner:id,full_name'),
+                'data' => $property->load(['owner:id,full_name', 'verifier:id,full_name']),
             ]);
         } catch (\Exception $e) {
             Log::error('PropertyController@show failed', [
@@ -332,7 +339,7 @@ class PropertyController extends Controller
         try {
             // Authorization is handled by route middleware (role:admin)
             
-            $property->update($request->validated());
+        $property->update($request->validated());
 
             Log::info('Property updated', [
                 'property_id' => $property->id,
@@ -402,7 +409,7 @@ class PropertyController extends Controller
             $propertyId = $property->id;
             $propertyName = $property->name;
 
-            $property->delete();
+        $property->delete();
 
             Log::info('Property deleted', [
                 'property_id' => $propertyId,
@@ -424,6 +431,105 @@ class PropertyController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Có lỗi xảy ra khi xóa property: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Verify property
+     */
+    public function verify(Request $request, Property $property): JsonResponse
+    {
+        try {
+            $validatedData = $request->validate([
+                'notes' => 'sometimes|string|max:1000',
+            ]);
+
+            $admin = $request->user();
+
+            $property->update([
+                'verification_status' => 'verified',
+                'verification_notes' => $validatedData['notes'] ?? null,
+                'verified_at' => now(),
+                'verified_by' => $admin->id,
+            ]);
+
+            Log::info('Property verified', [
+                'property_id' => $property->id,
+                'verified_by' => $admin->id,
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Xác minh property thành công',
+                'data' => $property->load(['owner:id,full_name,email', 'verifier:id,full_name']),
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Dữ liệu không hợp lệ',
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Exception $e) {
+            Log::error('PropertyController@verify failed', [
+                'property_id' => $property->id,
+                'message' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi xác minh property.',
+            ], 500);
+        }
+    }
+
+    /**
+     * Reject property verification
+     */
+    public function reject(Request $request, Property $property): JsonResponse
+    {
+        try {
+            $validatedData = $request->validate([
+                'notes' => 'required|string|max:1000',
+            ], [
+                'notes.required' => 'Vui lòng nhập lý do từ chối.',
+            ]);
+
+            $admin = $request->user();
+
+            $property->update([
+                'verification_status' => 'rejected',
+                'verification_notes' => $validatedData['notes'],
+                'verified_at' => now(),
+                'verified_by' => $admin->id,
+            ]);
+
+            Log::info('Property verification rejected', [
+                'property_id' => $property->id,
+                'verified_by' => $admin->id,
+                'notes' => $validatedData['notes'],
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Từ chối xác minh property thành công',
+                'data' => $property->load(['owner:id,full_name,email', 'verifier:id,full_name']),
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Dữ liệu không hợp lệ',
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Exception $e) {
+            Log::error('PropertyController@reject failed', [
+                'property_id' => $property->id,
+                'message' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi từ chối xác minh property.',
             ], 500);
         }
     }

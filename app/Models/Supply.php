@@ -4,10 +4,12 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Supply extends Model
 {
     protected $fillable = [
+        'room_id',
         'name',
         'description',
         'category',
@@ -32,6 +34,11 @@ class Supply extends Model
     public function supplyLogs(): HasMany
     {
         return $this->hasMany(SupplyLog::class);
+    }
+
+    public function room(): BelongsTo
+    {
+        return $this->belongsTo(Room::class);
     }
 
     // Scopes
@@ -64,16 +71,16 @@ class Supply extends Model
 
     public function getFormattedUnitPriceAttribute()
     {
-        return number_format($this->unit_price, 2) . ' VNĐ';
+        return number_format((float) $this->unit_price, 2) . ' VNĐ';
     }
 
     public function getTotalValueAttribute()
     {
-        return $this->current_stock * $this->unit_price;
+        return $this->current_stock * (float) $this->unit_price;
     }
 
     public function getFormattedTotalValueAttribute()
     {
-        return number_format($this->total_value, 2) . ' VNĐ';
+        return number_format((float) $this->total_value, 2) . ' VNĐ';
     }
 }

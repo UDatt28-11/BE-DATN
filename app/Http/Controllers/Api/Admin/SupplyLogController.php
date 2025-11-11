@@ -111,28 +111,28 @@ class SupplyLogController extends Controller
                 'user:id,full_name,email'
             ]);
 
-            // Filter by action type
-            if ($request->has('action_type')) {
-                $query->where('action_type', $request->action_type);
-            }
+        // Filter by action type
+        if ($request->has('action_type')) {
+            $query->where('action_type', $request->action_type);
+        }
 
-            // Filter by supply
-            if ($request->has('supply_id')) {
-                $query->where('supply_id', $request->supply_id);
-            }
+        // Filter by supply
+        if ($request->has('supply_id')) {
+            $query->where('supply_id', $request->supply_id);
+        }
 
-            // Filter by user
-            if ($request->has('user_id')) {
-                $query->where('user_id', $request->user_id);
-            }
+        // Filter by user
+        if ($request->has('user_id')) {
+            $query->where('user_id', $request->user_id);
+        }
 
-            // Date range filter
-            if ($request->has('date_from')) {
-                $query->whereDate('created_at', '>=', $request->date_from);
-            }
-            if ($request->has('date_to')) {
-                $query->whereDate('created_at', '<=', $request->date_to);
-            }
+        // Date range filter
+        if ($request->has('date_from')) {
+            $query->whereDate('created_at', '>=', $request->date_from);
+        }
+        if ($request->has('date_to')) {
+            $query->whereDate('created_at', '<=', $request->date_to);
+        }
 
             // Sort by latest
             $query->orderBy('created_at', 'desc');
@@ -140,8 +140,8 @@ class SupplyLogController extends Controller
             // Paginate results
             $logs = $query->paginate($perPage);
 
-            return response()->json([
-                'success' => true,
+        return response()->json([
+            'success' => true,
                 'data' => $logs->items(),
                 'meta' => [
                     'pagination' => [
@@ -208,10 +208,10 @@ class SupplyLogController extends Controller
                 'user:id,full_name,email'
             ])->findOrFail($id);
 
-            return response()->json([
-                'success' => true,
-                'data' => $log
-            ]);
+        return response()->json([
+            'success' => true,
+            'data' => $log
+        ]);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json([
                 'success' => false,
@@ -263,16 +263,16 @@ class SupplyLogController extends Controller
         try {
             // Authorization is handled by route middleware (role:admin)
 
-            $supply = Supply::findOrFail($supplyId);
-            $logs = $supply->supplyLogs()
+        $supply = Supply::findOrFail($supplyId);
+        $logs = $supply->supplyLogs()
                 ->with('user:id,full_name,email')
-                ->orderBy('created_at', 'desc')
-                ->get();
+            ->orderBy('created_at', 'desc')
+            ->get();
 
-            return response()->json([
-                'success' => true,
-                'data' => $logs
-            ]);
+        return response()->json([
+            'success' => true,
+            'data' => $logs
+        ]);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json([
                 'success' => false,
@@ -338,14 +338,14 @@ class SupplyLogController extends Controller
                 'supply:id,name,category,unit',
                 'user:id,full_name,email'
             ])
-                ->orderBy('created_at', 'desc')
-                ->limit($limit)
-                ->get();
+            ->orderBy('created_at', 'desc')
+            ->limit($limit)
+            ->get();
 
-            return response()->json([
-                'success' => true,
-                'data' => $activities
-            ]);
+        return response()->json([
+            'success' => true,
+            'data' => $activities
+        ]);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json([
                 'success' => false,
@@ -420,36 +420,36 @@ class SupplyLogController extends Controller
                 'date_to.after_or_equal' => 'Ngày kết thúc phải sau hoặc bằng ngày bắt đầu.',
             ]);
 
-            $query = SupplyLog::query();
+        $query = SupplyLog::query();
 
-            // Date range filter
-            if ($request->has('date_from')) {
-                $query->whereDate('supply_logs.created_at', '>=', $request->date_from);
-            }
-            if ($request->has('date_to')) {
-                $query->whereDate('supply_logs.created_at', '<=', $request->date_to);
-            }
+        // Date range filter
+        if ($request->has('date_from')) {
+            $query->whereDate('supply_logs.created_at', '>=', $request->date_from);
+        }
+        if ($request->has('date_to')) {
+            $query->whereDate('supply_logs.created_at', '<=', $request->date_to);
+        }
 
             $baseQuery = clone $query;
 
-            $summary = [
+        $summary = [
                 'total_inbound' => (int) $baseQuery->clone()->where('change_quantity', '>', 0)->sum('change_quantity'),
                 'total_outbound' => (int) $baseQuery->clone()->where('change_quantity', '<', 0)->sum(DB::raw('ABS(change_quantity)')),
                 'total_movements' => (int) $baseQuery->clone()->count(),
                 'inbound_value' => (float) $baseQuery->clone()
-                    ->where('change_quantity', '>', 0)
-                    ->join('supplies', 'supply_logs.supply_id', '=', 'supplies.id')
-                    ->sum(DB::raw('supply_logs.change_quantity * supplies.unit_price')),
+                ->where('change_quantity', '>', 0)
+                ->join('supplies', 'supply_logs.supply_id', '=', 'supplies.id')
+                ->sum(DB::raw('supply_logs.change_quantity * supplies.unit_price')),
                 'outbound_value' => (float) $baseQuery->clone()
-                    ->where('change_quantity', '<', 0)
-                    ->join('supplies', 'supply_logs.supply_id', '=', 'supplies.id')
-                    ->sum(DB::raw('ABS(supply_logs.change_quantity) * supplies.unit_price'))
-            ];
+                ->where('change_quantity', '<', 0)
+                ->join('supplies', 'supply_logs.supply_id', '=', 'supplies.id')
+                ->sum(DB::raw('ABS(supply_logs.change_quantity) * supplies.unit_price'))
+        ];
 
-            return response()->json([
-                'success' => true,
-                'data' => $summary
-            ]);
+        return response()->json([
+            'success' => true,
+            'data' => $summary
+        ]);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json([
                 'success' => false,

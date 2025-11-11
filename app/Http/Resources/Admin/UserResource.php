@@ -21,6 +21,17 @@ class UserResource extends JsonResource
             'status' => $this->status,
             'role' => $this->role,
             'preferred_language' => $this->preferred_language,
+            'identity_verified' => (bool) $this->identity_verified,
+            'identity_type' => $this->identity_type,
+            'identity_number' => $this->identity_number,
+            'identity_image_url' => $this->identity_image_url,
+            'verified_at' => $this->verified_at ? $this->verified_at->toISOString() : null,
+            'verifier' => $this->whenLoaded('verifier', function () {
+                return [
+                    'id' => $this->verifier->id,
+                    'full_name' => $this->verifier->full_name,
+                ];
+            }),
             'email_verified_at' => $this->email_verified_at ? $this->email_verified_at->toISOString() : null,
             'created_at' => $this->created_at ? $this->created_at->toISOString() : null,
             'updated_at' => $this->updated_at ? $this->updated_at->toISOString() : null,

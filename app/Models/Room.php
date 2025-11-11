@@ -28,6 +28,10 @@ class Room extends Model
         'max_children',
         'price_per_night',
         'status', // (available, maintenance, occupied)
+        'verification_status', // (pending, verified, rejected)
+        'verification_notes',
+        'verified_at',
+        'verified_by',
     ];
 
     // ----- CÁC QUAN HỆ -----
@@ -47,5 +51,50 @@ class Room extends Model
     {
         // Quan hệ nhiều-nhiều qua bảng 'room_amenities'
         return $this->belongsToMany(Amenity::class, 'room_amenities');
+    }
+
+    public function priceRules(): HasMany
+    {
+        return $this->hasMany(PriceRule::class);
+    }
+
+    public function bookingDetails(): HasMany
+    {
+        return $this->hasMany(BookingDetail::class);
+    }
+
+    public function reviews(): HasMany
+    {
+        return $this->hasMany(Review::class);
+    }
+
+    public function supplies(): HasMany
+    {
+        return $this->hasMany(Supply::class);
+    }
+
+    public function verifier(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'verified_by');
+    }
+
+    protected $casts = [
+        'verified_at' => 'datetime',
+    ];
+
+    // Scopes
+    public function scopeVerified($query)
+    {
+        return $query->where('verification_status', 'verified');
+    }
+
+    public function scopePendingVerification($query)
+    {
+        return $query->where('verification_status', 'pending');
+    }
+
+    public function scopeRejected($query)
+    {
+        return $query->where('verification_status', 'rejected');
     }
 }

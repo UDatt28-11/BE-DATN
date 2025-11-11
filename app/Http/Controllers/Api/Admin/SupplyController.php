@@ -89,56 +89,62 @@ class SupplyController extends Controller
                 'status' => 'sometimes|string|in:active,inactive,discontinued',
                 'stock_status' => 'sometimes|string|in:low_stock,out_of_stock,in_stock',
                 'search' => 'sometimes|string|max:255',
+                'sort_by' => 'sometimes|string|in:id,name,category,status,current_stock,unit_price,created_at,updated_at',
+                'sort_order' => 'sometimes|string|in:asc,desc',
                 'page' => 'sometimes|integer|min:1',
                 'per_page' => 'sometimes|integer|min:1|max:100',
             ], [
                 'status.in' => 'Trạng thái không hợp lệ. Chỉ chấp nhận: active, inactive, discontinued.',
                 'stock_status.in' => 'Trạng thái tồn kho không hợp lệ. Chỉ chấp nhận: low_stock, out_of_stock, in_stock.',
+                'sort_by.in' => 'Trường sắp xếp không hợp lệ.',
+                'sort_order.in' => 'Thứ tự sắp xếp không hợp lệ. Chỉ chấp nhận: asc, desc.',
                 'per_page.max' => 'Số lượng bản ghi mỗi trang không được vượt quá 100.',
             ]);
 
             $perPage = (int) ($request->get('per_page', self::DEFAULT_PER_PAGE));
             $query = Supply::query();
 
-            // Filter by category
-            if ($request->has('category')) {
-                $query->where('category', $request->category);
-            }
+        // Filter by category
+        if ($request->has('category')) {
+            $query->where('category', $request->category);
+        }
 
-            // Filter by status
-            if ($request->has('status')) {
-                $query->where('status', $request->status);
-            }
+        // Filter by status
+        if ($request->has('status')) {
+            $query->where('status', $request->status);
+        }
 
-            // Filter by stock status
-            if ($request->has('stock_status')) {
-                switch ($request->stock_status) {
-                    case 'low_stock':
-                        $query->lowStock();
-                        break;
-                    case 'out_of_stock':
-                        $query->outOfStock();
-                        break;
-                    case 'in_stock':
+        // Filter by stock status
+        if ($request->has('stock_status')) {
+            switch ($request->stock_status) {
+                case 'low_stock':
+                    $query->lowStock();
+                    break;
+                case 'out_of_stock':
+                    $query->outOfStock();
+                    break;
+                case 'in_stock':
                         $query->whereColumn('current_stock', '>', 'min_stock_level')
-                            ->where('current_stock', '>', 0);
-                        break;
-                }
+                        ->where('current_stock', '>', 0);
+                    break;
             }
+        }
 
-            // Search by name
-            if ($request->has('search') && !empty($request->search)) {
-                $query->where('name', 'like', '%' . $request->search . '%');
-            }
+        // Search by name
+        if ($request->has('search') && !empty($request->search)) {
+            $query->where('name', 'like', '%' . $request->search . '%');
+        }
 
-            // Sort by name
-            $query->orderBy('name');
+        // Sorting
+        $sortBy = $request->get('sort_by', 'created_at');
+        $sortOrder = $request->get('sort_order', 'desc');
+        $query->orderBy($sortBy, $sortOrder);
 
             // Paginate results
             $supplies = $query->paginate($perPage);
 
-            return response()->json([
-                'success' => true,
+        return response()->json([
+            'success' => true,
                 'data' => $supplies->items(),
                 'meta' => [
                     'pagination' => [
@@ -315,10 +321,10 @@ class SupplyController extends Controller
 
             $supply = Supply::with(['supplyLogs.user:id,full_name,email'])->findOrFail($id);
 
-            return response()->json([
-                'success' => true,
-                'data' => $supply
-            ]);
+        return response()->json([
+            'success' => true,
+            'data' => $supply
+        ]);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json([
                 'success' => false,
@@ -378,40 +384,40 @@ class SupplyController extends Controller
         try {
             // Authorization is handled by route middleware (role:admin)
 
-            $request->validate([
-                'name' => 'sometimes|required|string|max:255',
-                'description' => 'nullable|string|max:1000',
-                'category' => 'sometimes|required|string|max:100',
-                'unit' => 'sometimes|required|string|max:50',
-                'min_stock_level' => 'sometimes|required|integer|min:0',
-                'max_stock_level' => 'nullable|integer|min:0',
-                'unit_price' => 'sometimes|required|numeric|min:0',
-                'supplier' => 'nullable|string|max:255',
-                'supplier_contact' => 'nullable|string|max:255',
-                'status' => 'sometimes|in:active,inactive,discontinued'
+        $request->validate([
+            'name' => 'sometimes|required|string|max:255',
+            'description' => 'nullable|string|max:1000',
+            'category' => 'sometimes|required|string|max:100',
+            'unit' => 'sometimes|required|string|max:50',
+            'min_stock_level' => 'sometimes|required|integer|min:0',
+            'max_stock_level' => 'nullable|integer|min:0',
+            'unit_price' => 'sometimes|required|numeric|min:0',
+            'supplier' => 'nullable|string|max:255',
+            'supplier_contact' => 'nullable|string|max:255',
+            'status' => 'sometimes|in:active,inactive,discontinued'
             ], [
                 'status.in' => 'Trạng thái không hợp lệ. Chỉ chấp nhận: active, inactive, discontinued.',
-            ]);
+        ]);
 
-            $supply = Supply::findOrFail($id);
-            $supply->update($request->only([
-                'name',
-                'description',
-                'category',
-                'unit',
-                'min_stock_level',
-                'max_stock_level',
-                'unit_price',
-                'supplier',
-                'supplier_contact',
-                'status'
-            ]));
+        $supply = Supply::findOrFail($id);
+        $supply->update($request->only([
+            'name',
+            'description',
+            'category',
+            'unit',
+            'min_stock_level',
+            'max_stock_level',
+            'unit_price',
+            'supplier',
+            'supplier_contact',
+            'status'
+        ]));
 
-            return response()->json([
-                'success' => true,
-                'message' => 'Vật tư đã được cập nhật',
-                'data' => $supply
-            ]);
+        return response()->json([
+            'success' => true,
+            'message' => 'Vật tư đã được cập nhật',
+            'data' => $supply
+        ]);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json([
                 'success' => false,
@@ -469,22 +475,22 @@ class SupplyController extends Controller
         try {
             // Authorization is handled by route middleware (role:admin)
 
-            $supply = Supply::findOrFail($id);
+        $supply = Supply::findOrFail($id);
 
-            // Check if supply has stock
-            if ($supply->current_stock > 0) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Không thể xóa vật tư còn tồn kho.'
-                ], 400);
-            }
-
-            $supply->delete();
-
+        // Check if supply has stock
+        if ($supply->current_stock > 0) {
             return response()->json([
-                'success' => true,
+                'success' => false,
+                    'message' => 'Không thể xóa vật tư còn tồn kho.'
+            ], 400);
+        }
+
+        $supply->delete();
+
+        return response()->json([
+            'success' => true,
                 'message' => 'Vật tư đã được xóa thành công.'
-            ]);
+        ]);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json([
                 'success' => false,

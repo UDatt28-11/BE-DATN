@@ -49,13 +49,13 @@ class InvoiceItemController extends Controller
         try {
             // Authorization is handled by route middleware (role:admin)
 
-            $invoice = Invoice::findOrFail($invoiceId);
-            $items = $invoice->invoiceItems()->orderBy('created_at', 'desc')->get();
+        $invoice = Invoice::findOrFail($invoiceId);
+        $items = $invoice->invoiceItems()->orderBy('created_at', 'desc')->get();
 
-            return response()->json([
-                'success' => true,
-                'data' => $items
-            ]);
+        return response()->json([
+            'success' => true,
+            'data' => $items
+        ]);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json([
                 'success' => false,
@@ -745,13 +745,13 @@ class InvoiceItemController extends Controller
         try {
             // Authorization is handled by route middleware (role:admin)
 
-            $invoice = Invoice::findOrFail($invoiceId);
-            $penaltyItems = $invoice->invoiceItems()->penalties()->get();
+        $invoice = Invoice::findOrFail($invoiceId);
+        $penaltyItems = $invoice->invoiceItems()->penalties()->get();
 
-            return response()->json([
-                'success' => true,
-                'data' => $penaltyItems
-            ]);
+        return response()->json([
+            'success' => true,
+            'data' => $penaltyItems
+        ]);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json([
                 'success' => false,
@@ -803,13 +803,13 @@ class InvoiceItemController extends Controller
         try {
             // Authorization is handled by route middleware (role:admin)
 
-            $invoice = Invoice::findOrFail($invoiceId);
-            $regularItems = $invoice->invoiceItems()->regularItems()->get();
+        $invoice = Invoice::findOrFail($invoiceId);
+        $regularItems = $invoice->invoiceItems()->regularItems()->get();
 
-            return response()->json([
-                'success' => true,
-                'data' => $regularItems
-            ]);
+        return response()->json([
+            'success' => true,
+            'data' => $regularItems
+        ]);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json([
                 'success' => false,

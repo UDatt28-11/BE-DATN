@@ -101,50 +101,56 @@ class UserController extends Controller
             // Authorization is handled by route middleware (role:admin)
             
             $perPage = (int) ($request->get('per_page', self::DEFAULT_PER_PAGE));
-            $search = $request->get('search');
-            $status = $request->get('status');
+        $search = $request->get('search');
+        $status = $request->get('status');
             $role = $request->get('role');
-            $sortBy = $request->get('sort_by', 'created_at');
-            $sortOrder = $request->get('sort_order', 'desc');
+            $identityVerified = $request->get('identity_verified');
+        $sortBy = $request->get('sort_by', 'created_at');
+        $sortOrder = $request->get('sort_order', 'desc');
 
-            $query = User::query();
+        $query = User::query()->with('verifier:id,full_name');
 
-            // Tìm kiếm theo tên, email, số điện thoại
-            if ($search) {
-                $query->where(function ($q) use ($search) {
-                    $q->where('full_name', 'like', "%{$search}%")
-                        ->orWhere('email', 'like', "%{$search}%")
-                        ->orWhere('phone_number', 'like', "%{$search}%");
-                });
-            }
+        // Tìm kiếm theo tên, email, số điện thoại
+        if ($search) {
+            $query->where(function ($q) use ($search) {
+                $q->where('full_name', 'like', "%{$search}%")
+                    ->orWhere('email', 'like', "%{$search}%")
+                    ->orWhere('phone_number', 'like', "%{$search}%");
+            });
+        }
 
-            // Lọc theo trạng thái
-            if ($status) {
-                $query->where('status', $status);
-            }
+        // Lọc theo trạng thái
+        if ($status) {
+            $query->where('status', $status);
+        }
 
             // Lọc theo role
             if ($role) {
                 $query->where('role', $role);
             }
 
-            // Sắp xếp
-            $query->orderBy($sortBy, $sortOrder);
+            // Lọc theo identity_verified
+            if ($identityVerified !== null) {
+                $query->where('identity_verified', filter_var($identityVerified, FILTER_VALIDATE_BOOLEAN));
+            }
 
-            $users = $query->paginate($perPage);
+        // Sắp xếp
+        $query->orderBy($sortBy, $sortOrder);
 
-            return response()->json([
+        $users = $query->paginate($perPage);
+
+        return response()->json([
                 'success' => true,
-                'data' => UserResource::collection($users),
-                'meta' => [
-                    'pagination' => [
-                        'current_page' => $users->currentPage(),
-                        'per_page' => $users->perPage(),
-                        'total' => $users->total(),
-                        'last_page' => $users->lastPage(),
-                    ],
+            'data' => UserResource::collection($users),
+            'meta' => [
+                'pagination' => [
+                    'current_page' => $users->currentPage(),
+                    'per_page' => $users->perPage(),
+                    'total' => $users->total(),
+                    'last_page' => $users->lastPage(),
                 ],
-            ]);
+            ],
+        ]);
         } catch (\Exception $e) {
             Log::error('UserController@index failed', [
                 'message' => $e->getMessage(),
@@ -188,7 +194,7 @@ class UserController extends Controller
             // For now, returning all users with id and full_name
             $users = User::select('id', 'full_name')
                 ->whereIn('role', ['admin', 'user']) // Assuming these are the owner roles
-                ->get();
+            ->get();
 
             return response()->json([
                 'success' => true,
@@ -239,12 +245,12 @@ class UserController extends Controller
         try {
             // Authorization is handled by route middleware (role:admin)
             
-            $user = User::findOrFail($id);
+        $user = User::with('verifier:id,full_name')->findOrFail($id);
 
-            return response()->json([
+        return response()->json([
                 'success' => true,
-                'data' => new UserResource($user),
-            ]);
+            'data' => new UserResource($user),
+        ]);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json([
                 'success' => false,
@@ -306,15 +312,15 @@ class UserController extends Controller
         try {
             // Authorization is handled by route middleware (role:admin)
             
-            $validated = $request->validate([
-                'full_name' => 'required|string|max:255',
-                'email' => 'required|email|unique:users,email',
-                'password' => 'required|string|min:8',
-                'phone_number' => 'nullable|string|max:20|unique:users,phone_number',
-                'date_of_birth' => 'nullable|date',
-                'gender' => 'nullable|in:male,female,other',
-                'address' => 'nullable|string|max:255',
-                'status' => 'nullable|in:active,locked',
+        $validated = $request->validate([
+            'full_name' => 'required|string|max:255',
+            'email' => 'required|email|unique:users,email',
+            'password' => 'required|string|min:8',
+            'phone_number' => 'nullable|string|max:20|unique:users,phone_number',
+            'date_of_birth' => 'nullable|date',
+            'gender' => 'nullable|in:male,female,other',
+            'address' => 'nullable|string|max:255',
+            'status' => 'nullable|in:active,locked',
                 'role' => 'nullable|in:admin,staff,user',
             ], [
                 'full_name.required' => 'Vui lòng nhập họ và tên.',
@@ -324,30 +330,30 @@ class UserController extends Controller
                 'password.required' => 'Vui lòng nhập mật khẩu.',
                 'password.min' => 'Mật khẩu phải có ít nhất 8 ký tự.',
                 'phone_number.unique' => 'Số điện thoại đã được sử dụng.',
-            ]);
+        ]);
 
-            $user = User::create([
-                'full_name' => $validated['full_name'],
-                'email' => $validated['email'],
+        $user = User::create([
+            'full_name' => $validated['full_name'],
+            'email' => $validated['email'],
                 'password' => Hash::make($validated['password']),
-                'phone_number' => $validated['phone_number'] ?? null,
-                'date_of_birth' => $validated['date_of_birth'] ?? null,
-                'gender' => $validated['gender'] ?? null,
-                'address' => $validated['address'] ?? null,
-                'status' => $validated['status'] ?? 'active',
+            'phone_number' => $validated['phone_number'] ?? null,
+            'date_of_birth' => $validated['date_of_birth'] ?? null,
+            'gender' => $validated['gender'] ?? null,
+            'address' => $validated['address'] ?? null,
+            'status' => $validated['status'] ?? 'active',
                 'role' => $validated['role'] ?? 'user',
             ]);
 
             Log::info('User created', [
                 'user_id' => $user->id,
                 'email' => $user->email,
-            ]);
+        ]);
 
-            return response()->json([
+        return response()->json([
                 'success' => true,
                 'message' => 'Tạo người dùng thành công',
-                'data' => new UserResource($user),
-            ], 201);
+            'data' => new UserResource($user),
+        ], 201);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json([
                 'success' => false,
@@ -417,41 +423,41 @@ class UserController extends Controller
         try {
             // Authorization is handled by route middleware (role:admin)
             
-            $user = User::findOrFail($id);
+        $user = User::findOrFail($id);
 
-            $validated = $request->validate([
-                'full_name' => 'sometimes|string|max:255',
-                'email' => 'sometimes|email|unique:users,email,' . $id,
-                'password' => 'sometimes|string|min:8',
-                'phone_number' => 'nullable|string|max:20|unique:users,phone_number,' . $id,
-                'date_of_birth' => 'nullable|date',
-                'gender' => 'nullable|in:male,female,other',
-                'address' => 'nullable|string|max:255',
-                'status' => 'sometimes|in:active,locked',
-                'avatar_url' => 'nullable|string|max:255',
+        $validated = $request->validate([
+            'full_name' => 'sometimes|string|max:255',
+            'email' => 'sometimes|email|unique:users,email,' . $id,
+            'password' => 'sometimes|string|min:8',
+            'phone_number' => 'nullable|string|max:20|unique:users,phone_number,' . $id,
+            'date_of_birth' => 'nullable|date',
+            'gender' => 'nullable|in:male,female,other',
+            'address' => 'nullable|string|max:255',
+            'status' => 'sometimes|in:active,locked',
+            'avatar_url' => 'nullable|string|max:255',
             ], [
                 'email.email' => 'Email không hợp lệ.',
                 'email.unique' => 'Email đã được sử dụng.',
                 'password.min' => 'Mật khẩu phải có ít nhất 8 ký tự.',
                 'phone_number.unique' => 'Số điện thoại đã được sử dụng.',
-            ]);
+        ]);
 
-            // Chỉ hash password nếu có
-            if (isset($validated['password'])) {
+        // Chỉ hash password nếu có
+        if (isset($validated['password'])) {
                 $validated['password'] = Hash::make($validated['password']);
-            }
+        }
 
-            $user->update($validated);
+        $user->update($validated);
 
             Log::info('User updated', [
                 'user_id' => $user->id,
                 'email' => $user->email,
             ]);
 
-            return response()->json([
+        return response()->json([
                 'success' => true,
                 'message' => 'Cập nhật người dùng thành công',
-                'data' => new UserResource($user),
+            'data' => new UserResource($user),
             ]);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json([
@@ -513,20 +519,20 @@ class UserController extends Controller
         try {
             // Authorization is handled by route middleware (role:admin)
             
-            $user = User::findOrFail($id);
+        $user = User::findOrFail($id);
             $userId = $user->id;
             $userEmail = $user->email;
 
-            $user->delete();
+        $user->delete();
 
             Log::info('User deleted', [
                 'user_id' => $userId,
                 'email' => $userEmail,
             ]);
 
-            return response()->json([
+        return response()->json([
                 'success' => true,
-                'message' => 'Xóa người dùng thành công',
+            'message' => 'Xóa người dùng thành công',
             ], 200);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json([
@@ -544,6 +550,283 @@ class UserController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Có lỗi xảy ra khi xóa người dùng: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Get locked users
+     */
+    public function locked(Request $request): JsonResponse
+    {
+        try {
+            $request->validate([
+                'search' => 'sometimes|string|max:255',
+                'sort_by' => 'sometimes|string|in:id,full_name,email,created_at,updated_at',
+                'sort_order' => 'sometimes|string|in:asc,desc',
+                'page' => 'sometimes|integer|min:1',
+                'per_page' => 'sometimes|integer|min:1|max:100',
+            ], [
+                'per_page.max' => 'Số lượng bản ghi mỗi trang không được vượt quá 100.',
+            ]);
+
+            $perPage = (int) ($request->get('per_page', self::DEFAULT_PER_PAGE));
+            $query = User::where('status', 'locked');
+
+            // Search
+            if ($request->has('search') && !empty($request->search)) {
+                $query->where(function ($q) use ($request) {
+                    $q->where('full_name', 'like', '%' . $request->search . '%')
+                        ->orWhere('email', 'like', '%' . $request->search . '%')
+                        ->orWhere('phone_number', 'like', '%' . $request->search . '%');
+                });
+            }
+
+            // Sorting
+            $sortBy = $request->get('sort_by', 'created_at');
+            $sortOrder = $request->get('sort_order', 'desc');
+            $query->orderBy($sortBy, $sortOrder);
+
+            $users = $query->paginate($perPage);
+
+            return response()->json([
+                'success' => true,
+                'data' => UserResource::collection($users),
+                'meta' => [
+                    'pagination' => [
+                        'current_page' => $users->currentPage(),
+                        'per_page' => $users->perPage(),
+                        'total' => $users->total(),
+                        'last_page' => $users->lastPage(),
+                    ],
+                ],
+            ]);
+        } catch (\Exception $e) {
+            Log::error('UserController@locked failed', [
+                'message' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi lấy danh sách tài khoản khóa.',
+            ], 500);
+        }
+    }
+
+    /**
+     * Bulk lock users
+     */
+    public function bulkLock(Request $request): JsonResponse
+    {
+        try {
+            $validatedData = $request->validate([
+                'user_ids' => 'required|array|min:1',
+                'user_ids.*' => 'required|integer|exists:users,id',
+            ], [
+                'user_ids.required' => 'Vui lòng chọn ít nhất một người dùng.',
+                'user_ids.*.exists' => 'Một trong các người dùng không tồn tại.',
+            ]);
+
+            $count = User::whereIn('id', $validatedData['user_ids'])
+                ->update(['status' => 'locked']);
+
+            Log::info('Users bulk locked', [
+                'user_ids' => $validatedData['user_ids'],
+                'count' => $count,
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => "Đã khóa {$count} tài khoản thành công",
+                'data' => ['locked_count' => $count],
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Dữ liệu không hợp lệ',
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Exception $e) {
+            Log::error('UserController@bulkLock failed', [
+                'message' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi khóa tài khoản.',
+            ], 500);
+        }
+    }
+
+    /**
+     * Bulk unlock users
+     */
+    public function bulkUnlock(Request $request): JsonResponse
+    {
+        try {
+            $validatedData = $request->validate([
+                'user_ids' => 'required|array|min:1',
+                'user_ids.*' => 'required|integer|exists:users,id',
+            ], [
+                'user_ids.required' => 'Vui lòng chọn ít nhất một người dùng.',
+                'user_ids.*.exists' => 'Một trong các người dùng không tồn tại.',
+            ]);
+
+            $count = User::whereIn('id', $validatedData['user_ids'])
+                ->update(['status' => 'active']);
+
+            Log::info('Users bulk unlocked', [
+                'user_ids' => $validatedData['user_ids'],
+                'count' => $count,
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => "Đã bỏ khóa {$count} tài khoản thành công",
+                'data' => ['unlocked_count' => $count],
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Dữ liệu không hợp lệ',
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Exception $e) {
+            Log::error('UserController@bulkUnlock failed', [
+                'message' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi bỏ khóa tài khoản.',
+            ], 500);
+        }
+    }
+
+    /**
+     * Update user status
+     */
+    public function updateStatus(Request $request, User $user): JsonResponse
+    {
+        try {
+            $validatedData = $request->validate([
+                'status' => 'required|string|in:active,locked',
+            ], [
+                'status.required' => 'Vui lòng chọn trạng thái.',
+                'status.in' => 'Trạng thái không hợp lệ. Chỉ chấp nhận: active, locked.',
+            ]);
+
+            $user->update(['status' => $validatedData['status']]);
+
+            Log::info('User status updated', [
+                'user_id' => $user->id,
+                'status' => $user->status,
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Cập nhật trạng thái thành công',
+                'data' => new UserResource($user),
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Dữ liệu không hợp lệ',
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Exception $e) {
+            Log::error('UserController@updateStatus failed', [
+                'user_id' => $user->id,
+                'message' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi cập nhật trạng thái.',
+            ], 500);
+        }
+    }
+
+    /**
+     * Verify user identity
+     */
+    public function verifyIdentity(Request $request, User $user): JsonResponse
+    {
+        try {
+            $admin = $request->user();
+
+            $user->update([
+                'identity_verified' => true,
+                'verified_at' => now(),
+                'verified_by' => $admin->id,
+            ]);
+
+            Log::info('User identity verified', [
+                'user_id' => $user->id,
+                'verified_by' => $admin->id,
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Xác minh danh tính thành công',
+                'data' => new UserResource($user->load('verifier:id,full_name')),
+            ]);
+        } catch (\Exception $e) {
+            Log::error('UserController@verifyIdentity failed', [
+                'user_id' => $user->id,
+                'message' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi xác minh danh tính.',
+            ], 500);
+        }
+    }
+
+    /**
+     * Reject user identity verification
+     */
+    public function rejectIdentity(Request $request, User $user): JsonResponse
+    {
+        try {
+            $validatedData = $request->validate([
+                'notes' => 'sometimes|string|max:1000',
+            ]);
+
+            $admin = $request->user();
+
+            $user->update([
+                'identity_verified' => false,
+                'verified_at' => now(),
+                'verified_by' => $admin->id,
+            ]);
+
+            Log::info('User identity verification rejected', [
+                'user_id' => $user->id,
+                'verified_by' => $admin->id,
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Từ chối xác minh danh tính thành công',
+                'data' => new UserResource($user->load('verifier:id,full_name')),
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Dữ liệu không hợp lệ',
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Exception $e) {
+            Log::error('UserController@rejectIdentity failed', [
+                'user_id' => $user->id,
+                'message' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi từ chối xác minh danh tính.',
             ], 500);
         }
     }

@@ -31,6 +31,19 @@ use App\Http\Controllers\Api\Admin\SupplyController;
 use App\Http\Controllers\Api\Admin\SupplyLogController;
 use App\Http\Controllers\Api\Admin\InvoiceController;
 use App\Http\Controllers\Api\Admin\InvoiceItemController;
+use App\Http\Controllers\Api\Admin\PaymentController;
+use App\Http\Controllers\Api\Admin\VoucherController;
+use App\Http\Controllers\Api\Admin\ServiceController;
+use App\Http\Controllers\Api\Admin\SubscriptionController;
+use App\Http\Controllers\Api\Admin\PriceRuleController;
+use App\Http\Controllers\Api\Admin\ConversationController;
+use App\Http\Controllers\Api\Admin\MessageController;
+use App\Http\Controllers\Api\Admin\PayoutController;
+use App\Http\Controllers\Api\Admin\EmailTemplateController;
+use App\Http\Controllers\Api\Admin\EmailLogController;
+use App\Http\Controllers\Api\Admin\EmailConfigController;
+use App\Http\Controllers\Api\Admin\AnalyticsController;
+use App\Http\Controllers\Auth\AdminPasswordResetController;
 
 // ==================================================================
 // 1. GOOGLE LOGIN (PUBLIC)
@@ -49,6 +62,10 @@ Route::prefix('admin')->group(function () {
     Route::post('login', [AdminAuthController::class, 'login'])
         ->middleware('throttle:10,1');
     Route::middleware('auth:sanctum')->post('logout', LogoutController::class);
+    
+    // Password reset with OTP
+    Route::post('forgot-password', [AdminPasswordResetController::class, 'sendOtp']);
+    Route::post('reset-password', [AdminPasswordResetController::class, 'resetPassword']);
 });
 
 // ==================================================================
@@ -84,28 +101,64 @@ Route::prefix('user')->group(function () {
 Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(function () {
 
     // Properties
+    Route::post('properties/{property}/verify', [PropertyController::class, 'verify']);
+    Route::post('properties/{property}/reject', [PropertyController::class, 'reject']);
     Route::apiResource('properties', PropertyController::class);
 
     // Users
     Route::get('users/lookup', [UserController::class, 'lookup']);
+    Route::get('users/locked', [UserController::class, 'locked']);
+    Route::post('users/bulk-lock', [UserController::class, 'bulkLock']);
+    Route::post('users/bulk-unlock', [UserController::class, 'bulkUnlock']);
+    Route::patch('users/{user}/status', [UserController::class, 'updateStatus']);
+    Route::post('users/{user}/verify-identity', [UserController::class, 'verifyIdentity']);
+    Route::post('users/{user}/reject-identity', [UserController::class, 'rejectIdentity']);
     Route::apiResource('users', UserController::class);
 
     // Amenities
     Route::apiResource('amenities', AmenityController::class);
 
     // Room Types
+    Route::patch('room-types/{roomType}/status', [RoomTypeController::class, 'updateStatus']);
+    Route::get('room-types/{roomType}/amenities', [RoomTypeController::class, 'showWithAmenities']);
     Route::apiResource('room-types', RoomTypeController::class);
 
     // Rooms
+    Route::patch('rooms/{room}/status', [RoomController::class, 'updateStatus']);
+    Route::post('rooms/{room}/verify', [RoomController::class, 'verify']);
+    Route::post('rooms/{room}/reject', [RoomController::class, 'reject']);
     Route::apiResource('rooms', RoomController::class);
     Route::post('rooms/{room}/upload-images', [RoomImageController::class, 'store']);
     Route::delete('room-images/{roomImage}', [RoomImageController::class, 'destroy']);
 
     // Booking Orders
-    Route::apiResource('booking-orders', BookingOrderController::class);
+    Route::get('booking-orders/statistics', [BookingOrderController::class, 'statistics']);
     Route::patch('booking-orders/{id}/status', [BookingOrderController::class, 'updateStatus']);
+    Route::apiResource('booking-orders', BookingOrderController::class);
+    
+    // Email Templates
+    Route::apiResource('email-templates', EmailTemplateController::class);
+    
+    // Email Logs
+    Route::get('email-logs/statistics', [EmailLogController::class, 'statistics']);
+    Route::apiResource('email-logs', EmailLogController::class)->only(['index', 'show']);
+    
+    // Email Config
+    Route::get('email-configs', [EmailConfigController::class, 'index']);
+    Route::put('email-configs', [EmailConfigController::class, 'update']);
+    Route::get('email-configs/smtp', [EmailConfigController::class, 'getSmtpConfig']);
+    Route::put('email-configs/smtp', [EmailConfigController::class, 'updateSmtpConfig']);
+    
+    // Analytics
+    Route::get('analytics/dashboard', [AnalyticsController::class, 'dashboard']);
+    Route::get('analytics/revenue', [AnalyticsController::class, 'revenue']);
+    Route::get('analytics/customers', [AnalyticsController::class, 'customers']);
+    Route::get('analytics/bookings', [AnalyticsController::class, 'bookings']);
+    Route::get('analytics/properties', [AnalyticsController::class, 'properties']);
 
     // Promotions
+    Route::post('promotions/bulk-delete', [PromotionController::class, 'bulkDelete']);
+    Route::post('promotions/bulk-update-status', [PromotionController::class, 'bulkUpdateStatus']);
     Route::apiResource('promotions', PromotionController::class);
     Route::get('promotions/statistics/overview', [PromotionController::class, 'statistics']);
     Route::post('promotions/validate', [PromotionController::class, 'validate']);
@@ -176,6 +229,28 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
         Route::post('/bulk/create', [InvoiceItemController::class, 'bulkCreate']);
         Route::delete('/bulk/delete', [InvoiceItemController::class, 'bulkDelete']);
     });
+
+    // Payments
+    Route::apiResource('payments', PaymentController::class);
+
+    // Vouchers
+    Route::apiResource('vouchers', VoucherController::class);
+    Route::post('vouchers/validate', [VoucherController::class, 'validateVoucher']);
+
+    // Services
+    Route::apiResource('services', ServiceController::class);
+
+    // Subscriptions
+    Route::apiResource('subscriptions', SubscriptionController::class);
+
+    // Price Rules
+    Route::apiResource('price-rules', PriceRuleController::class);
+
+    // Conversations
+    Route::apiResource('conversations', ConversationController::class);
+
+    // Payouts
+    Route::apiResource('payouts', PayoutController::class);
 });
 
 // ==================================================================
@@ -330,7 +405,123 @@ Route::prefix('invoice-items')->middleware('auth:sanctum')->group(function () {
 });
 
 // ==================================================================
-// 14. TEST: LẤY USER HIỆN TẠI (XÓA TRƯỚC DEPLOY)
+// 14. VOUCHERS (PUBLIC + PROTECTED)
+// ==================================================================
+Route::prefix('vouchers')->group(function () {
+    Route::get('/', [VoucherController::class, 'index']);
+    Route::get('/{id}', [VoucherController::class, 'show'])->where('id', '[0-9]+');
+    Route::post('/validate', [VoucherController::class, 'validateVoucher']);
+
+    Route::middleware(['auth:sanctum', 'role:staff,admin'])->group(function () {
+        Route::post('/', [VoucherController::class, 'store']);
+        Route::put('/{id}', [VoucherController::class, 'update']);
+        Route::delete('/{id}', [VoucherController::class, 'destroy']);
+    });
+});
+
+// ==================================================================
+// 15. SERVICES (PUBLIC + PROTECTED)
+// ==================================================================
+Route::prefix('services')->group(function () {
+    Route::get('/', [ServiceController::class, 'index']);
+    Route::get('/{id}', [ServiceController::class, 'show'])->where('id', '[0-9]+');
+
+    Route::middleware(['auth:sanctum', 'role:staff,admin'])->group(function () {
+        Route::post('/', [ServiceController::class, 'store']);
+        Route::put('/{id}', [ServiceController::class, 'update']);
+        Route::delete('/{id}', [ServiceController::class, 'destroy']);
+    });
+});
+
+// ==================================================================
+// 16. SUBSCRIPTIONS (PROTECTED)
+// ==================================================================
+Route::prefix('subscriptions')->middleware('auth:sanctum')->group(function () {
+    Route::get('/', [SubscriptionController::class, 'index']);
+    Route::get('/{id}', [SubscriptionController::class, 'show'])->where('id', '[0-9]+');
+
+    Route::middleware('role:staff,admin')->group(function () {
+        Route::post('/', [SubscriptionController::class, 'store']);
+        Route::put('/{id}', [SubscriptionController::class, 'update']);
+        Route::delete('/{id}', [SubscriptionController::class, 'destroy']);
+    });
+});
+
+// ==================================================================
+// 17. PRICE RULES (PROTECTED)
+// ==================================================================
+Route::prefix('price-rules')->middleware('auth:sanctum')->group(function () {
+    Route::get('/', [PriceRuleController::class, 'index']);
+    Route::get('/{id}', [PriceRuleController::class, 'show'])->where('id', '[0-9]+');
+
+    Route::middleware('role:staff,admin')->group(function () {
+        Route::post('/', [PriceRuleController::class, 'store']);
+        Route::put('/{id}', [PriceRuleController::class, 'update']);
+        Route::delete('/{id}', [PriceRuleController::class, 'destroy']);
+    });
+});
+
+// ==================================================================
+// 18. CONVERSATIONS (PROTECTED)
+// ==================================================================
+Route::prefix('conversations')->middleware('auth:sanctum')->group(function () {
+    Route::get('/', [ConversationController::class, 'index']);
+    Route::post('/', [ConversationController::class, 'store']);
+    Route::get('/{id}', [ConversationController::class, 'show'])->where('id', '[0-9]+');
+    Route::delete('/{id}', [ConversationController::class, 'destroy'])->where('id', '[0-9]+');
+});
+
+// ==================================================================
+// 19. MESSAGES (PROTECTED)
+// ==================================================================
+Route::prefix('conversations/{conversation}/messages')->middleware('auth:sanctum')->group(function () {
+    Route::get('/', [MessageController::class, 'index']);
+    Route::post('/', [MessageController::class, 'store']);
+});
+
+Route::prefix('messages')->middleware('auth:sanctum')->group(function () {
+    Route::get('/{id}', [MessageController::class, 'show'])->where('id', '[0-9]+');
+    Route::put('/{id}', [MessageController::class, 'update'])->where('id', '[0-9]+');
+    Route::delete('/{id}', [MessageController::class, 'destroy'])->where('id', '[0-9]+');
+    Route::post('/{id}/mark-read', [MessageController::class, 'markAsRead'])->where('id', '[0-9]+');
+    
+    // Admin only
+    Route::middleware('role:admin')->group(function () {
+        Route::post('/{id}/hide', [MessageController::class, 'hide'])->where('id', '[0-9]+');
+        Route::post('/{id}/unhide', [MessageController::class, 'unhide'])->where('id', '[0-9]+');
+    });
+});
+
+// ==================================================================
+// 20. PAYMENTS (PROTECTED)
+// ==================================================================
+Route::prefix('payments')->middleware('auth:sanctum')->group(function () {
+    Route::get('/', [PaymentController::class, 'index']);
+    Route::get('/{id}', [PaymentController::class, 'show'])->where('id', '[0-9]+');
+
+    Route::middleware('role:staff,admin')->group(function () {
+        Route::post('/', [PaymentController::class, 'store']);
+        Route::put('/{id}', [PaymentController::class, 'update']);
+        Route::delete('/{id}', [PaymentController::class, 'destroy']);
+    });
+});
+
+// ==================================================================
+// 21. PAYOUTS (PROTECTED)
+// ==================================================================
+Route::prefix('payouts')->middleware('auth:sanctum')->group(function () {
+    Route::get('/', [PayoutController::class, 'index']);
+    Route::get('/{id}', [PayoutController::class, 'show'])->where('id', '[0-9]+');
+
+    Route::middleware('role:staff,admin')->group(function () {
+        Route::post('/', [PayoutController::class, 'store']);
+        Route::put('/{id}', [PayoutController::class, 'update']);
+        Route::delete('/{id}', [PayoutController::class, 'destroy']);
+    });
+});
+
+// ==================================================================
+// 22. TEST: LẤY USER HIỆN TẠI (XÓA TRƯỚC DEPLOY)
 // ==================================================================
 Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
     return $request->user();

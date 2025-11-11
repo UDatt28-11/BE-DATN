@@ -49,19 +49,19 @@ class RoomImageController extends Controller
         try {
             // Authorization is handled by route middleware (role:admin)
 
-            $uploadedImages = [];
+        $uploadedImages = [];
             
             // Kiểm tra xem phòng này đã có ảnh primary chưa
             $hasPrimaryImage = $room->images()->where('is_primary', true)->exists();
             $isFirstImage = !$hasPrimaryImage;
 
-            foreach ($request->file('images') as $file) {
-                try {
-                    $uploadResult = $this->storeLocalFile($file);
+        foreach ($request->file('images') as $file) {
+            try {
+                $uploadResult = $this->storeLocalFile($file);
 
-                    // Tạo record trong bảng 'room_images'
-                    $imageRecord = $room->images()->create([
-                        'image_url' => $uploadResult['url'],
+                // Tạo record trong bảng 'room_images'
+                $imageRecord = $room->images()->create([
+                    'image_url' => $uploadResult['url'],
                         'is_primary' => $isFirstImage,
                     ]);
 
@@ -73,8 +73,8 @@ class RoomImageController extends Controller
                         $isFirstImage = false; // Chỉ set ảnh đầu tiên trong batch làm primary
                     }
 
-                    $uploadedImages[] = $imageRecord;
-                } catch (Exception $e) {
+                $uploadedImages[] = $imageRecord;
+            } catch (Exception $e) {
                     Log::error('RoomImageController@store - File upload failed', [
                         'room_id' => $room->id,
                         'file_name' => $file->getClientOriginalName(),
@@ -93,8 +93,8 @@ class RoomImageController extends Controller
                         'success' => false,
                         'message' => 'Có lỗi xảy ra khi upload ảnh: ' . $e->getMessage(),
                     ], 500);
-                }
             }
+        }
 
             return response()->json([
                 'success' => true,
@@ -149,10 +149,10 @@ class RoomImageController extends Controller
             }
 
             // 2. Xóa file trên server
-            $this->deleteLocalFile($roomImage->image_url);
+        $this->deleteLocalFile($roomImage->image_url);
 
             // 3. Xóa record trong CSDL
-            $roomImage->delete();
+        $roomImage->delete();
 
             return response()->json([
                 'success' => true,

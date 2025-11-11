@@ -12,6 +12,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Facades\Log;
+use Exception;
 
 /**
  * @OA\Tag(
@@ -82,10 +83,14 @@ class PromotionController extends Controller
                 'property_id' => 'sometimes|integer|exists:properties,id',
                 'is_active' => 'sometimes|boolean',
                 'search' => 'sometimes|string|max:255',
+                'sort_by' => 'sometimes|string|in:id,code,name,is_active,created_at,updated_at',
+                'sort_order' => 'sometimes|string|in:asc,desc',
                 'page' => 'sometimes|integer|min:1',
                 'per_page' => 'sometimes|integer|min:1|max:100',
             ], [
                 'property_id.exists' => 'Property không tồn tại.',
+                'sort_by.in' => 'Trường sắp xếp không hợp lệ.',
+                'sort_order.in' => 'Thứ tự sắp xếp không hợp lệ. Chỉ chấp nhận: asc, desc.',
                 'per_page.max' => 'Số lượng bản ghi mỗi trang không được vượt quá 100.',
             ]);
 
@@ -115,16 +120,18 @@ class PromotionController extends Controller
                 });
             }
 
-            // Sort by latest
-            $query->latest();
+            // Sorting
+            $sortBy = $request->get('sort_by', 'created_at');
+            $sortOrder = $request->get('sort_order', 'desc');
+            $query->orderBy($sortBy, $sortOrder);
 
             // Paginate results
             $promotions = $query->paginate($perPage);
 
             // Transform data to include relationships conditionally
-            $promotions->getCollection()->transform(function ($promotion) {
-                $data = $promotion->toArray();
-                if ($promotion->applicable_to !== 'all') {
+        $promotions->getCollection()->transform(function ($promotion) {
+            $data = $promotion->toArray();
+            if ($promotion->applicable_to !== 'all') {
                     $data['rooms'] = $promotion->relationLoaded('rooms') ? $promotion->rooms->map(fn($room) => [
                         'id' => $room->id,
                         'name' => $room->name,
@@ -133,12 +140,12 @@ class PromotionController extends Controller
                         'id' => $roomType->id,
                         'name' => $roomType->name,
                     ]) : [];
-                } else {
-                    $data['rooms'] = [];
-                    $data['room_types'] = [];
-                }
-                return $data;
-            });
+            } else {
+                $data['rooms'] = [];
+                $data['room_types'] = [];
+            }
+            return $data;
+        });
 
             return response()->json([
                 'success' => true,
@@ -239,22 +246,22 @@ class PromotionController extends Controller
         try {
             // Authorization is handled by route middleware (role:admin)
 
-            // Custom validation - handle room_ids and room_type_ids based on applicable_to
-            $rules = [
-                'property_id' => 'required|exists:properties,id',
-                'code' => 'required|string|unique:promotions,code|max:50',
-                'description' => 'nullable|string|max:500',
-                'discount_type' => 'required|in:percentage,fixed_amount',
-                'discount_value' => 'required|numeric|min:0',
-                'max_discount_amount' => 'nullable|numeric|min:0',
-                'min_purchase_amount' => 'nullable|numeric|min:0',
-                'max_usage_limit' => 'nullable|integer|min:1',
-                'max_usage_per_user' => 'nullable|integer|min:1',
-                'start_date' => 'required|date|before_or_equal:end_date',
-                'end_date' => 'required|date|after_or_equal:start_date',
-                'is_active' => 'nullable|in:0,1',
-                'applicable_to' => 'required|in:all,specific_rooms,specific_room_types',
-            ];
+        // Custom validation - handle room_ids and room_type_ids based on applicable_to
+        $rules = [
+            'property_id' => 'required|exists:properties,id',
+            'code' => 'required|string|unique:promotions,code|max:50',
+            'description' => 'nullable|string|max:500',
+            'discount_type' => 'required|in:percentage,fixed_amount',
+            'discount_value' => 'required|numeric|min:0',
+            'max_discount_amount' => 'nullable|numeric|min:0',
+            'min_purchase_amount' => 'nullable|numeric|min:0',
+            'max_usage_limit' => 'nullable|integer|min:1',
+            'max_usage_per_user' => 'nullable|integer|min:1',
+            'start_date' => 'required|date|before_or_equal:end_date',
+            'end_date' => 'required|date|after_or_equal:start_date',
+            'is_active' => 'nullable|in:0,1',
+            'applicable_to' => 'required|in:all,specific_rooms,specific_room_types',
+        ];
 
             $messages = [
                 'property_id.required' => 'Vui lòng chọn property.',
@@ -285,14 +292,14 @@ class PromotionController extends Controller
                 'room_type_ids.*.exists' => 'Một hoặc nhiều loại phòng không tồn tại.',
             ];
 
-            // Only validate room_ids/room_type_ids if applicable_to is not 'all'
-            if ($request->get('applicable_to') === 'specific_rooms') {
-                $rules['room_ids'] = 'required|array|min:1';
-                $rules['room_ids.*'] = 'exists:rooms,id';
-            } elseif ($request->get('applicable_to') === 'specific_room_types') {
-                $rules['room_type_ids'] = 'required|array|min:1';
-                $rules['room_type_ids.*'] = 'exists:room_types,id';
-            }
+        // Only validate room_ids/room_type_ids if applicable_to is not 'all'
+        if ($request->get('applicable_to') === 'specific_rooms') {
+            $rules['room_ids'] = 'required|array|min:1';
+            $rules['room_ids.*'] = 'exists:rooms,id';
+        } elseif ($request->get('applicable_to') === 'specific_room_types') {
+            $rules['room_type_ids'] = 'required|array|min:1';
+            $rules['room_type_ids.*'] = 'exists:room_types,id';
+        }
 
             $validated = $request->validate($rules, $messages);
 
@@ -911,5 +918,97 @@ class PromotionController extends Controller
         });
 
         return response()->json(['success' => true, 'data' => $promotions]);
+    }
+
+    /**
+     * Bulk delete promotions
+     */
+    public function bulkDelete(Request $request): JsonResponse
+    {
+        try {
+            $validatedData = $request->validate([
+                'promotion_ids' => 'required|array|min:1',
+                'promotion_ids.*' => 'required|integer|exists:promotions,id',
+            ], [
+                'promotion_ids.required' => 'Vui lòng chọn ít nhất một mã giảm giá.',
+                'promotion_ids.*.exists' => 'Một trong các mã giảm giá không tồn tại.',
+            ]);
+
+            $count = Promotion::whereIn('id', $validatedData['promotion_ids'])->delete();
+
+            Log::info('Promotions bulk deleted', [
+                'promotion_ids' => $validatedData['promotion_ids'],
+                'count' => $count,
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => "Đã xóa {$count} mã giảm giá thành công",
+                'data' => ['deleted_count' => $count],
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Dữ liệu không hợp lệ',
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (Exception $e) {
+            Log::error('PromotionController@bulkDelete failed', [
+                'message' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi xóa mã giảm giá.',
+            ], 500);
+        }
+    }
+
+    /**
+     * Bulk update promotion status
+     */
+    public function bulkUpdateStatus(Request $request): JsonResponse
+    {
+        try {
+            $validatedData = $request->validate([
+                'promotion_ids' => 'required|array|min:1',
+                'promotion_ids.*' => 'required|integer|exists:promotions,id',
+                'is_active' => 'required|boolean',
+            ], [
+                'promotion_ids.required' => 'Vui lòng chọn ít nhất một mã giảm giá.',
+                'promotion_ids.*.exists' => 'Một trong các mã giảm giá không tồn tại.',
+                'is_active.required' => 'Vui lòng chọn trạng thái.',
+            ]);
+
+            $count = Promotion::whereIn('id', $validatedData['promotion_ids'])
+                ->update(['is_active' => $validatedData['is_active']]);
+
+            Log::info('Promotions bulk status updated', [
+                'promotion_ids' => $validatedData['promotion_ids'],
+                'is_active' => $validatedData['is_active'],
+                'count' => $count,
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => "Đã cập nhật trạng thái {$count} mã giảm giá thành công",
+                'data' => ['updated_count' => $count],
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Dữ liệu không hợp lệ',
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (Exception $e) {
+            Log::error('PromotionController@bulkUpdateStatus failed', [
+                'message' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi cập nhật trạng thái mã giảm giá.',
+            ], 500);
+        }
     }
 }

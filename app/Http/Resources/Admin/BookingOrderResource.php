@@ -46,9 +46,9 @@ class BookingOrderResource extends JsonResource
                         ] : null,
                         'check_in_date' => $detail->check_in_date?->format('Y-m-d'),
                         'check_out_date' => $detail->check_out_date?->format('Y-m-d'),
-                        'num_adults' => $detail->num_adults,
-                        'num_children' => $detail->num_children,
-                        'sub_total' => $detail->sub_total,
+                'num_adults' => $detail->num_adults,
+                'num_children' => $detail->num_children,
+                'sub_total' => $detail->sub_total,
                         'status' => $detail->status,
                     ];
                 });
