@@ -22,8 +22,8 @@ class UserSeeder extends Seeder
             ['description' => 'Chủ sở hữu homestay']
         );
 
-        $guestRole = Role::firstOrCreate(
-            ['name' => 'guest'],
+        $userRole = Role::firstOrCreate(
+            ['name' => 'user'],
             ['description' => 'Khách hàng']
         );
 
@@ -53,18 +53,18 @@ class UserSeeder extends Seeder
         );
         $owner->roles()->syncWithoutDetaching($ownerRole->id);
 
-        // 4. Tạo Guest
-        $guest = User::firstOrCreate(
-            ['email' => 'guest@staybook.com'],
+        // 4. Tạo User
+        $user = User::firstOrCreate(
+            ['email' => 'user@staybook.com'],
             [
-                'full_name'    => 'Guest User',
-                'role'         => 'guest',
+                'full_name'    => 'User',
+                'role'         => 'user',
                 'password'     => Hash::make('password'),
                 'status'       => 'active',
                 'phone_number' => '0111222333',
             ]
         );
-        $guest->roles()->syncWithoutDetaching($guestRole->id);
+        $user->roles()->syncWithoutDetaching($userRole->id);
 
         // 5. Tạo thêm 5 Owner
         User::factory(5)->create()->each(function ($user) use ($ownerRole) {
@@ -73,9 +73,9 @@ class UserSeeder extends Seeder
             $user->save();
         });
 
-        // 6. Tạo thêm 10 Guest
-        User::factory(10)->create()->each(function ($user) use ($guestRole) {
-            $user->roles()->syncWithoutDetaching($guestRole->id);
+        // 6. Tạo thêm 10 User
+        User::factory(10)->create()->each(function ($user) use ($userRole) {
+            $user->roles()->syncWithoutDetaching($userRole->id);
             $user->phone_number = '0' . rand(100000000, 999999999);
             $user->save();
         });

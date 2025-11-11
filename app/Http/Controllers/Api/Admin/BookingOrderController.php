@@ -1,226 +1,435 @@
 <?php
+// app/Http/Controllers/Api/Admin/BookingOrderController.php
 
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Resources\Admin\BookingOrderResource;
+use App\Http\Requests\Admin\StoreBookingOrderRequest;
+use App\Http\Requests\Admin\UpdateBookingOrderRequest;
 use App\Models\BookingOrder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
+/**
+ * @OA\Tag(
+ *     name="Booking Orders",
+ *     description="API Endpoints for Booking Order Management"
+ * )
+ */
 class BookingOrderController extends Controller
 {
     /**
-     * Lấy danh sách booking orders
+     * Số lượng bản ghi mỗi trang mặc định
+     */
+    private const DEFAULT_PER_PAGE = 15;
+
+    /**
+     * Display a listing of booking orders
+     *
+     * @OA\Get(
+     *     path="/api/admin/booking-orders",
+     *     operationId="getBookingOrders",
+     *     tags={"Booking Orders"},
+     *     summary="Danh sách đơn đặt phòng",
+     *     description="Lấy danh sách tất cả đơn đặt phòng với hỗ trợ phân trang",
+     *     security={{"bearerAuth":{}}},
+     *     @OA\Parameter(
+     *         name="page",
+     *         in="query",
+     *         description="Trang (mặc định 1)",
+     *         required=false,
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\Parameter(
+     *         name="per_page",
+     *         in="query",
+     *         description="Số lượng bản ghi mỗi trang (mặc định 15)",
+     *         required=false,
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Danh sách đơn đặt phòng",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="success", type="boolean", example=true),
+     *             @OA\Property(property="data", type="array", @OA\Items(type="object")),
+     *             @OA\Property(property="meta", type="object")
+     *         )
+     *     ),
+     *     @OA\Response(response=401, description="Unauthorized"),
+     *     @OA\Response(response=403, description="Forbidden")
+     * )
      */
     public function index(Request $request): JsonResponse
     {
-        $query = BookingOrder::with(['guest', 'details.room', 'details.room.roomType']);
+        try {
+            // Authorization is handled by route middleware (role:admin)
+            
+            $perPage = (int) ($request->get('per_page', self::DEFAULT_PER_PAGE));
+            
+            // Load đầy đủ relationships để tránh N+1 query
+            $orders = BookingOrder::with([
+                'guest:id,full_name,email',
+                'details.room:id,name,room_type_id,property_id',
+                'details.room.roomType:id,name',
+                'details.room.property:id,name'
+            ])
+                ->latest()
+                ->paginate($perPage);
 
-        // Filters
-        if ($request->has('status')) {
-            $query->where('status', $request->status);
-        }
-
-        if ($request->has('guest_id')) {
-            $query->where('guest_id', $request->guest_id);
-        }
-
-        if ($request->has('search')) {
-            $search = $request->search;
-            $query->where(function ($q) use ($search) {
-                $q->where('order_code', 'like', "%{$search}%")
-                    ->orWhere('customer_name', 'like', "%{$search}%")
-                    ->orWhere('customer_phone', 'like', "%{$search}%");
-            });
-        }
-
-        // Date range
-        if ($request->has('date_from')) {
-            $query->whereDate('created_at', '>=', $request->date_from);
-        }
-        if ($request->has('date_to')) {
-            $query->whereDate('created_at', '<=', $request->date_to);
-        }
-
-        $perPage = $request->get('per_page', 15);
-        $orders = $query->orderBy('created_at', 'desc')->paginate($perPage);
-
-        return response()->json([
-            'data' => $orders->items(),
-            'meta' => [
-                'current_page' => $orders->currentPage(),
-                'per_page' => $orders->perPage(),
-                'total' => $orders->total(),
-                'last_page' => $orders->lastPage(),
-            ],
-        ]);
-    }
-
-    /**
-     * Lấy chi tiết booking order
-     */
-    public function show(int $id): JsonResponse
-    {
-        $order = BookingOrder::with([
-            'guest',
-            'details.room',
-            'details.room.roomType',
-            'details.room.property',
-            'details.guests',
-        ])->findOrFail($id);
-
-        return response()->json([
-            'data' => $order,
-        ]);
-    }
-
-    /**
-     * Tạo booking mới
-     */
-    public function store(Request $request): JsonResponse
-    {
-        $validated = $request->validate([
-            'guest_id' => 'nullable|exists:users,id',
-            'customer_name' => 'required|string|max:255',
-            'customer_phone' => 'required|string|max:20',
-            'customer_email' => 'nullable|email|max:255',
-            'total_amount' => 'required|numeric|min:0',
-            'payment_method' => 'nullable|string|max:50',
-            'notes' => 'nullable|string',
-            'details' => 'required|array|min:1',
-            'details.*.room_id' => 'required|exists:rooms,id',
-            'details.*.check_in_date' => 'required|date',
-            'details.*.check_out_date' => 'required|date|after:details.*.check_in_date',
-            'details.*.num_adults' => 'required|integer|min:1',
-            'details.*.num_children' => 'required|integer|min:0',
-            'details.*.sub_total' => 'required|numeric|min:0',
-        ]);
-
-        // Tạo mã đơn hàng tự động
-        $orderCode = 'BK' . date('YmdHis') . str_pad(rand(0, 9999), 4, '0', STR_PAD_LEFT);
-
-        // Tạo booking order
-        $order = BookingOrder::create([
-            'guest_id' => $validated['guest_id'] ?? null,
-            'order_code' => $orderCode,
-            'customer_name' => $validated['customer_name'],
-            'customer_phone' => $validated['customer_phone'],
-            'customer_email' => $validated['customer_email'] ?? null,
-            'total_amount' => $validated['total_amount'],
-            'payment_method' => $validated['payment_method'] ?? null,
-            'notes' => $validated['notes'] ?? null,
-            'status' => 'pending',
-        ]);
-
-        // Tạo booking details
-        foreach ($validated['details'] as $detail) {
-            $order->details()->create([
-                'room_id' => $detail['room_id'],
-                'check_in_date' => $detail['check_in_date'],
-                'check_out_date' => $detail['check_out_date'],
-                'num_adults' => $detail['num_adults'],
-                'num_children' => $detail['num_children'],
-                'sub_total' => $detail['sub_total'],
-                'status' => 'active',
+            return response()->json([
+                'success' => true,
+                'data' => BookingOrderResource::collection($orders),
+                'meta' => [
+                    'pagination' => [
+                        'current_page' => $orders->currentPage(),
+                        'per_page' => $orders->perPage(),
+                        'total' => $orders->total(),
+                        'last_page' => $orders->lastPage(),
+                    ],
+                ],
             ]);
-        }
+        } catch (\Exception $e) {
+            Log::error('BookingOrderController@index failed', [
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'trace' => $e->getTraceAsString(),
+            ]);
 
-        $order->load('details');
-
-        return response()->json([
-            'data' => $order,
-            'message' => 'Tạo đặt phòng thành công',
-        ], 201);
-    }
-
-    /**
-     * Cập nhật booking
-     */
-    public function update(int $id, Request $request): JsonResponse
-    {
-        $order = BookingOrder::findOrFail($id);
-
-        $validated = $request->validate([
-            'customer_name' => 'sometimes|string|max:255',
-            'customer_phone' => 'sometimes|string|max:20',
-            'customer_email' => 'nullable|email|max:255',
-            'total_amount' => 'sometimes|numeric|min:0',
-            'payment_method' => 'nullable|string|max:50',
-            'notes' => 'nullable|string',
-        ]);
-
-        $order->update($validated);
-
-        return response()->json([
-            'data' => $order,
-            'message' => 'Cập nhật đặt phòng thành công',
-        ]);
-    }
-
-    /**
-     * Cập nhật trạng thái booking
-     */
-    public function updateStatus(int $id, Request $request): JsonResponse
-    {
-        $order = BookingOrder::findOrFail($id);
-
-        $validated = $request->validate([
-            'status' => 'required|in:pending,confirmed,completed,cancelled',
-        ]);
-
-        $from = $order->status;
-        $to = $validated['status'];
-
-        // State machine validation
-        $valid = match ($from) {
-            'pending' => in_array($to, ['confirmed', 'cancelled'], true),
-            'confirmed' => in_array($to, ['completed', 'cancelled'], true),
-            'completed', 'cancelled' => false,
-            default => false,
-        };
-
-        if (!$valid) {
             return response()->json([
-                'error' => [
-                    'code' => 'INVALID_TRANSITION',
-                    'message' => 'Trạng thái không hợp lệ từ ' . $from . ' → ' . $to,
-                ],
-            ], 422);
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi lấy danh sách đơn đặt phòng: ' . $e->getMessage(),
+            ], 500);
         }
-
-        $order->update(['status' => $to]);
-
-        return response()->json([
-            'data' => [
-                'id' => $order->id,
-                'status' => $order->status,
-            ],
-            'message' => 'Cập nhật trạng thái thành công',
-        ]);
     }
 
     /**
-     * Xóa booking
+     * Store a newly created booking order
+     *
+     * @OA\Post(
+     *     path="/api/admin/booking-orders",
+     *     operationId="storeBookingOrder",
+     *     tags={"Booking Orders"},
+     *     summary="Tạo đơn đặt phòng mới",
+     *     description="Tạo đơn đặt phòng mới",
+     *     security={{"bearerAuth":{}}},
+     *     @OA\Response(
+     *         response=201,
+     *         description="Tạo đơn đặt phòng thành công",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="success", type="boolean", example=true),
+     *             @OA\Property(property="message", type="string"),
+     *             @OA\Property(property="data", type="object")
+     *         )
+     *     ),
+     *     @OA\Response(response=422, description="Validation error"),
+     *     @OA\Response(response=403, description="Forbidden")
+     * )
      */
-    public function destroy(int $id): JsonResponse
+    public function store(StoreBookingOrderRequest $request): JsonResponse
     {
-        $order = BookingOrder::findOrFail($id);
+        try {
+            // Authorization is handled by route middleware (role:admin)
+            
+            $order = BookingOrder::create($request->validated());
 
-        // Chỉ cho phép xóa nếu trạng thái là pending hoặc cancelled
-        if (!in_array($order->status, ['pending', 'cancelled'], true)) {
+            Log::info('BookingOrder created', [
+                'booking_order_id' => $order->id,
+            ]);
+
             return response()->json([
-                'error' => [
-                    'code' => 'CANNOT_DELETE',
-                    'message' => 'Chỉ có thể xóa đơn đang chờ hoặc đã hủy',
-                ],
+                'success' => true,
+                'message' => 'Tạo đơn đặt phòng thành công',
+                'data' => new BookingOrderResource($order),
+            ], 201);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Dữ liệu không hợp lệ',
+                'errors' => $e->errors(),
             ], 422);
+        } catch (\Exception $e) {
+            Log::error('BookingOrderController@store failed', [
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi tạo đơn đặt phòng: ' . $e->getMessage(),
+            ], 500);
         }
+    }
 
-        $order->delete();
+    /**
+     * Display the specified booking order
+     *
+     * @OA\Get(
+     *     path="/api/admin/booking-orders/{id}",
+     *     operationId="getBookingOrder",
+     *     tags={"Booking Orders"},
+     *     summary="Chi tiết đơn đặt phòng",
+     *     description="Lấy thông tin chi tiết của một đơn đặt phòng",
+     *     security={{"bearerAuth":{}}},
+     *     @OA\Parameter(
+     *         name="id",
+     *         in="path",
+     *         required=true,
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Chi tiết đơn đặt phòng",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="success", type="boolean", example=true),
+     *             @OA\Property(property="data", type="object")
+     *         )
+     *     ),
+     *     @OA\Response(response=404, description="Booking order not found"),
+     *     @OA\Response(response=403, description="Forbidden")
+     * )
+     */
+    public function show(BookingOrder $booking_order): JsonResponse
+    {
+        try {
+            // Authorization is handled by route middleware (role:admin)
+            
+            // Load đầy đủ relationships
+            $booking_order->load([
+                'guest:id,full_name,email',
+                'details.room:id,name,room_type_id,property_id',
+                'details.room.roomType:id,name',
+                'details.room.property:id,name',
+                'details.bookingServices.service:id,name',
+                'invoices',
+                'promotions:id,name'
+            ]);
+            
+            return response()->json([
+                'success' => true,
+                'data' => new BookingOrderResource($booking_order),
+            ]);
+        } catch (\Exception $e) {
+            Log::error('BookingOrderController@show failed', [
+                'booking_order_id' => $booking_order->id,
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'trace' => $e->getTraceAsString(),
+            ]);
 
-        return response()->json([
-            'message' => 'Xóa đặt phòng thành công',
-        ]);
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi lấy thông tin đơn đặt phòng: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Update the specified booking order
+     *
+     * @OA\Put(
+     *     path="/api/admin/booking-orders/{id}",
+     *     operationId="updateBookingOrder",
+     *     tags={"Booking Orders"},
+     *     summary="Cập nhật đơn đặt phòng",
+     *     description="Cập nhật thông tin đơn đặt phòng",
+     *     security={{"bearerAuth":{}}},
+     *     @OA\Parameter(
+     *         name="id",
+     *         in="path",
+     *         required=true,
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Cập nhật thành công",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="success", type="boolean", example=true),
+     *             @OA\Property(property="message", type="string"),
+     *             @OA\Property(property="data", type="object")
+     *         )
+     *     ),
+     *     @OA\Response(response=422, description="Validation error"),
+     *     @OA\Response(response=403, description="Forbidden"),
+     *     @OA\Response(response=404, description="Booking order not found")
+     * )
+     */
+    public function update(UpdateBookingOrderRequest $request, BookingOrder $booking_order): JsonResponse
+    {
+        try {
+            // Authorization is handled by route middleware (role:admin)
+            
+            $booking_order->update($request->validated());
+
+            Log::info('BookingOrder updated', [
+                'booking_order_id' => $booking_order->id,
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Cập nhật đơn đặt phòng thành công',
+                'data' => new BookingOrderResource($booking_order),
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Dữ liệu không hợp lệ',
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Exception $e) {
+            Log::error('BookingOrderController@update failed', [
+                'booking_order_id' => $booking_order->id,
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi cập nhật đơn đặt phòng: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Remove the specified booking order
+     *
+     * @OA\Delete(
+     *     path="/api/admin/booking-orders/{id}",
+     *     operationId="deleteBookingOrder",
+     *     tags={"Booking Orders"},
+     *     summary="Xóa đơn đặt phòng",
+     *     description="Xóa đơn đặt phòng",
+     *     security={{"bearerAuth":{}}},
+     *     @OA\Parameter(
+     *         name="id",
+     *         in="path",
+     *         required=true,
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Xóa thành công",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="success", type="boolean", example=true),
+     *             @OA\Property(property="message", type="string")
+     *         )
+     *     ),
+     *     @OA\Response(response=403, description="Forbidden"),
+     *     @OA\Response(response=404, description="Booking order not found")
+     * )
+     */
+    public function destroy(BookingOrder $booking_order): JsonResponse
+    {
+        try {
+            // Authorization is handled by route middleware (role:admin)
+            
+            $bookingOrderId = $booking_order->id;
+            
+            $booking_order->delete();
+
+            Log::info('BookingOrder deleted', [
+                'booking_order_id' => $bookingOrderId,
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Xóa đơn đặt phòng thành công',
+            ], 200);
+        } catch (\Exception $e) {
+            Log::error('BookingOrderController@destroy failed', [
+                'booking_order_id' => $booking_order->id,
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi xóa đơn đặt phòng: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Update booking order status
+     *
+     * @OA\Patch(
+     *     path="/api/admin/booking-orders/{id}/status",
+     *     operationId="updateBookingOrderStatus",
+     *     tags={"Booking Orders"},
+     *     summary="Cập nhật trạng thái đơn đặt phòng",
+     *     description="Cập nhật trạng thái đơn đặt phòng",
+     *     security={{"bearerAuth":{}}},
+     *     @OA\Parameter(
+     *         name="id",
+     *         in="path",
+     *         required=true,
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\RequestBody(
+     *         required=true,
+     *         @OA\JsonContent(
+     *             required={"status"},
+     *             @OA\Property(property="status", type="string")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Cập nhật trạng thái thành công",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="success", type="boolean", example=true),
+     *             @OA\Property(property="message", type="string"),
+     *             @OA\Property(property="data", type="object")
+     *         )
+     *     ),
+     *     @OA\Response(response=422, description="Validation error"),
+     *     @OA\Response(response=403, description="Forbidden")
+     * )
+     */
+    public function updateStatus(Request $request, $id): JsonResponse
+    {
+        try {
+            // Authorization is handled by route middleware (role:admin)
+            
+            $request->validate([
+                'status' => 'required|string',
+            ]);
+
+            $bookingOrder = BookingOrder::findOrFail($id);
+            $bookingOrder->update(['status' => $request->status]);
+
+            Log::info('BookingOrder status updated', [
+                'booking_order_id' => $bookingOrder->id,
+                'status' => $request->status,
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Cập nhật trạng thái thành công',
+                'data' => new BookingOrderResource($bookingOrder),
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Dữ liệu không hợp lệ',
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Exception $e) {
+            Log::error('BookingOrderController@updateStatus failed', [
+                'booking_order_id' => $id,
+                'message' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi cập nhật trạng thái: ' . $e->getMessage(),
+            ], 500);
+        }
     }
 }
-

@@ -16,7 +16,7 @@ class RoleSeeder extends Seeder
             'admin' => 'Quản trị viên cấp cao nhất',
             'owner'       => 'Chủ sở hữu homestay',
             'staff'       => 'Nhân viên homestay',
-            'guest'       => 'Khách hàng',
+            'user'       => 'Khách hàng',
         ];
 
         foreach ($roles as $name => $desc) {

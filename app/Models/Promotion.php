@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 
-class Voucher extends Model
+class Promotion extends Model
 {
     protected $fillable = [
         'property_id',
@@ -47,17 +47,17 @@ class Voucher extends Model
 
     public function rooms(): BelongsToMany
     {
-        return $this->belongsToMany(Room::class, 'Voucher_room', 'Voucher_id', 'room_id');
+        return $this->belongsToMany(Room::class, 'promotion_room', 'promotion_id', 'room_id');
     }
 
     public function roomTypes(): BelongsToMany
     {
-        return $this->belongsToMany(RoomType::class, 'Voucher_room_type', 'Voucher_id', 'room_type_id');
+        return $this->belongsToMany(RoomType::class, 'promotion_room_type', 'promotion_id', 'room_type_id');
     }
 
     public function bookingOrders(): BelongsToMany
     {
-        return $this->belongsToMany(BookingOrder::class, 'Voucher_usage', 'Voucher_id', 'booking_order_id')
+        return $this->belongsToMany(BookingOrder::class, 'promotion_usage', 'promotion_id', 'booking_order_id')
             ->withTimestamps()
             ->withPivot('applied_discount_amount');
     }
@@ -77,7 +77,7 @@ class Voucher extends Model
 
     // Methods
     /**
-     * Check if Voucher is valid for use
+     * Check if promotion is valid for use
      */
     public function isValid(): bool
     {
@@ -114,9 +114,9 @@ class Voucher extends Model
     }
 
     /**
-     * Apply Voucher to booking
+     * Apply promotion to booking
      */
-    public function applyVoucher($bookingOrderId, $appliedAmount = null)
+    public function applyPromotion($bookingOrderId, $appliedAmount = null)
     {
         // Check usage limit per user
         if ($this->max_usage_per_user) {
@@ -142,7 +142,7 @@ class Voucher extends Model
     }
 
     /**
-     * Check if Voucher is applicable to specific room
+     * Check if promotion is applicable to specific room
      */
     public function isApplicableToRoom($roomId): bool
     {

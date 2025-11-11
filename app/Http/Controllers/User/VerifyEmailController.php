@@ -1,4 +1,5 @@
 <?php
+// app/Http/Controllers/User/VerifyEmailController.php
 
 namespace App\Http\Controllers\User;
 
@@ -9,22 +10,48 @@ use App\Models\User;
 
 class VerifyEmailController extends Controller
 {
+    /**
+     * Xác thực email qua API
+     *
+     * @param Request $request
+     * @param int $id
+     * @param string $hash
+     * @return \Illuminate\Http\JsonResponse
+     */
     public function verify(Request $request, $id, $hash)
     {
-        $user = User::findOrFail($id);
+        // 1. Tìm user
+        $user = User::find($id);
 
-        if (!hash_equals(sha1($user->getEmailForVerification()), $hash)) {
-            return response()->json(['message' => 'Liên kết xác thực không hợp lệ hoặc đã hết hạn.'], 400);
+        if (!$user) {
+            return response()->json([
+                'message' => 'Người dùng không tồn tại.'
+            ], 404);
         }
 
+        // 2. Kiểm tra hash (chuẩn Laravel)
+        if (!hash_equals((string) $hash, sha1($user->getEmailForVerification()))) {
+            return response()->json([
+                'message' => 'Liên kết xác thực không hợp lệ hoặc đã hết hạn.'
+            ], 400);
+        }
+
+        // 3. Đã xác thực rồi?
         if ($user->hasVerifiedEmail()) {
-            return redirect(config('app.frontend_url') . '/verified?status=already');
+            return response()->json([
+                'message' => 'Email đã được xác thực trước đó.',
+                'redirect' => config('app.frontend_url') . '/verified?status=already'
+            ], 200);
         }
 
+        // 4. Xác thực thành công
         if ($user->markEmailAsVerified()) {
             event(new Verified($user));
         }
 
-        return redirect(config('app.frontend_url') . '/verified?status=success');
+        return response()->json([
+            'message' => 'Xác thực email thành công!',
+            'redirect' => config('app.frontend_url') . '/verified?status=success'
+        ], 200);
     }
 }
