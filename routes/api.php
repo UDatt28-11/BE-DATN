@@ -15,6 +15,7 @@ use App\Http\Controllers\SupplyController;
 use App\Http\Controllers\SupplyLogController;
 use App\Http\Controllers\PromotionController;
 use App\Http\Controllers\ReviewController;
+use App\Http\Controllers\UserManagementController;
 
 Route::prefix('admin')->group(function () {
     Route::post('login', [AdminAuthController::class, 'login']);
@@ -69,6 +70,24 @@ Route::get('/user', function (Request $request) {
 // Health check
 Route::get('/ping', function () {
     return response()->json(['ok' => true, 'time' => now()->toISOString()]);
+});
+
+/*
+|--------------------------------------------------------------------------
+| Users Management
+|--------------------------------------------------------------------------
+*/
+Route::prefix('users')->group(function () {
+    // Admin only (read and write)
+    Route::middleware(['auth:sanctum', 'role:admin'])->group(function () {
+        Route::get('/', [UserManagementController::class, 'index']);
+        Route::get('/{id}', [UserManagementController::class, 'show'])->where('id', '[0-9]+');
+        Route::post('/', [UserManagementController::class, 'store']);
+        Route::put('/{id}', [UserManagementController::class, 'update'])->where('id', '[0-9]+');
+        Route::patch('/{id}/status', [UserManagementController::class, 'updateStatus'])->where('id', '[0-9]+');
+        Route::patch('/{id}/role', [UserManagementController::class, 'updateRole'])->where('id', '[0-9]+');
+        Route::delete('/{id}', [UserManagementController::class, 'destroy'])->where('id', '[0-9]+');
+    });
 });
 
 /*
