@@ -17,6 +17,10 @@ Route::middleware([])
         // Route cho rooms
         Route::get('/rooms', [\App\Http\Controllers\Api\Admin\RoomController::class, 'index']);
         Route::get('/rooms/{id}', [\App\Http\Controllers\Api\Admin\RoomController::class, 'show']);
+        
+        // Route cho room types
+        Route::get('/room-types', [\App\Http\Controllers\Api\Admin\RoomTypeController::class, 'index']);
+        Route::get('/room-types/{id}', [\App\Http\Controllers\Api\Admin\RoomTypeController::class, 'show']);
     });
 
 
