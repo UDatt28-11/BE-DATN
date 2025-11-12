@@ -159,6 +159,7 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
     // Promotions
     Route::post('promotions/bulk-delete', [PromotionController::class, 'bulkDelete']);
     Route::post('promotions/bulk-update-status', [PromotionController::class, 'bulkUpdateStatus']);
+    Route::get('promotions/{id}/usage', [PromotionController::class, 'usage']);
     Route::apiResource('promotions', PromotionController::class);
     Route::get('promotions/statistics/overview', [PromotionController::class, 'statistics']);
     Route::post('promotions/validate', [PromotionController::class, 'validate']);

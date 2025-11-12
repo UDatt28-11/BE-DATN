@@ -85,6 +85,7 @@ class SupplyController extends Controller
 
             // Validate query parameters
             $request->validate([
+                'room_id' => 'sometimes|integer|exists:rooms,id',
                 'category' => 'sometimes|string|max:100',
                 'status' => 'sometimes|string|in:active,inactive,discontinued',
                 'stock_status' => 'sometimes|string|in:low_stock,out_of_stock,in_stock',
@@ -94,6 +95,7 @@ class SupplyController extends Controller
                 'page' => 'sometimes|integer|min:1',
                 'per_page' => 'sometimes|integer|min:1|max:100',
             ], [
+                'room_id.exists' => 'Phòng không tồn tại.',
                 'status.in' => 'Trạng thái không hợp lệ. Chỉ chấp nhận: active, inactive, discontinued.',
                 'stock_status.in' => 'Trạng thái tồn kho không hợp lệ. Chỉ chấp nhận: low_stock, out_of_stock, in_stock.',
                 'sort_by.in' => 'Trường sắp xếp không hợp lệ.',
@@ -102,7 +104,12 @@ class SupplyController extends Controller
             ]);
 
             $perPage = (int) ($request->get('per_page', self::DEFAULT_PER_PAGE));
-            $query = Supply::query();
+            $query = Supply::with('room:id,name');
+
+        // Filter by room_id
+        if ($request->has('room_id')) {
+            $query->where('room_id', $request->room_id);
+        }
 
         // Filter by category
         if ($request->has('category')) {
@@ -215,6 +222,7 @@ class SupplyController extends Controller
     public function store(Request $request): JsonResponse
     {
         $request->validate([
+            'room_id' => 'nullable|integer|exists:rooms,id',
             'name' => 'required|string|max:255',
             'description' => 'nullable|string|max:1000',
             'category' => 'required|string|max:100',
@@ -226,12 +234,15 @@ class SupplyController extends Controller
             'supplier' => 'nullable|string|max:255',
             'supplier_contact' => 'nullable|string|max:255',
             'status' => 'nullable|in:active,inactive,discontinued'
+        ], [
+            'room_id.exists' => 'Phòng không tồn tại.',
         ]);
 
         try {
             DB::beginTransaction();
 
             $supply = Supply::create([
+                'room_id' => $request->room_id,
                 'name' => $request->name,
                 'description' => $request->description,
                 'category' => $request->category,
@@ -386,9 +397,11 @@ class SupplyController extends Controller
 
         $request->validate([
             'name' => 'sometimes|required|string|max:255',
+            'room_id' => 'nullable|integer|exists:rooms,id',
             'description' => 'nullable|string|max:1000',
             'category' => 'sometimes|required|string|max:100',
             'unit' => 'sometimes|required|string|max:50',
+            'current_stock' => 'sometimes|required|integer|min:0',
             'min_stock_level' => 'sometimes|required|integer|min:0',
             'max_stock_level' => 'nullable|integer|min:0',
             'unit_price' => 'sometimes|required|numeric|min:0',
@@ -396,22 +409,43 @@ class SupplyController extends Controller
             'supplier_contact' => 'nullable|string|max:255',
             'status' => 'sometimes|in:active,inactive,discontinued'
             ], [
+                'room_id.exists' => 'Phòng không tồn tại.',
                 'status.in' => 'Trạng thái không hợp lệ. Chỉ chấp nhận: active, inactive, discontinued.',
         ]);
 
         $supply = Supply::findOrFail($id);
-        $supply->update($request->only([
+        
+        // Lấy dữ liệu cập nhật
+        $updateData = $request->only([
+            'room_id',
             'name',
             'description',
             'category',
             'unit',
+            'current_stock',
             'min_stock_level',
             'max_stock_level',
             'unit_price',
             'supplier',
             'supplier_contact',
             'status'
-        ]));
+        ]);
+
+        // Nếu current_stock thay đổi, tạo log
+        if ($request->has('current_stock') && $supply->current_stock != $request->current_stock) {
+            $changeQuantity = $request->current_stock - $supply->current_stock;
+            $supply->update($updateData);
+            
+            // Tạo log cho thay đổi tồn kho
+            SupplyLog::create([
+                'supply_id' => $supply->id,
+                'user_id' => Auth::check() ? Auth::id() : 1,
+                'change_quantity' => $changeQuantity,
+                'reason' => 'Manual stock adjustment via update'
+            ]);
+        } else {
+            $supply->update($updateData);
+        }
 
         return response()->json([
             'success' => true,

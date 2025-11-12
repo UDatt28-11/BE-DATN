@@ -9,11 +9,17 @@ class UpdateRoomTypeRequest extends FormRequest
 
     public function rules(): array
     {
-        return [
+        $rules = [
             'property_id' => 'sometimes|required|exists:properties,id',
             'name' => 'sometimes|required|string|max:255',
             'description' => 'nullable|string',
-            'image_file' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048',
         ];
+        
+        // Chỉ validate image_file nếu nó thực sự được gửi lên (có file)
+        if ($this->hasFile('image_file')) {
+            $rules['image_file'] = 'required|image|mimes:jpeg,png,jpg,gif|max:2048';
+        }
+        
+        return $rules;
     }
 }

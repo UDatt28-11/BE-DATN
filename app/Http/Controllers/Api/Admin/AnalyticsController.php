@@ -38,19 +38,51 @@ class AnalyticsController extends Controller
             $dateTo = $request->has('date_to') ? Carbon::parse($request->date_to) : Carbon::now();
             $period = $request->get('period', 'day');
 
-            // Revenue overview
-            $revenueData = $this->getRevenueOverview($dateFrom, $dateTo, $period);
+            // Calculate totals
+            $totalRevenue = BookingOrder::where('status', 'completed')
+                ->whereBetween('created_at', [$dateFrom, $dateTo])
+                ->sum('total_amount');
 
-            // Booking overview
-            $bookingData = $this->getBookingOverview($dateFrom, $dateTo, $period);
+            $totalBookings = BookingOrder::whereBetween('created_at', [$dateFrom, $dateTo])
+                ->count();
 
-            // Top properties by revenue
+            $totalProperties = Property::count();
+
+            $totalUsers = User::where('role', '!=', 'admin')->count();
+
+            // Calculate previous period for growth comparison
+            $periodDays = $dateFrom->diffInDays($dateTo);
+            $prevDateFrom = $dateFrom->copy()->subDays($periodDays + 1);
+            $prevDateTo = $dateFrom->copy()->subDay();
+
+            $prevTotalRevenue = BookingOrder::where('status', 'completed')
+                ->whereBetween('created_at', [$prevDateFrom, $prevDateTo])
+                ->sum('total_amount');
+
+            $prevTotalBookings = BookingOrder::whereBetween('created_at', [$prevDateFrom, $prevDateTo])
+                ->count();
+
+            // Calculate growth percentages
+            $revenueGrowth = $prevTotalRevenue > 0 
+                ? round((($totalRevenue - $prevTotalRevenue) / $prevTotalRevenue) * 100, 2)
+                : 0;
+
+            $bookingsGrowth = $prevTotalBookings > 0
+                ? round((($totalBookings - $prevTotalBookings) / $prevTotalBookings) * 100, 2)
+                : 0;
+
+            // Top properties by revenue (formatted for frontend)
             $topProperties = $this->getTopPropertiesByRevenue($dateFrom, $dateTo);
+            $topPropertiesFormatted = array_map(function ($item) {
+                return [
+                    'id' => $item['property_id'],
+                    'name' => $item['property_name'],
+                    'revenue' => $item['revenue'],
+                    'bookings_count' => $item['booking_count'],
+                ];
+            }, $topProperties);
 
-            // Top customers
-            $topCustomers = $this->getTopCustomers($dateFrom, $dateTo);
-
-            // Recent bookings
+            // Recent bookings (formatted for frontend)
             $recentBookings = BookingOrder::with(['guest:id,full_name,email', 'details.room.property:id,name'])
                 ->latest()
                 ->limit(10)
@@ -59,22 +91,26 @@ class AnalyticsController extends Controller
                     return [
                         'id' => $order->id,
                         'order_code' => $order->order_code,
-                        'guest_name' => $order->guest->full_name ?? $order->customer_name,
+                        'customer_name' => $order->guest->full_name ?? $order->customer_name ?? 'N/A',
                         'property_name' => $order->details->first()?->room?->property?->name ?? 'N/A',
                         'total_amount' => (float) $order->total_amount,
                         'status' => $order->status,
                         'created_at' => $order->created_at->format('Y-m-d H:i:s'),
                     ];
-                });
+                })
+                ->toArray();
 
             return response()->json([
                 'success' => true,
                 'data' => [
-                    'revenue' => $revenueData,
-                    'bookings' => $bookingData,
-                    'top_properties' => $topProperties,
-                    'top_customers' => $topCustomers,
+                    'total_properties' => (int) $totalProperties,
+                    'total_bookings' => (int) $totalBookings,
+                    'total_users' => (int) $totalUsers,
+                    'total_revenue' => (float) $totalRevenue,
+                    'revenue_growth' => $revenueGrowth,
+                    'bookings_growth' => $bookingsGrowth,
                     'recent_bookings' => $recentBookings,
+                    'top_properties' => $topPropertiesFormatted,
                 ],
             ]);
         } catch (\Exception $e) {

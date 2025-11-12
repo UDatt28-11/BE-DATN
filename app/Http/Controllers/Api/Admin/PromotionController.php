@@ -1011,4 +1011,123 @@ class PromotionController extends Controller
             ], 500);
         }
     }
+
+    /**
+     * Get promotion usage history - list of users who used this promotion
+     *
+     * @OA\Get(
+     *     path="/api/admin/promotions/{id}/usage",
+     *     operationId="getPromotionUsage",
+     *     tags={"Promotions"},
+     *     summary="Lịch sử sử dụng mã giảm giá",
+     *     description="Lấy danh sách người dùng đã sử dụng mã giảm giá này",
+     *     @OA\Parameter(
+     *         name="id",
+     *         in="path",
+     *         description="ID mã giảm giá",
+     *         required=true,
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\Parameter(
+     *         name="page",
+     *         in="query",
+     *         description="Trang (mặc định 1)",
+     *         required=false,
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\Parameter(
+     *         name="per_page",
+     *         in="query",
+     *         description="Số lượng bản ghi mỗi trang (mặc định 15)",
+     *         required=false,
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Danh sách người dùng đã sử dụng mã",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="success", type="boolean", example=true),
+     *             @OA\Property(property="data", type="object")
+     *         )
+     *     ),
+     *     @OA\Response(response=404, description="Không tìm thấy mã giảm giá")
+     * )
+     */
+    public function usage(int $id, Request $request): JsonResponse
+    {
+        try {
+            $promotion = Promotion::findOrFail($id);
+
+            $perPage = (int) ($request->get('per_page', self::DEFAULT_PER_PAGE));
+
+            // Get booking orders that used this promotion
+            $bookingOrders = $promotion->bookingOrders()
+                ->with([
+                    'guest:id,name,email,phone',
+                    'invoices:id,booking_order_id,invoice_number,total_amount,status'
+                ])
+                ->orderBy('created_at', 'desc')
+                ->paginate($perPage);
+
+            // Transform data to include user info and usage details
+            $usageData = $bookingOrders->getCollection()->map(function ($bookingOrder) use ($promotion) {
+                $pivot = $bookingOrder->pivot;
+                return [
+                    'id' => $bookingOrder->id,
+                    'order_code' => $bookingOrder->order_code,
+                    'user' => $bookingOrder->guest ? [
+                        'id' => $bookingOrder->guest->id,
+                        'name' => $bookingOrder->guest->name,
+                        'email' => $bookingOrder->guest->email,
+                        'phone' => $bookingOrder->guest->phone,
+                    ] : null,
+                    'customer_name' => $bookingOrder->customer_name,
+                    'customer_email' => $bookingOrder->customer_email,
+                    'customer_phone' => $bookingOrder->customer_phone,
+                    'total_amount' => $bookingOrder->total_amount,
+                    'discount_amount' => $pivot->applied_discount_amount ?? 0,
+                    'used_at' => $pivot->created_at ?? $bookingOrder->created_at,
+                    'booking_status' => $bookingOrder->status,
+                ];
+            });
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'promotion' => [
+                        'id' => $promotion->id,
+                        'code' => $promotion->code,
+                        'description' => $promotion->description,
+                        'usage_count' => $promotion->usage_count,
+                        'max_usage_limit' => $promotion->max_usage_limit,
+                    ],
+                    'usage_history' => $usageData,
+                    'pagination' => [
+                        'current_page' => $bookingOrders->currentPage(),
+                        'per_page' => $bookingOrders->perPage(),
+                        'total' => $bookingOrders->total(),
+                        'last_page' => $bookingOrders->lastPage(),
+                    ],
+                ]
+            ]);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Không tìm thấy mã giảm giá.',
+            ], 404);
+        } catch (\Exception $e) {
+            Log::error('PromotionController@usage failed', [
+                'promotion_id' => $id,
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi lấy lịch sử sử dụng.',
+            ], 500);
+        }
+    }
 }

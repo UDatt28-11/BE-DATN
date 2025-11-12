@@ -11,6 +11,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Exception;
 
@@ -471,7 +472,7 @@ class AmenityController extends Controller
     }
 
     /**
-     * Store uploaded file to local storage
+     * Store uploaded file to local storage with unique filename
      *
      * @param \Illuminate\Http\UploadedFile $file
      * @return string|null Full URL of the stored file
@@ -480,11 +481,15 @@ class AmenityController extends Controller
     private function storeLocalFile($file): ?string
     {
         try {
-            // Store file in public disk
-            $path = $file->store('amenity_icons', 'public');
+            // Generate unique filename to avoid overwriting
+            $extension = $file->getClientOriginalExtension();
+            $filename = Str::uuid() . '.' . $extension;
             
-            // Generate full URL (e.g., http://example.com/storage/amenity_icons/file.png)
-            $url = asset(Storage::url($path));
+            // Store file in public disk with unique filename
+            $path = $file->storeAs('amenity_icons', $filename, 'public');
+            
+            // Generate full URL using Storage disk URL (more reliable than asset())
+            $url = Storage::disk('public')->url($path);
             
             return $url;
         } catch (Exception $e) {
@@ -513,17 +518,25 @@ class AmenityController extends Controller
             // Extract relative path from URL
             // URL format: http://example.com/storage/amenity_icons/file.png
             // We need: amenity_icons/file.png
-            $storageUrlPath = Storage::url('');
-            $path = parse_url($url, PHP_URL_PATH);
-            $relativePath = str_replace($storageUrlPath, '', $path);
-
-            if (Storage::disk('public')->exists($relativePath)) {
-                Storage::disk('public')->delete($relativePath);
+            $parsedUrl = parse_url($url);
+            $path = $parsedUrl['path'] ?? '';
+            
+            // Remove /storage prefix if present
+            $path = ltrim($path, '/');
+            if (Str::startsWith($path, 'storage/')) {
+                $path = Str::after($path, 'storage/');
+            }
+            
+            // Delete file if exists
+            if ($path && Storage::disk('public')->exists($path)) {
+                Storage::disk('public')->delete($path);
             }
         } catch (Exception $e) {
             Log::error('Failed to delete amenity icon', [
                 'url' => $url,
                 'error' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
             ]);
             // Don't throw exception, just log the error to avoid breaking the flow
         }

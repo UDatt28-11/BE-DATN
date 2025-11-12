@@ -435,11 +435,13 @@ class UserController extends Controller
             'address' => 'nullable|string|max:255',
             'status' => 'sometimes|in:active,locked',
             'avatar_url' => 'nullable|string|max:255',
+            'role' => 'sometimes|in:admin,staff,user',
             ], [
                 'email.email' => 'Email không hợp lệ.',
                 'email.unique' => 'Email đã được sử dụng.',
                 'password.min' => 'Mật khẩu phải có ít nhất 8 ký tự.',
                 'phone_number.unique' => 'Số điện thoại đã được sử dụng.',
+                'role.in' => 'Vai trò không hợp lệ. Chỉ chấp nhận: admin, staff, user.',
         ]);
 
         // Chỉ hash password nếu có

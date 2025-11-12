@@ -10,33 +10,79 @@ use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Exception;
 
 class RoomImageController extends Controller
 {
-    // --- Copy các hàm Helper từ RoomTypeController ---
+    /**
+     * Store uploaded file to local storage with unique filename
+     *
+     * @param \Illuminate\Http\UploadedFile $file
+     * @return array ['path' => string, 'url' => string]
+     * @throws Exception
+     */
     private function storeLocalFile($file)
     {
         try {
-            // Lưu vào 'storage/app/public/room_images'
-            $path = $file->store('room_images', 'public');
-            $url = asset(Storage::url($path));
+            // Generate unique filename to avoid overwriting
+            $extension = $file->getClientOriginalExtension();
+            $filename = Str::uuid() . '.' . $extension;
+            
+            // Store file in public disk with unique filename
+            $path = $file->storeAs('room_images', $filename, 'public');
+            
+            // Generate full URL using Storage disk URL (more reliable than asset())
+            $url = Storage::disk('public')->url($path);
+            
             return ['path' => $path, 'url' => $url];
         } catch (Exception $e) {
+            Log::error('RoomImageController@storeLocalFile failed', [
+                'error' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ]);
             throw new Exception('Lỗi khi tải file ảnh phòng: ' . $e->getMessage());
         }
     }
+
+    /**
+     * Delete file from local storage
+     *
+     * @param string|null $url Full URL of the file to delete
+     * @return void
+     */
     private function deleteLocalFile($url)
     {
-        if (!$url) return;
+        if (!$url) {
+            return;
+        }
+
         try {
-            $storageUrlPath = Storage::url('');
-            $relativePath = str_replace($storageUrlPath, '', parse_url($url, PHP_URL_PATH));
-            if (Storage::disk('public')->exists($relativePath)) {
-                Storage::disk('public')->delete($relativePath);
+            // Extract relative path from URL
+            // URL format: http://example.com/storage/room_images/file.png
+            // We need: room_images/file.png
+            $parsedUrl = parse_url($url);
+            $path = $parsedUrl['path'] ?? '';
+            
+            // Remove /storage prefix if present
+            $path = ltrim($path, '/');
+            if (Str::startsWith($path, 'storage/')) {
+                $path = Str::after($path, 'storage/');
+            }
+            
+            // Delete file if exists
+            if ($path && Storage::disk('public')->exists($path)) {
+                Storage::disk('public')->delete($path);
             }
         } catch (Exception $e) {
-             \Log::error('Lỗi khi xóa file ảnh phòng: ' . $e->getMessage());
+            Log::error('RoomImageController@deleteLocalFile failed', [
+                'url' => $url,
+                'error' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ]);
+            // Don't throw exception, just log the error to avoid breaking the flow
         }
     }
 
