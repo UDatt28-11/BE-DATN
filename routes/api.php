@@ -18,6 +18,7 @@ use App\Http\Controllers\ReviewController;
 use App\Http\Controllers\BookingOrderController;
 use App\Http\Controllers\RoomController;
 use App\Http\Controllers\RoomTypeController;
+use App\Http\Controllers\UserManagementController;
 
 Route::prefix('admin')->group(function () {
     Route::post('login', [AdminAuthController::class, 'login']);
@@ -27,7 +28,7 @@ Route::prefix('admin')->group(function () {
 
     Route::middleware(['auth:sanctum', 'role:admin'])->group(function () {
         Route::post('logout', [AdminAuthController::class, 'logout']);
-        
+
         // Booking Orders Management
         Route::get('/booking-orders', [BookingOrderController::class, 'index']);
         Route::get('/booking-orders/{id}', [BookingOrderController::class, 'show']);
@@ -35,11 +36,11 @@ Route::prefix('admin')->group(function () {
         Route::put('/booking-orders/{id}', [BookingOrderController::class, 'update']);
         Route::patch('/booking-orders/{id}/status', [BookingOrderController::class, 'updateStatus']);
         Route::delete('/booking-orders/{id}', [BookingOrderController::class, 'destroy']);
-        
+
         // Rooms Management
         Route::get('/rooms', [RoomController::class, 'index']);
         Route::get('/rooms/{id}', [RoomController::class, 'show']);
-        
+
         // Room Types Management
         Route::get('/room-types', [RoomTypeController::class, 'index']);
         Route::get('/room-types/{id}', [RoomTypeController::class, 'show']);
@@ -87,6 +88,24 @@ Route::get('/user', function (Request $request) {
 // Health check
 Route::get('/ping', function () {
     return response()->json(['ok' => true, 'time' => now()->toISOString()]);
+});
+
+/*
+|--------------------------------------------------------------------------
+| Users Management
+|--------------------------------------------------------------------------
+*/
+Route::prefix('users')->group(function () {
+    // Admin only (read and write)
+    Route::middleware(['auth:sanctum', 'role:admin'])->group(function () {
+        Route::get('/', [UserManagementController::class, 'index']);
+        Route::get('/{id}', [UserManagementController::class, 'show'])->where('id', '[0-9]+');
+        Route::post('/', [UserManagementController::class, 'store']);
+        Route::put('/{id}', [UserManagementController::class, 'update'])->where('id', '[0-9]+');
+        Route::patch('/{id}/status', [UserManagementController::class, 'updateStatus'])->where('id', '[0-9]+');
+        Route::patch('/{id}/role', [UserManagementController::class, 'updateRole'])->where('id', '[0-9]+');
+        Route::delete('/{id}', [UserManagementController::class, 'destroy'])->where('id', '[0-9]+');
+    });
 });
 
 /*
