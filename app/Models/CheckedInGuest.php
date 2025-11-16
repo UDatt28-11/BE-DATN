@@ -24,6 +24,11 @@ class CheckedInGuest extends Model
         'check_in_time',
     ];
 
+    protected $casts = [
+        'date_of_birth' => 'date',
+        'check_in_time' => 'datetime',
+    ];
+
     public function bookingDetail(): BelongsTo
     {
         return $this->belongsTo(BookingDetail::class, 'booking_details_id');

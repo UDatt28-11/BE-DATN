@@ -21,6 +21,13 @@ Route::middleware([])
         // Route cho room types
         Route::get('/room-types', [\App\Http\Controllers\Api\Admin\RoomTypeController::class, 'index']);
         Route::get('/room-types/{id}', [\App\Http\Controllers\Api\Admin\RoomTypeController::class, 'show']);
+        
+        // Route cho checked-in guests (quản lý lưu trú)
+        Route::get('/checked-in-guests', [\App\Http\Controllers\Api\Admin\CheckedInGuestController::class, 'index']);
+        Route::get('/booking-details/{bookingDetail}/guests', [\App\Http\Controllers\Api\Admin\CheckedInGuestController::class, 'getByBookingDetail']);
+        Route::post('/booking-details/{bookingDetail}/guests', [\App\Http\Controllers\Api\Admin\CheckedInGuestController::class, 'storeForBookingDetail']);
+        Route::put('/checked-in-guests/{checkedInGuest}', [\App\Http\Controllers\Api\Admin\CheckedInGuestController::class, 'update']);
+        Route::delete('/checked-in-guests/{checkedInGuest}', [\App\Http\Controllers\Api\Admin\CheckedInGuestController::class, 'destroy']);
     });
 
 

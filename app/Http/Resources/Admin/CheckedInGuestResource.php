@@ -11,6 +11,7 @@ class CheckedInGuestResource extends JsonResource
     {
         return [
             'id' => $this->id,
+            'booking_details_id' => $this->booking_details_id,
             'full_name' => $this->full_name,
             'date_of_birth' => $this->date_of_birth ? $this->date_of_birth->format('Y-m-d') : null,
             'identity_type' => $this->identity_type,
