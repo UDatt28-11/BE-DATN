@@ -84,6 +84,11 @@ class Property extends Model
         return $this->hasMany(Review::class);
     }
 
+    public function images(): HasMany
+    {
+        return $this->hasMany(PropertyImage::class);
+    }
+
     public function verifier(): BelongsTo
     {
         return $this->belongsTo(User::class, 'verified_by');

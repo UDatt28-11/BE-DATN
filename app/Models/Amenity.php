@@ -11,7 +11,7 @@ use App\Models\Property;
 class Amenity extends Model
 {
     use HasFactory;
-    protected $fillable = ['property_id', 'name', 'icon_url', 'type'];
+    protected $fillable = ['property_id', 'name', 'icon_url', 'type', 'category'];
 
     public function property(): BelongsTo {
         return $this->belongsTo(Property::class);

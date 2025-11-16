@@ -12,6 +12,7 @@ use Illuminate\Http\Resources\Json\JsonResource;
  *     @OA\Property(property="id", type="integer", example=1),
  *     @OA\Property(property="name", type="string", example="Wi-Fi miễn phí"),
  *     @OA\Property(property="type", type="string", enum={"basic", "advanced", "safety"}, example="basic"),
+ *     @OA\Property(property="category", type="string", enum={"facility", "service"}, example="facility", description="Danh mục: facility (vật tư) hoặc service (dịch vụ)"),
  *     @OA\Property(property="icon_url", type="string", nullable=true, example="http://example.com/storage/amenity_icons/icon.png"),
  *     @OA\Property(property="property", type="object",
  *         @OA\Property(property="id", type="integer", example=1),
@@ -35,6 +36,7 @@ class AmenityResource extends JsonResource
             'id' => $this->id,
             'name' => $this->name,
             'type' => $this->type,
+            'category' => $this->category ?? 'facility', // Default to 'facility' if not set
             'icon_url' => $this->icon_url,
             'property' => $this->whenLoaded('property', function () {
                 return [

@@ -9,6 +9,7 @@ use App\Http\Controllers\Auth\AdminAuthController;
 use App\Http\Controllers\Auth\StaffAuthController;
 use App\Http\Controllers\Auth\UserAuthController;
 use App\Http\Controllers\Auth\LogoutController;
+use App\Http\Controllers\AuthController as MainAuthController;
 
 use App\Http\Controllers\User\VerifyEmailController;
 use App\Http\Controllers\User\ResetPasswordController;
@@ -24,6 +25,7 @@ use App\Http\Controllers\Api\Admin\AmenityController;
 use App\Http\Controllers\Api\Admin\RoomController;
 use App\Http\Controllers\Api\Admin\RoomTypeController;
 use App\Http\Controllers\Api\Admin\RoomImageController;
+use App\Http\Controllers\Api\Admin\PropertyImageController;
 use App\Http\Controllers\Api\Admin\BookingOrderController;
 use App\Http\Controllers\Api\Admin\PromotionController;
 use App\Http\Controllers\Api\Admin\ReviewController;
@@ -43,6 +45,7 @@ use App\Http\Controllers\Api\Admin\EmailTemplateController;
 use App\Http\Controllers\Api\Admin\EmailLogController;
 use App\Http\Controllers\Api\Admin\EmailConfigController;
 use App\Http\Controllers\Api\Admin\AnalyticsController;
+use App\Http\Controllers\Api\Public\HomeController;
 use App\Http\Controllers\Auth\AdminPasswordResetController;
 
 // ==================================================================
@@ -56,7 +59,14 @@ Route::prefix('google')->group(function () {
 });
 
 // ==================================================================
-// 2. ADMIN AUTH
+// 2. GLOBAL AUTH (Admin + Staff + User) - BE tự xác định role
+// ==================================================================
+Route::post('login', [MainAuthController::class, 'login'])
+    ->middleware('throttle:10,1');
+Route::middleware('auth:sanctum')->post('logout', [MainAuthController::class, 'logout']);
+
+// ==================================================================
+// 3. ADMIN AUTH (giữ lại cho các client khác nếu cần)
 // ==================================================================
 Route::prefix('admin')->group(function () {
     Route::post('login', [AdminAuthController::class, 'login'])
@@ -69,7 +79,7 @@ Route::prefix('admin')->group(function () {
 });
 
 // ==================================================================
-// 3. STAFF AUTH
+// 4. STAFF AUTH
 // ==================================================================
 Route::prefix('staff')->group(function () {
     Route::post('login', [StaffAuthController::class, 'login'])
@@ -78,7 +88,7 @@ Route::prefix('staff')->group(function () {
 });
 
 // ==================================================================
-// 4. USER AUTH
+// 5. USER AUTH
 // ==================================================================
 Route::prefix('user')->group(function () {
     Route::post('login', [UserAuthController::class, 'login'])
@@ -96,7 +106,7 @@ Route::prefix('user')->group(function () {
 });
 
 // ==================================================================
-// 5. ADMIN ROUTES (role:admin)
+// 6. ADMIN ROUTES (role:admin)
 // ==================================================================
 Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(function () {
 
@@ -104,6 +114,9 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
     Route::post('properties/{property}/verify', [PropertyController::class, 'verify']);
     Route::post('properties/{property}/reject', [PropertyController::class, 'reject']);
     Route::apiResource('properties', PropertyController::class);
+    Route::post('properties/{property}/upload-images', [PropertyImageController::class, 'store']);
+    Route::delete('property-images/{propertyImage}', [PropertyImageController::class, 'destroy']);
+    Route::post('property-images/{propertyImage}/set-primary', [PropertyImageController::class, 'setPrimary']);
 
     // Users
     Route::get('users/lookup', [UserController::class, 'lookup']);
@@ -123,11 +136,15 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
     Route::get('room-types/{roomType}/amenities', [RoomTypeController::class, 'showWithAmenities']);
     Route::apiResource('room-types', RoomTypeController::class);
 
-    // Rooms
+    // Rooms - Admin routes (lấy tất cả rooms kể cả chưa verified)
+    Route::get('rooms', [RoomController::class, 'index']);
+    Route::get('rooms/{room}', [RoomController::class, 'show']);
     Route::patch('rooms/{room}/status', [RoomController::class, 'updateStatus']);
     Route::post('rooms/{room}/verify', [RoomController::class, 'verify']);
     Route::post('rooms/{room}/reject', [RoomController::class, 'reject']);
-    Route::apiResource('rooms', RoomController::class);
+    Route::post('rooms', [RoomController::class, 'store']);
+    Route::put('rooms/{room}', [RoomController::class, 'update']);
+    Route::delete('rooms/{room}', [RoomController::class, 'destroy']);
     Route::post('rooms/{room}/upload-images', [RoomImageController::class, 'store']);
     Route::delete('room-images/{roomImage}', [RoomImageController::class, 'destroy']);
 
@@ -255,10 +272,16 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
 });
 
 // ==================================================================
-// 6. STAFF ROUTES (CẦN BỔ SUNG SAU)
+// 6. STAFF ROUTES
 // ==================================================================
 Route::middleware(['auth:sanctum', 'role:staff'])->prefix('staff')->group(function () {
-    // TODO: Thêm route cho staff
+    // Check-in/Check-out
+    Route::get('/check-in/list', [\App\Http\Controllers\Api\Staff\CheckInOutController::class, 'getCheckInList']);
+    Route::get('/check-in/{id}', [\App\Http\Controllers\Api\Staff\CheckInOutController::class, 'getCheckInDetails']);
+    Route::post('/check-in/{id}', [\App\Http\Controllers\Api\Staff\CheckInOutController::class, 'checkIn']);
+    Route::get('/check-out/list', [\App\Http\Controllers\Api\Staff\CheckInOutController::class, 'getCheckOutList']);
+    Route::get('/check-out/{id}', [\App\Http\Controllers\Api\Staff\CheckInOutController::class, 'getCheckOutDetails']);
+    Route::post('/check-out/{id}', [\App\Http\Controllers\Api\Staff\CheckInOutController::class, 'checkOut']);
 });
 
 // ==================================================================
@@ -522,14 +545,62 @@ Route::prefix('payouts')->middleware('auth:sanctum')->group(function () {
 });
 
 // ==================================================================
-// 22. TEST: LẤY USER HIỆN TẠI (XÓA TRƯỚC DEPLOY)
+// 22. ROOMS (PUBLIC + PROTECTED)
+// ==================================================================
+Route::prefix('rooms')->group(function () {
+    // Public routes - không cần đăng nhập
+    Route::get('/', [RoomController::class, 'indexPublic']);
+    Route::get('/{id}', [RoomController::class, 'showPublic'])->where('id', '[0-9]+');
+    
+    // Protected routes - cần đăng nhập và role admin
+    Route::middleware(['auth:sanctum', 'role:admin'])->group(function () {
+        Route::patch('/{room}/status', [RoomController::class, 'updateStatus']);
+        Route::post('/{room}/verify', [RoomController::class, 'verify']);
+        Route::post('/{room}/reject', [RoomController::class, 'reject']);
+        Route::post('/', [RoomController::class, 'store']);
+        Route::put('/{id}', [RoomController::class, 'update']);
+        Route::delete('/{id}', [RoomController::class, 'destroy']);
+        Route::post('/{room}/upload-images', [RoomImageController::class, 'store']);
+        Route::delete('/room-images/{roomImage}', [RoomImageController::class, 'destroy']);
+    });
+});
+
+// ==================================================================
+// 23. PUBLIC HOMEPAGE (không cần đăng nhập)
+// ==================================================================
+Route::prefix('public')->group(function () {
+    Route::get('/statistics', [HomeController::class, 'statistics']);
+    Route::get('/room-types', [HomeController::class, 'roomTypes']);
+    Route::get('/amenities', [HomeController::class, 'amenities']);
+    Route::get('/featured-rooms', [HomeController::class, 'featuredRooms']);
+    Route::get('/popular-rooms', [HomeController::class, 'popularRooms']);
+    Route::get('/properties', [HomeController::class, 'properties']); // Featured properties for homepage
+});
+
+// API tổng hợp homepage data
+Route::get('/homepage/data', [HomeController::class, 'homepageData']);
+
+// API tìm kiếm properties (public) - với search, filter, sort
+Route::get('/properties/search', [HomeController::class, 'searchProperties']);
+
+// API chi tiết properties (public)
+Route::get('/properties/{id}', [HomeController::class, 'propertyDetail'])->where('id', '[0-9]+');
+Route::get('/properties/{id}/reviews', [HomeController::class, 'propertyReviews'])->where('id', '[0-9]+');
+Route::get('/properties/{id}/comments', [HomeController::class, 'propertyComments'])->where('id', '[0-9]+');
+
+// API reviews và comments cho rooms (public)
+Route::get('/rooms/{id}/reviews', [RoomController::class, 'roomReviews'])->where('id', '[0-9]+');
+Route::get('/rooms/{id}/comments', [RoomController::class, 'roomComments'])->where('id', '[0-9]+');
+
+// ==================================================================
+// 24. TEST: LẤY USER HIỆN TẠI (XÓA TRƯỚC DEPLOY)
 // ==================================================================
 Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
     return $request->user();
 });
 
 // ==================================================================
-// 15. FALLBACK 404
+// 24. FALLBACK 404
 // ==================================================================
 Route::fallback(function () {
     return response()->json(['message' => 'Route not found.'], 404);

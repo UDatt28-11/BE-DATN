@@ -13,6 +13,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Carbon\Carbon;
 
@@ -689,6 +690,71 @@ class AnalyticsController extends Controller
                 ];
             })
             ->toArray();
+    }
+
+    /**
+     * Public statistics for homepage (không cần đăng nhập)
+     */
+    public function publicStatistics(): JsonResponse
+    {
+        try {
+            // Tổng số properties
+            try {
+                $totalProperties = Property::where('verification_status', 'verified')->count();
+            } catch (\Exception $e) {
+                $totalProperties = Property::count();
+            }
+            
+            // Tổng số users (không tính admin)
+            $totalUsers = User::where('role', '!=', 'admin')->count();
+            
+            // Tổng số rooms
+            try {
+                $totalRooms = Room::where('verification_status', 'verified')
+                    ->where('status', 'available')
+                    ->count();
+            } catch (\Exception $e) {
+                $totalRooms = Room::where('status', 'available')->count();
+            }
+            
+            // Tổng số reviews với rating 5 sao
+            try {
+                $totalFiveStarReviews = Review::where('rating', 5)
+                    ->where('status', 'approved')
+                    ->count();
+            } catch (\Exception $e) {
+                $totalFiveStarReviews = Review::where('rating', 5)->count();
+            }
+            
+            // Đếm số lượng room types
+            try {
+                $totalRoomTypes = \App\Models\RoomType::where('status', 'active')->count();
+            } catch (\Exception $e) {
+                $totalRoomTypes = \App\Models\RoomType::count();
+            }
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'total_properties' => (int) $totalProperties,
+                    'total_users' => (int) $totalUsers,
+                    'total_rooms' => (int) $totalRooms,
+                    'total_five_star_reviews' => (int) $totalFiveStarReviews,
+                    'total_room_types' => (int) $totalRoomTypes,
+                ],
+            ]);
+        } catch (\Exception $e) {
+            Log::error('AnalyticsController@publicStatistics failed', [
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi lấy dữ liệu thống kê.',
+            ], 500);
+        }
     }
 }
 

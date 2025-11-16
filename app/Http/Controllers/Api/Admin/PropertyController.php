@@ -104,7 +104,7 @@ class PropertyController extends Controller
             ]);
 
             $perPage = (int) ($request->get('per_page', self::DEFAULT_PER_PAGE));
-            $query = Property::query()->with(['owner:id,full_name', 'verifier:id,full_name']);
+            $query = Property::query()->with(['owner:id,full_name', 'verifier:id,full_name', 'images']);
 
             // Filter by owner_id
             if ($request->has('owner_id')) {
@@ -277,7 +277,7 @@ class PropertyController extends Controller
             
             return response()->json([
                 'success' => true,
-                'data' => $property->load(['owner:id,full_name', 'verifier:id,full_name']),
+                'data' => $property->load(['owner:id,full_name', 'verifier:id,full_name', 'images']),
             ]);
         } catch (\Exception $e) {
             Log::error('PropertyController@show failed', [

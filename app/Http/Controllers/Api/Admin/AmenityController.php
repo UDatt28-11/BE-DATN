@@ -488,15 +488,38 @@ class AmenityController extends Controller
             // Store file in public disk with unique filename
             $path = $file->storeAs('amenity_icons', $filename, 'public');
             
-            // Generate full URL using Storage disk URL (more reliable than asset())
-            $url = Storage::disk('public')->url($path);
+            // Verify file was actually saved
+            if (!Storage::disk('public')->exists($path)) {
+                throw new Exception('File không được lưu vào storage. Path: ' . $path);
+            }
+            
+            // Get file size for logging
+            $fileSize = Storage::disk('public')->size($path);
+            
+            // Generate full URL using Storage disk URL
+            // Storage::disk('public')->url() returns relative path like /storage/amenity_icons/...
+            // We need to prepend APP_URL to make it a full URL
+            $relativeUrl = Storage::disk('public')->url($path);
+            $appUrl = rtrim(config('app.url'), '/');
+            $url = $appUrl . $relativeUrl;
+            
+            // Log successful upload for debugging
+            Log::info('AmenityController@storeLocalFile - File uploaded successfully', [
+                'original_name' => $file->getClientOriginalName(),
+                'stored_path' => $path,
+                'file_size' => $fileSize,
+                'full_url' => $url,
+                'storage_path' => storage_path('app/public/' . $path),
+            ]);
             
             return $url;
         } catch (Exception $e) {
             Log::error('Failed to store amenity icon', [
+                'original_name' => $file->getClientOriginalName() ?? 'unknown',
                 'error' => $e->getMessage(),
                 'file' => $e->getFile(),
                 'line' => $e->getLine(),
+                'trace' => $e->getTraceAsString(),
             ]);
             throw new Exception('Lỗi khi tải file icon: ' . $e->getMessage());
         }

@@ -25,6 +25,7 @@ class StoreAmenityRequest extends FormRequest
             'property_id' => 'required|integer|exists:properties,id',
             'name'        => 'required|string|max:255',
             'type'        => 'required|string|in:basic,advanced,safety',
+            'category'    => 'nullable|string|in:facility,service',
             'icon_file'   => 'nullable|file|image|mimes:png,svg,jpg,jpeg|max:2048',
         ];
     }
@@ -43,6 +44,7 @@ class StoreAmenityRequest extends FormRequest
             'name.max' => 'Tên tiện ích không được vượt quá 255 ký tự.',
             'type.required' => 'Vui lòng chọn loại tiện ích.',
             'type.in' => 'Loại tiện ích không hợp lệ. Chỉ chấp nhận: basic, advanced, safety.',
+            'category.in' => 'Danh mục không hợp lệ. Chỉ chấp nhận: facility (vật tư), service (dịch vụ).',
             'icon_file.file' => 'File icon phải là file hợp lệ.',
             'icon_file.image' => 'File icon phải là hình ảnh.',
             'icon_file.mimes' => 'File icon phải có định dạng: png, svg, jpg, jpeg.',

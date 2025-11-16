@@ -17,6 +17,10 @@ return new class extends Migration
             $table->time('check_in_time')->default('14:00:00');
             $table->time('check_out_time')->default('12:00:00');
             $table->enum('status', ['active', 'inactive', 'pending_approval'])->default('pending_approval');
+            $table->enum('verification_status', ['pending', 'verified', 'rejected'])->nullable();
+            $table->text('verification_notes')->nullable();
+            $table->timestamp('verified_at')->nullable();
+            $table->foreignId('verified_by')->nullable()->constrained('users')->onDelete('set null');
             $table->timestamps();
         });
     }

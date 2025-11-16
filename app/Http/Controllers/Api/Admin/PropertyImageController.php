@@ -3,9 +3,9 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
-use App\Models\Room;
-use App\Models\RoomImage;
-use App\Http\Requests\Admin\StoreRoomImagesRequest;
+use App\Models\Property;
+use App\Models\PropertyImage;
+use App\Http\Requests\Admin\StorePropertyImagesRequest;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Storage;
@@ -13,7 +13,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Exception;
 
-class RoomImageController extends Controller
+class PropertyImageController extends Controller
 {
     /**
      * Store uploaded file to local storage with unique filename
@@ -26,7 +26,7 @@ class RoomImageController extends Controller
     {
         try {
             // Ensure directory exists
-            $directory = 'room_images';
+            $directory = 'property_images';
             if (!Storage::disk('public')->exists($directory)) {
                 Storage::disk('public')->makeDirectory($directory);
             }
@@ -47,13 +47,13 @@ class RoomImageController extends Controller
             $fileSize = Storage::disk('public')->size($path);
             
             // Generate full URL
-            // Path format: room_images/filename.jpg
-            // We need: http://localhost:8000/storage/room_images/filename.jpg
+            // Path format: property_images/filename.jpg
+            // We need: http://localhost:8000/storage/property_images/filename.jpg
             $appUrl = rtrim(config('app.url'), '/');
             $url = $appUrl . '/storage/' . $path;
             
             // Log successful upload for debugging
-            Log::info('RoomImageController@storeLocalFile - File uploaded successfully', [
+            Log::info('PropertyImageController@storeLocalFile - File uploaded successfully', [
                 'original_name' => $file->getClientOriginalName(),
                 'stored_path' => $path,
                 'file_size' => $fileSize,
@@ -63,14 +63,14 @@ class RoomImageController extends Controller
             
             return ['path' => $path, 'url' => $url];
         } catch (Exception $e) {
-            Log::error('RoomImageController@storeLocalFile failed', [
+            Log::error('PropertyImageController@storeLocalFile failed', [
                 'original_name' => $file->getClientOriginalName() ?? 'unknown',
                 'error' => $e->getMessage(),
                 'file' => $e->getFile(),
                 'line' => $e->getLine(),
                 'trace' => $e->getTraceAsString(),
             ]);
-            throw new Exception('Lỗi khi tải file ảnh phòng: ' . $e->getMessage());
+            throw new Exception('Lỗi khi tải file ảnh property: ' . $e->getMessage());
         }
     }
 
@@ -88,8 +88,6 @@ class RoomImageController extends Controller
 
         try {
             // Extract relative path from URL
-            // URL format: http://example.com/storage/room_images/file.png
-            // We need: room_images/file.png
             $parsedUrl = parse_url($url);
             $path = $parsedUrl['path'] ?? '';
             
@@ -104,7 +102,7 @@ class RoomImageController extends Controller
                 Storage::disk('public')->delete($path);
             }
         } catch (Exception $e) {
-            Log::error('RoomImageController@deleteLocalFile failed', [
+            Log::error('PropertyImageController@deleteLocalFile failed', [
                 'url' => $url,
                 'error' => $e->getMessage(),
                 'file' => $e->getFile(),
@@ -115,42 +113,42 @@ class RoomImageController extends Controller
     }
 
     /**
-     * Store (lưu) một hoặc nhiều ảnh cho 1 phòng.
-     * (Route: POST /api/v1/rooms/{room}/upload-images)
+     * Store (lưu) một hoặc nhiều ảnh cho 1 property.
+     * (Route: POST /api/admin/properties/{property}/upload-images)
      */
-    public function store(StoreRoomImagesRequest $request, Room $room): JsonResponse
+    public function store(StorePropertyImagesRequest $request, Property $property): JsonResponse
     {
         try {
             // Authorization is handled by route middleware (role:admin)
 
-        $uploadedImages = [];
+            $uploadedImages = [];
             
-            // Kiểm tra xem phòng này đã có ảnh primary chưa
-            $hasPrimaryImage = $room->images()->where('is_primary', true)->exists();
+            // Kiểm tra xem property này đã có ảnh primary chưa
+            $hasPrimaryImage = $property->images()->where('is_primary', true)->exists();
             $isFirstImage = !$hasPrimaryImage;
 
-        foreach ($request->file('images') as $file) {
-            try {
-                $uploadResult = $this->storeLocalFile($file);
+            foreach ($request->file('images') as $file) {
+                try {
+                    $uploadResult = $this->storeLocalFile($file);
 
-                // Tạo record trong bảng 'room_images'
-                $imageRecord = $room->images()->create([
-                    'image_url' => $uploadResult['url'],
+                    // Tạo record trong bảng 'property_images'
+                    $imageRecord = $property->images()->create([
+                        'image_url' => $uploadResult['url'],
                         'is_primary' => $isFirstImage,
                     ]);
 
                     // Nếu đây là ảnh đầu tiên và được set làm primary, set tất cả ảnh khác thành false
                     if ($isFirstImage) {
-                        $room->images()
+                        $property->images()
                             ->where('id', '!=', $imageRecord->id)
                             ->update(['is_primary' => false]);
                         $isFirstImage = false; // Chỉ set ảnh đầu tiên trong batch làm primary
                     }
 
-                $uploadedImages[] = $imageRecord;
-            } catch (Exception $e) {
-                    Log::error('RoomImageController@store - File upload failed', [
-                        'room_id' => $room->id,
+                    $uploadedImages[] = $imageRecord;
+                } catch (Exception $e) {
+                    Log::error('PropertyImageController@store - File upload failed', [
+                        'property_id' => $property->id,
                         'file_name' => $file->getClientOriginalName(),
                         'message' => $e->getMessage(),
                         'file' => $e->getFile(),
@@ -167,8 +165,8 @@ class RoomImageController extends Controller
                         'success' => false,
                         'message' => 'Có lỗi xảy ra khi upload ảnh: ' . $e->getMessage(),
                     ], 500);
+                }
             }
-        }
 
             return response()->json([
                 'success' => true,
@@ -182,8 +180,8 @@ class RoomImageController extends Controller
                 'errors' => $e->errors(),
             ], 422);
         } catch (\Exception $e) {
-            Log::error('RoomImageController@store failed', [
-                'room_id' => $room->id,
+            Log::error('PropertyImageController@store failed', [
+                'property_id' => $property->id,
                 'message' => $e->getMessage(),
                 'file' => $e->getFile(),
                 'line' => $e->getLine(),
@@ -192,28 +190,27 @@ class RoomImageController extends Controller
 
             return response()->json([
                 'success' => false,
-                'message' => 'Có lỗi xảy ra khi upload ảnh phòng.',
+                'message' => 'Có lỗi xảy ra khi upload ảnh property.',
             ], 500);
         }
     }
 
     /**
      * Xóa 1 ảnh.
-     * (Route: DELETE /api/v1/room-images/{roomImage})
-     * (Dùng {roomImage} thay vì {id} để dùng Route-Model Binding)
+     * (Route: DELETE /api/admin/property-images/{propertyImage})
      */
-    public function destroy(RoomImage $roomImage): JsonResponse
+    public function destroy(PropertyImage $propertyImage): JsonResponse
     {
         try {
             // Authorization is handled by route middleware (role:admin)
 
-            $roomId = $roomImage->room_id;
-            $isPrimary = $roomImage->is_primary;
+            $propertyId = $propertyImage->property_id;
+            $isPrimary = $propertyImage->is_primary;
 
             // 1. Nếu đây là ảnh primary, tìm ảnh khác để set làm primary trước khi xóa
             if ($isPrimary) {
-                $firstImage = RoomImage::where('room_id', $roomId)
-                    ->where('id', '!=', $roomImage->id)
+                $firstImage = PropertyImage::where('property_id', $propertyId)
+                    ->where('id', '!=', $propertyImage->id)
                     ->orderBy('created_at', 'asc')
                     ->first();
 
@@ -223,10 +220,10 @@ class RoomImageController extends Controller
             }
 
             // 2. Xóa file trên server
-        $this->deleteLocalFile($roomImage->image_url);
+            $this->deleteLocalFile($propertyImage->image_url);
 
             // 3. Xóa record trong CSDL
-        $roomImage->delete();
+            $propertyImage->delete();
 
             return response()->json([
                 'success' => true,
@@ -238,8 +235,8 @@ class RoomImageController extends Controller
                 'message' => 'Không tìm thấy ảnh.',
             ], 404);
         } catch (\Exception $e) {
-            Log::error('RoomImageController@destroy failed', [
-                'room_image_id' => $roomImage->id,
+            Log::error('PropertyImageController@destroy failed', [
+                'property_image_id' => $propertyImage->id,
                 'message' => $e->getMessage(),
                 'file' => $e->getFile(),
                 'line' => $e->getLine(),
@@ -249,6 +246,41 @@ class RoomImageController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Có lỗi xảy ra khi xóa ảnh.',
+            ], 500);
+        }
+    }
+
+    /**
+     * Set primary image
+     * (Route: POST /api/admin/property-images/{propertyImage}/set-primary)
+     */
+    public function setPrimary(PropertyImage $propertyImage): JsonResponse
+    {
+        try {
+            // Authorization is handled by route middleware (role:admin)
+
+            // Set all other images of this property to non-primary
+            PropertyImage::where('property_id', $propertyImage->property_id)
+                ->where('id', '!=', $propertyImage->id)
+                ->update(['is_primary' => false]);
+
+            // Set this image as primary
+            $propertyImage->update(['is_primary' => true]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Đã đặt ảnh làm ảnh chính thành công.',
+                'data' => $propertyImage->fresh()
+            ], 200);
+        } catch (\Exception $e) {
+            Log::error('PropertyImageController@setPrimary failed', [
+                'property_image_id' => $propertyImage->id,
+                'message' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi đặt ảnh chính.',
             ], 500);
         }
     }

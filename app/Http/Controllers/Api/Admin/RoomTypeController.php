@@ -4,11 +4,13 @@ namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\RoomType;
+use App\Models\Room;
 use App\Http\Requests\Admin\StoreRoomTypeRequest;
 use App\Http\Requests\Admin\UpdateRoomTypeRequest;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Exception;
@@ -539,15 +541,38 @@ class RoomTypeController extends Controller
             // Store file in public disk with unique filename
             $path = $file->storeAs('room_type_images', $filename, 'public');
             
-            // Generate full URL using Storage disk URL (more reliable than asset())
-            $url = Storage::disk('public')->url($path);
+            // Verify file was actually saved
+            if (!Storage::disk('public')->exists($path)) {
+                throw new Exception('File không được lưu vào storage. Path: ' . $path);
+            }
+            
+            // Get file size for logging
+            $fileSize = Storage::disk('public')->size($path);
+            
+            // Generate full URL using Storage disk URL
+            // Storage::disk('public')->url() returns relative path like /storage/room_type_images/...
+            // We need to prepend APP_URL to make it a full URL
+            $relativeUrl = Storage::disk('public')->url($path);
+            $appUrl = rtrim(config('app.url'), '/');
+            $url = $appUrl . $relativeUrl;
+            
+            // Log successful upload for debugging
+            Log::info('RoomTypeController@storeLocalFile - File uploaded successfully', [
+                'original_name' => $file->getClientOriginalName(),
+                'stored_path' => $path,
+                'file_size' => $fileSize,
+                'full_url' => $url,
+                'storage_path' => storage_path('app/public/' . $path),
+            ]);
             
             return $url;
         } catch (Exception $e) {
             Log::error('Failed to store room type image', [
+                'original_name' => $file->getClientOriginalName() ?? 'unknown',
                 'error' => $e->getMessage(),
                 'file' => $e->getFile(),
                 'line' => $e->getLine(),
+                'trace' => $e->getTraceAsString(),
             ]);
             throw new Exception('Lỗi khi tải file hình ảnh: ' . $e->getMessage());
         }
@@ -590,6 +615,82 @@ class RoomTypeController extends Controller
                 'line' => $e->getLine(),
             ]);
             // Don't throw exception, just log the error to avoid breaking the flow
+        }
+    }
+
+    /**
+     * Public method: Display a listing of room types (không cần đăng nhập)
+     * Chỉ trả về room types active
+     */
+    public function indexPublic(Request $request): JsonResponse
+    {
+        try {
+            // Validate query parameters
+            $request->validate([
+                'limit' => 'sometimes|integer|min:1|max:20',
+            ], [
+                'limit.max' => 'Số lượng bản ghi không được vượt quá 20.',
+            ]);
+
+            $limit = (int) ($request->get('limit', 6));
+            $query = RoomType::query();
+            
+            // Thêm điều kiện status nếu cột tồn tại
+            if (Schema::hasColumn('room_types', 'status')) {
+                $query->where('status', 'active');
+            }
+            
+            // Load relationship nếu property_id tồn tại
+            if (Schema::hasColumn('room_types', 'property_id')) {
+                $query->with('property:id,name');
+            }
+            
+            $query->orderBy('created_at', 'desc')
+                ->limit($limit);
+
+            $roomTypes = $query->get();
+
+            // Đếm số lượng rooms cho mỗi room type
+            $roomTypesWithCount = $roomTypes->map(function ($roomType) {
+                $roomsQuery = Room::where('room_type_id', $roomType->id);
+                
+                // Thêm điều kiện verification_status nếu cột tồn tại
+                if (Schema::hasColumn('rooms', 'verification_status')) {
+                    $roomsQuery->where('verification_status', 'verified');
+                }
+                
+                $roomsCount = $roomsQuery->where('status', 'available')->count();
+                
+                return [
+                    'id' => $roomType->id,
+                    'name' => $roomType->name,
+                    'description' => $roomType->description,
+                    'image_url' => $roomType->image_url,
+                    'rooms_count' => $roomsCount,
+                ];
+            });
+
+            return response()->json([
+                'success' => true,
+                'data' => $roomTypesWithCount,
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Dữ liệu không hợp lệ',
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Exception $e) {
+            Log::error('RoomTypeController@indexPublic failed', [
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi lấy danh sách loại phòng.',
+            ], 500);
         }
     }
 }
