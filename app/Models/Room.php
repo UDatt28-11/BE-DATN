@@ -6,9 +6,14 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+
 
 class Room extends Model
 {
+    use HasFactory;
+    protected $table = 'rooms';
+
     protected $fillable = [
         'property_id',
         'room_type_id',
@@ -42,7 +47,7 @@ class Room extends Model
 
     public function bookingDetails(): HasMany
     {
-        return $this->hasMany(BookingDetail::class);
+        return $this->hasMany(BookingDetail::class, 'room_id');
     }
 
     public function promotions(): BelongsToMany

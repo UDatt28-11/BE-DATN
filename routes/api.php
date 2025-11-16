@@ -15,6 +15,9 @@ use App\Http\Controllers\SupplyController;
 use App\Http\Controllers\SupplyLogController;
 use App\Http\Controllers\PromotionController;
 use App\Http\Controllers\ReviewController;
+use App\Http\Controllers\BookingOrderController;
+use App\Http\Controllers\RoomController;
+use App\Http\Controllers\RoomTypeController;
 
 Route::prefix('admin')->group(function () {
     Route::post('login', [AdminAuthController::class, 'login']);
@@ -24,7 +27,22 @@ Route::prefix('admin')->group(function () {
 
     Route::middleware(['auth:sanctum', 'role:admin'])->group(function () {
         Route::post('logout', [AdminAuthController::class, 'logout']);
-        // thêm các route quản lý admin
+        
+        // Booking Orders Management
+        Route::get('/booking-orders', [BookingOrderController::class, 'index']);
+        Route::get('/booking-orders/{id}', [BookingOrderController::class, 'show']);
+        Route::post('/booking-orders', [BookingOrderController::class, 'store']);
+        Route::put('/booking-orders/{id}', [BookingOrderController::class, 'update']);
+        Route::patch('/booking-orders/{id}/status', [BookingOrderController::class, 'updateStatus']);
+        Route::delete('/booking-orders/{id}', [BookingOrderController::class, 'destroy']);
+        
+        // Rooms Management
+        Route::get('/rooms', [RoomController::class, 'index']);
+        Route::get('/rooms/{id}', [RoomController::class, 'show']);
+        
+        // Room Types Management
+        Route::get('/room-types', [RoomTypeController::class, 'index']);
+        Route::get('/room-types/{id}', [RoomTypeController::class, 'show']);
     });
 });
 

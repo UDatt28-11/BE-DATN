@@ -237,6 +237,498 @@
                 }
             }
         },
+        "/api/admin/booking-orders": {
+            "get": {
+                "tags": [
+                    "Booking Orders"
+                ],
+                "summary": "Danh sách đơn đặt phòng",
+                "description": "Lấy danh sách tất cả đơn đặt phòng với bộ lọc",
+                "operationId": "getBookingOrders",
+                "parameters": [
+                    {
+                        "name": "include",
+                        "in": "query",
+                        "description": "Include relationships (details, details.room, details.guests)",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "example": "details,details.room,details.guests"
+                        }
+                    },
+                    {
+                        "name": "status",
+                        "in": "query",
+                        "description": "Filter by status",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "enum": [
+                                "pending",
+                                "confirmed",
+                                "completed",
+                                "cancelled"
+                            ]
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Danh sách đơn đặt phòng",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "properties": {
+                                                    "id": {
+                                                        "type": "integer",
+                                                        "example": 1
+                                                    },
+                                                    "order_code": {
+                                                        "type": "string",
+                                                        "example": "BK20240101120000001"
+                                                    },
+                                                    "customer_name": {
+                                                        "type": "string",
+                                                        "example": "Nguyễn Văn A"
+                                                    },
+                                                    "customer_phone": {
+                                                        "type": "string",
+                                                        "example": "0123456789"
+                                                    },
+                                                    "customer_email": {
+                                                        "type": "string",
+                                                        "example": "example@email.com"
+                                                    },
+                                                    "total_amount": {
+                                                        "type": "number",
+                                                        "example": 1000000
+                                                    },
+                                                    "status": {
+                                                        "type": "string",
+                                                        "example": "pending"
+                                                    }
+                                                },
+                                                "type": "object"
+                                            }
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "tags": [
+                    "Booking Orders"
+                ],
+                "summary": "Tạo đơn đặt phòng mới",
+                "description": "Tạo đơn đặt phòng mới với chi tiết phòng",
+                "operationId": "createBookingOrder",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "customer_name",
+                                    "customer_phone",
+                                    "total_amount",
+                                    "details"
+                                ],
+                                "properties": {
+                                    "guest_id": {
+                                        "type": "integer",
+                                        "example": 1,
+                                        "nullable": true
+                                    },
+                                    "customer_name": {
+                                        "type": "string",
+                                        "example": "Nguyễn Văn A"
+                                    },
+                                    "customer_phone": {
+                                        "type": "string",
+                                        "example": "0123456789"
+                                    },
+                                    "customer_email": {
+                                        "type": "string",
+                                        "example": "example@email.com",
+                                        "nullable": true
+                                    },
+                                    "total_amount": {
+                                        "type": "number",
+                                        "example": 1000000
+                                    },
+                                    "payment_method": {
+                                        "type": "string",
+                                        "example": "cash",
+                                        "nullable": true
+                                    },
+                                    "notes": {
+                                        "type": "string",
+                                        "example": "Ghi chú đặc biệt",
+                                        "nullable": true
+                                    },
+                                    "details": {
+                                        "type": "array",
+                                        "items": {
+                                            "required": [
+                                                "room_id",
+                                                "check_in_date",
+                                                "check_out_date",
+                                                "num_adults",
+                                                "num_children",
+                                                "sub_total"
+                                            ],
+                                            "properties": {
+                                                "room_id": {
+                                                    "type": "integer",
+                                                    "example": 1
+                                                },
+                                                "check_in_date": {
+                                                    "type": "string",
+                                                    "format": "date",
+                                                    "example": "2024-01-15"
+                                                },
+                                                "check_out_date": {
+                                                    "type": "string",
+                                                    "format": "date",
+                                                    "example": "2024-01-17"
+                                                },
+                                                "num_adults": {
+                                                    "type": "integer",
+                                                    "example": 2
+                                                },
+                                                "num_children": {
+                                                    "type": "integer",
+                                                    "example": 0
+                                                },
+                                                "sub_total": {
+                                                    "type": "number",
+                                                    "example": 500000
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Tạo đặt phòng thành công",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "data": {
+                                            "type": "object"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Tạo đặt phòng thành công"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation error"
+                    }
+                }
+            }
+        },
+        "/api/admin/booking-orders/{id}": {
+            "get": {
+                "tags": [
+                    "Booking Orders"
+                ],
+                "summary": "Chi tiết đơn đặt phòng",
+                "description": "Lấy thông tin chi tiết một đơn đặt phòng",
+                "operationId": "getBookingOrder",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "ID của đơn đặt phòng",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "include",
+                        "in": "query",
+                        "description": "Include relationships (details, details.room, details.guests)",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "example": "details,details.room,details.guests"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Chi tiết đơn đặt phòng",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "data": {
+                                            "properties": {
+                                                "id": {
+                                                    "type": "integer",
+                                                    "example": 1
+                                                },
+                                                "order_code": {
+                                                    "type": "string",
+                                                    "example": "BK20240101120000001"
+                                                },
+                                                "customer_name": {
+                                                    "type": "string",
+                                                    "example": "Nguyễn Văn A"
+                                                },
+                                                "customer_phone": {
+                                                    "type": "string",
+                                                    "example": "0123456789"
+                                                },
+                                                "total_amount": {
+                                                    "type": "number",
+                                                    "example": 1000000
+                                                },
+                                                "status": {
+                                                    "type": "string",
+                                                    "example": "pending"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Không tìm thấy đơn đặt phòng"
+                    }
+                }
+            },
+            "put": {
+                "tags": [
+                    "Booking Orders"
+                ],
+                "summary": "Cập nhật đơn đặt phòng",
+                "description": "Cập nhật thông tin đơn đặt phòng (không thay đổi guest_id)",
+                "operationId": "updateBookingOrder",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "ID của đơn đặt phòng",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "customer_name": {
+                                        "type": "string",
+                                        "example": "Nguyễn Văn A"
+                                    },
+                                    "customer_phone": {
+                                        "type": "string",
+                                        "example": "0123456789"
+                                    },
+                                    "customer_email": {
+                                        "type": "string",
+                                        "example": "example@email.com",
+                                        "nullable": true
+                                    },
+                                    "total_amount": {
+                                        "type": "number",
+                                        "example": 1000000
+                                    },
+                                    "payment_method": {
+                                        "type": "string",
+                                        "example": "cash",
+                                        "nullable": true
+                                    },
+                                    "notes": {
+                                        "type": "string",
+                                        "example": "Ghi chú đặc biệt",
+                                        "nullable": true
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Cập nhật đặt phòng thành công",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "data": {
+                                            "type": "object"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Cập nhật đặt phòng thành công"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Không tìm thấy đơn đặt phòng"
+                    },
+                    "422": {
+                        "description": "Validation error"
+                    }
+                }
+            },
+            "delete": {
+                "tags": [
+                    "Booking Orders"
+                ],
+                "summary": "Xóa đơn đặt phòng",
+                "description": "Xóa đơn đặt phòng (chỉ cho phép với trạng thái pending hoặc cancelled)",
+                "operationId": "deleteBookingOrder",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "ID của đơn đặt phòng",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Xóa đặt phòng thành công",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Xóa đặt phòng thành công"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Không tìm thấy đơn đặt phòng"
+                    },
+                    "422": {
+                        "description": "Không thể xóa đơn với trạng thái hiện tại"
+                    }
+                }
+            }
+        },
+        "/api/admin/booking-orders/{id}/status": {
+            "patch": {
+                "tags": [
+                    "Booking Orders"
+                ],
+                "summary": "Cập nhật trạng thái đơn",
+                "description": "Cập nhật trạng thái đơn đặt phòng theo state machine",
+                "operationId": "updateBookingOrderStatus",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "ID của đơn đặt phòng",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "status"
+                                ],
+                                "properties": {
+                                    "status": {
+                                        "type": "string",
+                                        "enum": [
+                                            "pending",
+                                            "confirmed",
+                                            "completed",
+                                            "cancelled"
+                                        ],
+                                        "example": "confirmed"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Cập nhật trạng thái thành công",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "data": {
+                                            "properties": {
+                                                "id": {
+                                                    "type": "integer",
+                                                    "example": 1
+                                                },
+                                                "status": {
+                                                    "type": "string",
+                                                    "example": "confirmed"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Trạng thái không hợp lệ"
+                    }
+                }
+            }
+        },
         "/api/invoices": {
             "get": {
                 "tags": [
@@ -3084,6 +3576,254 @@
                 }
             }
         },
+        "/api/admin/rooms": {
+            "get": {
+                "tags": [
+                    "Rooms"
+                ],
+                "summary": "Danh sách phòng",
+                "description": "Lấy danh sách tất cả phòng với thông tin cơ bản",
+                "operationId": "getRooms",
+                "responses": {
+                    "200": {
+                        "description": "Danh sách phòng",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "properties": {
+                                                    "id": {
+                                                        "type": "integer",
+                                                        "example": 1
+                                                    },
+                                                    "name": {
+                                                        "type": "string",
+                                                        "example": "Phòng 101"
+                                                    },
+                                                    "room_type": {
+                                                        "type": "string",
+                                                        "example": "Standard",
+                                                        "nullable": true
+                                                    },
+                                                    "capacity": {
+                                                        "type": "integer",
+                                                        "example": 2,
+                                                        "nullable": true
+                                                    },
+                                                    "price_per_night": {
+                                                        "type": "number",
+                                                        "example": 500000
+                                                    },
+                                                    "status": {
+                                                        "type": "string",
+                                                        "example": "available",
+                                                        "nullable": true
+                                                    },
+                                                    "description": {
+                                                        "type": "string",
+                                                        "nullable": true
+                                                    }
+                                                },
+                                                "type": "object"
+                                            }
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/admin/rooms/{id}": {
+            "get": {
+                "tags": [
+                    "Rooms"
+                ],
+                "summary": "Chi tiết phòng",
+                "description": "Lấy thông tin chi tiết một phòng",
+                "operationId": "getRoom",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "ID của phòng",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Chi tiết phòng",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "data": {
+                                            "properties": {
+                                                "id": {
+                                                    "type": "integer",
+                                                    "example": 1
+                                                },
+                                                "name": {
+                                                    "type": "string",
+                                                    "example": "Phòng 101"
+                                                },
+                                                "room_type": {
+                                                    "type": "string",
+                                                    "example": "Standard",
+                                                    "nullable": true
+                                                },
+                                                "capacity": {
+                                                    "type": "integer",
+                                                    "example": 2,
+                                                    "nullable": true
+                                                },
+                                                "price_per_night": {
+                                                    "type": "number",
+                                                    "example": 500000
+                                                },
+                                                "status": {
+                                                    "type": "string",
+                                                    "example": "available",
+                                                    "nullable": true
+                                                },
+                                                "description": {
+                                                    "type": "string",
+                                                    "nullable": true
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Không tìm thấy phòng"
+                    }
+                }
+            }
+        },
+        "/api/admin/room-types": {
+            "get": {
+                "tags": [
+                    "Room Types"
+                ],
+                "summary": "Danh sách loại phòng",
+                "description": "Lấy danh sách tất cả loại phòng với thông tin cơ bản",
+                "operationId": "getRoomTypes",
+                "responses": {
+                    "200": {
+                        "description": "Danh sách loại phòng",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "properties": {
+                                                    "id": {
+                                                        "type": "integer",
+                                                        "example": 1
+                                                    },
+                                                    "name": {
+                                                        "type": "string",
+                                                        "example": "Standard Room"
+                                                    },
+                                                    "description": {
+                                                        "type": "string",
+                                                        "example": "Phòng tiêu chuẩn",
+                                                        "nullable": true
+                                                    },
+                                                    "property_id": {
+                                                        "type": "integer",
+                                                        "example": 1,
+                                                        "nullable": true
+                                                    }
+                                                },
+                                                "type": "object"
+                                            }
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/admin/room-types/{id}": {
+            "get": {
+                "tags": [
+                    "Room Types"
+                ],
+                "summary": "Chi tiết loại phòng",
+                "description": "Lấy thông tin chi tiết một loại phòng",
+                "operationId": "getRoomType",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "ID của loại phòng",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Chi tiết loại phòng",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "data": {
+                                            "properties": {
+                                                "id": {
+                                                    "type": "integer",
+                                                    "example": 1
+                                                },
+                                                "name": {
+                                                    "type": "string",
+                                                    "example": "Standard Room"
+                                                },
+                                                "description": {
+                                                    "type": "string",
+                                                    "example": "Phòng tiêu chuẩn",
+                                                    "nullable": true
+                                                },
+                                                "property_id": {
+                                                    "type": "integer",
+                                                    "example": 1,
+                                                    "nullable": true
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Không tìm thấy loại phòng"
+                    }
+                }
+            }
+        },
         "/api/staff/register": {
             "post": {
                 "tags": [
@@ -4307,6 +5047,10 @@
             "description": "Đăng nhập và đăng ký bằng tài khoản Google cho các vai trò khác nhau (user, staff, admin)"
         },
         {
+            "name": "Booking Orders",
+            "description": "API Endpoints for Booking Order Management"
+        },
+        {
             "name": "Invoices",
             "description": "API Endpoints for Invoice Management"
         },
@@ -4321,6 +5065,14 @@
         {
             "name": "Reviews",
             "description": "API Endpoints for Review Management"
+        },
+        {
+            "name": "Rooms",
+            "description": "API Endpoints for Room Management"
+        },
+        {
+            "name": "Room Types",
+            "description": "API Endpoints for Room Type Management"
         },
         {
             "name": "Supplies",
