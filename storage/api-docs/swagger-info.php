@@ -41,6 +41,26 @@
  *         },
  *         schemas={
  *             @OA\Schema(
+ *                 schema="BookingOrder",
+ *                 type="object",
+ *                 title="Booking Order",
+ *                 description="Đơn đặt phòng",
+ *                 properties={
+ *                     @OA\Property(property="id", type="integer", example=1),
+ *                     @OA\Property(property="guest_id", type="integer", example=1),
+ *                     @OA\Property(property="order_code", type="string", example="BK202511010001"),
+ *                     @OA\Property(property="customer_name", type="string", example="Nguyễn Văn An"),
+ *                     @OA\Property(property="customer_phone", type="string", example="0901234567"),
+ *                     @OA\Property(property="customer_email", type="string", example="nva@example.com"),
+ *                     @OA\Property(property="total_amount", type="number", format="float", example=3000000),
+ *                     @OA\Property(property="payment_method", type="string", enum={"credit_card", "bank_transfer", "cash", "e_wallet"}, example="cash"),
+ *                     @OA\Property(property="notes", type="string", example="Yêu cầu phòng view biển"),
+ *                     @OA\Property(property="status", type="string", enum={"pending", "confirmed", "cancelled", "completed"}, example="confirmed"),
+ *                     @OA\Property(property="created_at", type="string", format="date-time"),
+ *                     @OA\Property(property="updated_at", type="string", format="date-time")
+ *                 }
+ *             ),
+ *             @OA\Schema(
  *                 schema="Invoice",
  *                 type="object",
  *                 title="Invoice",

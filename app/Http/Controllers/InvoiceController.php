@@ -194,52 +194,102 @@ class InvoiceController extends Controller
                 ], 400);
             }
 
-            // Create invoice
+            // Generate invoice number
+            $invoiceNumber = 'INV-' . strtoupper(Str::random(8));
+
+            // Create invoice với đầy đủ thông tin
             $invoice = Invoice::create([
                 'booking_order_id' => $bookingOrder->id,
+                'property_id' => $bookingOrder->property_id ?? null,
+                'invoice_number' => $invoiceNumber,
                 'issue_date' => now()->toDateString(),
                 'due_date' => $request->due_date ?? now()->addDays(7)->toDateString(),
+                'customer_name' => $bookingOrder->customer_name,
+                'customer_email' => $bookingOrder->customer_email,
+                'customer_phone' => $bookingOrder->customer_phone,
+                'customer_address' => null, // Có thể lấy từ booking nếu có
+                'subtotal' => 0,
+                'tax_rate' => 10, // Default 10%
+                'tax_amount' => 0,
+                'discount_amount' => 0,
                 'total_amount' => 0,  // Will be updated after calculating items
-                'status' => 'pending'
+                'paid_amount' => 0,
+                'balance' => 0,
+                'status' => 'pending', // Giữ lại để tương thích
+                'payment_status' => 'pending',
+                'invoice_status' => 'draft',
+                'payment_method' => $bookingOrder->payment_method ?? null,
+                'notes' => $request->notes ?? $bookingOrder->notes ?? null,
+                'terms_conditions' => null,
             ]);
 
             // Create invoice items from booking details
-            $totalAmount = 0;
+            $subtotal = 0;
+            $taxRate = 10; // Default tax rate
             foreach ($bookingOrder->bookingDetails as $detail) {
                 // Calculate nights from check-in and check-out
                 $nights = $detail->check_out_date->diffInDays($detail->check_in_date);
                 if ($nights <= 0) $nights = 1; // At least 1 night
                 
-                $roomPrice = $detail->room->price_per_night * $nights;
+                $unitPrice = $detail->room->price_per_night ?? 0;
+                $amount = $unitPrice * $nights; // Tổng trước thuế
+                $taxAmount = ($amount * $taxRate) / 100;
+                $total = $amount + $taxAmount; // Tổng sau thuế
                 
                 $item = InvoiceItem::create([
                     'invoice_id' => $invoice->id,
+                    'booking_detail_id' => $detail->id,
+                    'room_id' => $detail->room_id,
                     'description' => "Phòng {$detail->room->name} - {$nights} đêm",
-                    'quantity' => 1,
-                    'unit_price' => $detail->room->price_per_night,
-                    'total_line' => $roomPrice,
+                    'quantity' => $nights,
+                    'unit_price' => $unitPrice,
+                    'tax_rate' => $taxRate,
+                    'tax_amount' => $taxAmount,
+                    'amount' => $amount,
+                    'total_line' => $total, // Giữ lại để tương thích
+                    'total' => $total,
                     'item_type' => 'room_charge'
                 ]);
-                $totalAmount += $roomPrice;
+                $subtotal += $amount;
             }
 
             // Create invoice items from booking services
             foreach ($bookingOrder->bookingServices as $bookingService) {
-                $servicePrice = $bookingService->service->unit_price * $bookingService->quantity;
+                $unitPrice = $bookingService->service->unit_price ?? 0;
+                $quantity = $bookingService->quantity ?? 1;
+                $amount = $unitPrice * $quantity;
+                $taxAmount = ($amount * $taxRate) / 100;
+                $total = $amount + $taxAmount;
+                
                 $item = InvoiceItem::create([
                     'invoice_id' => $invoice->id,
-                    'description' => $bookingService->service->name . ' - ' . ($bookingService->service->description ?? ''),
-                    'quantity' => $bookingService->quantity,
-                    'unit_price' => $bookingService->service->unit_price,
-                    'total_line' => $servicePrice,
+                    'service_id' => $bookingService->service_id ?? null,
+                    'description' => ($bookingService->service->name ?? 'Dịch vụ') . ' - ' . ($bookingService->service->description ?? ''),
+                    'quantity' => $quantity,
+                    'unit_price' => $unitPrice,
+                    'tax_rate' => $taxRate,
+                    'tax_amount' => $taxAmount,
+                    'amount' => $amount,
+                    'total_line' => $total,
+                    'total' => $total,
                     'item_type' => 'service_charge'
                 ]);
-                $totalAmount += $servicePrice;
+                $subtotal += $amount;
             }
+
+            // Calculate totals
+            $taxAmount = ($subtotal * $taxRate) / 100;
+            $totalAmount = $subtotal + $taxAmount;
+            $balance = $totalAmount; // Chưa thanh toán nên balance = total_amount
 
             // Update invoice totals
             $invoice->update([
-                'total_amount' => $totalAmount
+                'subtotal' => $subtotal,
+                'tax_rate' => $taxRate,
+                'tax_amount' => $taxAmount,
+                'total_amount' => $totalAmount,
+                'balance' => $balance,
+                'invoice_status' => 'sent', // Tự động chuyển sang sent sau khi tạo
             ]);
 
             DB::commit();
@@ -330,27 +380,39 @@ class InvoiceController extends Controller
     public function markAsPaid(Request $request, string $id): JsonResponse
     {
         $request->validate([
-            'payment_method' => 'nullable|string|max:50',
-            'payment_notes' => 'nullable|string|max:500'
+            'payment_method' => 'nullable|in:cash,bank_transfer,credit_card,e_wallet,other',
+            'payment_notes' => 'nullable|string|max:500',
+            'paid_amount' => 'nullable|numeric|min:0',
         ]);
 
         $invoice = Invoice::findOrFail($id);
 
-        if ($invoice->status === 'paid') {
+        if ($invoice->payment_status === 'paid') {
             return response()->json([
                 'success' => false,
                 'message' => 'Hóa đơn đã được thanh toán'
             ], 400);
         }
 
+        $paidAmount = $request->paid_amount ?? $invoice->total_amount;
+        $balance = $invoice->total_amount - $paidAmount;
+        $paymentStatus = $balance > 0 ? 'partially_paid' : 'paid';
+
         $invoice->update([
-            'status' => 'paid'
+            'status' => 'paid', // Giữ lại để tương thích
+            'payment_status' => $paymentStatus,
+            'invoice_status' => 'paid',
+            'paid_amount' => $paidAmount,
+            'balance' => $balance,
+            'payment_method' => $request->payment_method ?? $invoice->payment_method,
+            'payment_date' => now()->toDateString(),
+            'payment_notes' => $request->payment_notes ?? null,
         ]);
 
         return response()->json([
             'success' => true,
             'message' => 'Hóa đơn đã được đánh dấu là đã thanh toán',
-            'data' => $invoice
+            'data' => $invoice->fresh()
         ]);
     }
 
@@ -385,16 +447,52 @@ class InvoiceController extends Controller
     public function updateStatus(Request $request, string $id): JsonResponse
     {
         $request->validate([
-            'status' => 'required|in:pending,paid,overdue,cancelled'
+            'status' => 'nullable|in:pending,paid,overdue,cancelled',
+            'payment_status' => 'nullable|in:pending,partially_paid,paid,overdue,cancelled',
+            'invoice_status' => 'nullable|in:draft,sent,viewed,paid,cancelled',
         ]);
 
         $invoice = Invoice::findOrFail($id);
-        $invoice->update(['status' => $request->status]);
+        
+        $updateData = [];
+        
+        // Cập nhật status (giữ lại để tương thích)
+        if ($request->has('status')) {
+            $updateData['status'] = $request->status;
+            // Đồng bộ payment_status nếu không được chỉ định
+            if (!$request->has('payment_status')) {
+                $updateData['payment_status'] = $request->status === 'paid' ? 'paid' : 
+                    ($request->status === 'cancelled' ? 'cancelled' : 'pending');
+            }
+        }
+        
+        // Cập nhật payment_status
+        if ($request->has('payment_status')) {
+            $updateData['payment_status'] = $request->payment_status;
+            // Đồng bộ status nếu không được chỉ định
+            if (!$request->has('status')) {
+                $updateData['status'] = $request->payment_status === 'paid' ? 'paid' : 
+                    ($request->payment_status === 'cancelled' ? 'cancelled' : 'pending');
+            }
+        }
+        
+        // Cập nhật invoice_status
+        if ($request->has('invoice_status')) {
+            $updateData['invoice_status'] = $request->invoice_status;
+        }
+        
+        // Nếu chuyển sang cancelled, cập nhật balance
+        if (($request->status === 'cancelled' || $request->payment_status === 'cancelled') && 
+            !isset($updateData['balance'])) {
+            $updateData['balance'] = 0;
+        }
+        
+        $invoice->update($updateData);
 
         return response()->json([
             'success' => true,
             'message' => 'Trạng thái hóa đơn đã được cập nhật',
-            'data' => $invoice
+            'data' => $invoice->fresh()
         ]);
     }
 
@@ -477,27 +575,90 @@ class InvoiceController extends Controller
     public function store(Request $request): JsonResponse
     {
         $request->validate([
-            'booking_order_id' => 'required|exists:booking_orders,id',
+            'property_id' => 'nullable|exists:properties,id',
+            'booking_order_id' => 'nullable|exists:booking_orders,id',
+            'customer_name' => 'required|string|max:255',
+            'customer_email' => 'nullable|email|max:255',
+            'customer_phone' => 'nullable|string|max:20',
+            'customer_address' => 'nullable|string',
             'issue_date' => 'required|date',
             'due_date' => 'required|date|after:issue_date',
-            'total_amount' => 'required|numeric|min:0',
-            'status' => 'in:pending,paid,overdue,cancelled',
-            'calculation_method' => 'in:automatic,manual',
+            'payment_method' => 'nullable|in:cash,bank_transfer,credit_card,e_wallet,other',
+            'notes' => 'nullable|string',
+            'terms_conditions' => 'nullable|string',
+            'items' => 'required|array|min:1',
+            'items.*.item_type' => 'required|in:room_charge,service_charge,penalty,other',
+            'items.*.description' => 'required|string',
+            'items.*.quantity' => 'required|integer|min:1',
+            'items.*.unit_price' => 'required|numeric|min:0',
+            'items.*.tax_rate' => 'nullable|numeric|min:0|max:100',
         ]);
 
         try {
             DB::beginTransaction();
 
+            // Generate invoice number
+            $invoiceNumber = 'INV-' . strtoupper(Str::random(8));
+
+            // Calculate totals from items
+            $subtotal = 0;
+            $taxRate = $request->tax_rate ?? 10;
+            foreach ($request->items as $itemData) {
+                $itemTaxRate = $itemData['tax_rate'] ?? $taxRate;
+                $amount = $itemData['quantity'] * $itemData['unit_price'];
+                $subtotal += $amount;
+            }
+            $taxAmount = ($subtotal * $taxRate) / 100;
+            $totalAmount = $subtotal + $taxAmount;
+            $balance = $totalAmount;
+
+            // Create invoice
             $invoice = Invoice::create([
-                'booking_order_id' => $request->booking_order_id,
+                'property_id' => $request->property_id ?? null,
+                'booking_order_id' => $request->booking_order_id ?? null,
+                'invoice_number' => $invoiceNumber,
                 'issue_date' => $request->issue_date,
                 'due_date' => $request->due_date,
-                'total_amount' => $request->total_amount,
-                'status' => $request->status ?? 'pending',
-                'calculation_method' => $request->calculation_method ?? 'automatic',
+                'customer_name' => $request->customer_name,
+                'customer_email' => $request->customer_email ?? null,
+                'customer_phone' => $request->customer_phone ?? null,
+                'customer_address' => $request->customer_address ?? null,
+                'subtotal' => $subtotal,
+                'tax_rate' => $taxRate,
+                'tax_amount' => $taxAmount,
                 'discount_amount' => 0,
-                'refund_amount' => 0,
+                'total_amount' => $totalAmount,
+                'paid_amount' => 0,
+                'balance' => $balance,
+                'status' => 'pending', // Giữ lại để tương thích
+                'payment_status' => 'pending',
+                'invoice_status' => 'draft',
+                'payment_method' => $request->payment_method ?? null,
+                'notes' => $request->notes ?? null,
+                'terms_conditions' => $request->terms_conditions ?? null,
+                'calculation_method' => 'manual',
             ]);
+
+            // Create invoice items
+            foreach ($request->items as $itemData) {
+                $itemTaxRate = $itemData['tax_rate'] ?? $taxRate;
+                $amount = $itemData['quantity'] * $itemData['unit_price'];
+                $itemTaxAmount = ($amount * $itemTaxRate) / 100;
+                $total = $amount + $itemTaxAmount;
+
+                InvoiceItem::create([
+                    'invoice_id' => $invoice->id,
+                    'description' => $itemData['description'],
+                    'quantity' => $itemData['quantity'],
+                    'unit_price' => $itemData['unit_price'],
+                    'tax_rate' => $itemTaxRate,
+                    'tax_amount' => $itemTaxAmount,
+                    'amount' => $amount,
+                    'total_line' => $total,
+                    'total' => $total,
+                    'item_type' => $itemData['item_type'],
+                ]);
+            }
 
             DB::commit();
 

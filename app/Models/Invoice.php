@@ -10,12 +10,30 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 class Invoice extends Model
 {
     protected $fillable = [
+        'property_id',
         'booking_order_id',
+        'invoice_number',
         'issue_date',
         'due_date',
-        'total_amount',
-        'status',
+        'customer_name',
+        'customer_email',
+        'customer_phone',
+        'customer_address',
+        'subtotal',
+        'tax_rate',
+        'tax_amount',
         'discount_amount',
+        'total_amount',
+        'paid_amount',
+        'balance',
+        'status', // Giữ lại để tương thích
+        'payment_status',
+        'invoice_status',
+        'payment_method',
+        'payment_date',
+        'payment_notes',
+        'notes',
+        'terms_conditions',
         'refund_amount',
         'refund_policy_id',
         'refund_date',
@@ -23,11 +41,17 @@ class Invoice extends Model
     ];
 
     protected $casts = [
+        'subtotal' => 'decimal:2',
+        'tax_rate' => 'decimal:2',
+        'tax_amount' => 'decimal:2',
         'total_amount' => 'decimal:2',
+        'paid_amount' => 'decimal:2',
+        'balance' => 'decimal:2',
         'discount_amount' => 'decimal:2',
         'refund_amount' => 'decimal:2',
         'issue_date' => 'date',
         'due_date' => 'date',
+        'payment_date' => 'date',
         'refund_date' => 'date',
     ];
 

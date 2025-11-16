@@ -93,33 +93,11 @@ class InvoiceItemSeeder extends Seeder
                 'invoice_id' => $invoices[3]->id,
                 'description' => 'Phòng Dalat Suite 401 - 1 đêm',
                 'quantity' => 1,
-                'unit_price' => 2000000.00,
-                'total_line' => 2000000.00,
+                'unit_price' => 1800000.00,
+                'total_line' => 1800000.00,
                 'item_type' => 'room_charge',
                 'created_at' => now()->subDays(10),
                 'updated_at' => now()->subDays(10),
-            ],
-            [
-                'invoice_id' => $invoices[3]->id,
-                'description' => 'Dịch vụ spa cao cấp',
-                'quantity' => 1,
-                'unit_price' => 1000000.00,
-                'total_line' => 1000000.00,
-                'item_type' => 'service_charge',
-                'created_at' => now()->subDays(10),
-                'updated_at' => now()->subDays(10),
-            ],
-
-            // Invoice 5 - Room charges (cancelled)
-            [
-                'invoice_id' => $invoices[4]->id,
-                'description' => 'Phòng PhuQuoc Ocean 101 - 3 đêm',
-                'quantity' => 3,
-                'unit_price' => 1500000.00,
-                'total_line' => 4500000.00,
-                'item_type' => 'room_charge',
-                'created_at' => now()->subDays(7),
-                'updated_at' => now()->subDays(7),
             ]
         ];
 

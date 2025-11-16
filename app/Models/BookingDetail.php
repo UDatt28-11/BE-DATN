@@ -38,6 +38,11 @@ class BookingDetail extends Model
 
     public function bookingServices(): HasMany
     {
-        return $this->hasMany(BookingService::class);
+        return $this->hasMany(BookingService::class, 'booking_details_id');
+    }
+
+    public function guests(): HasMany
+    {
+        return $this->hasMany(CheckedInGuest::class, 'booking_details_id');
     }
 }

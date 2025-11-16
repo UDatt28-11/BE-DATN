@@ -54,7 +54,11 @@ class ReviewControllerTest extends TestCase
         $bookingOrder = BookingOrder::create([
             'guest_id' => $this->user->id,
             'order_code' => 'TEST001',
+            'customer_name' => 'Test User',
+            'customer_phone' => '0901234567',
+            'customer_email' => 'test@example.com',
             'total_amount' => 500,
+            'payment_method' => 'cash',
             'status' => 'completed'
         ]);
 

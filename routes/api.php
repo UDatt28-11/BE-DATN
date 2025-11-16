@@ -9,6 +9,8 @@ use App\Http\Controllers\SupplyController;
 use App\Http\Controllers\SupplyLogController;
 use App\Http\Controllers\PromotionController;
 use App\Http\Controllers\ReviewController;
+use App\Http\Controllers\BookingController;
+use App\Http\Controllers\RoomController;
 
 /**
  * ========================================
@@ -27,6 +29,55 @@ Route::get('/me', [AuthController::class, 'me']);
 
 // Đăng xuất & xóa token
 Route::post('/logout', [AuthController::class, 'logout']);
+
+/**
+ * ========================================
+ * 🏠 ROOMS MANAGEMENT (Quản lý Phòng)
+ * ========================================
+ */
+
+Route::prefix('admin/rooms')->group(function () {
+    // GET /admin/rooms - Danh sách phòng
+    Route::get('/', [RoomController::class, 'index']);
+    
+    // GET /admin/rooms/{id} - Chi tiết phòng
+    Route::get('/{id}', [RoomController::class, 'show'])->where('id', '[0-9]+');
+    
+    // POST /admin/rooms - Tạo phòng mới
+    Route::post('/', [RoomController::class, 'store']);
+    
+    // PUT /admin/rooms/{id} - Cập nhật phòng
+    Route::put('/{id}', [RoomController::class, 'update'])->where('id', '[0-9]+');
+    
+    // DELETE /admin/rooms/{id} - Xóa phòng
+    Route::delete('/{id}', [RoomController::class, 'destroy'])->where('id', '[0-9]+');
+});
+
+/**
+ * ========================================
+ * 📅 BOOKING ORDERS MANAGEMENT (Quản lý Đặt phòng)
+ * ========================================
+ */
+
+Route::prefix('admin/booking-orders')->group(function () {
+    // GET /admin/booking-orders - Danh sách đặt phòng
+    Route::get('/', [BookingController::class, 'index']);
+    
+    // GET /admin/booking-orders/{id} - Chi tiết đặt phòng
+    Route::get('/{id}', [BookingController::class, 'show'])->where('id', '[0-9]+');
+    
+    // POST /admin/booking-orders - Tạo đặt phòng mới
+    Route::post('/', [BookingController::class, 'store']);
+    
+    // PUT /admin/booking-orders/{id} - Cập nhật đặt phòng
+    Route::put('/{id}', [BookingController::class, 'update'])->where('id', '[0-9]+');
+    
+    // PATCH /admin/booking-orders/{id}/status - Cập nhật trạng thái
+    Route::patch('/{id}/status', [BookingController::class, 'updateStatus'])->where('id', '[0-9]+');
+    
+    // DELETE /admin/booking-orders/{id} - Xóa đặt phòng
+    Route::delete('/{id}', [BookingController::class, 'destroy'])->where('id', '[0-9]+');
+});
 
 /**
  * ========================================

@@ -26,6 +26,6 @@ class BookingService extends Model
 
     public function service(): BelongsTo
     {
-        return $this->belongsTo(Supply::class, 'service_id');
+        return $this->belongsTo(Service::class, 'service_id');
     }
 }
