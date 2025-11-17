@@ -7,6 +7,7 @@ use App\Models\BookingDetail;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
 
 class BookingController extends Controller
@@ -371,6 +372,289 @@ class BookingController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Có lỗi xảy ra khi xóa đặt phòng: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Customer: Display a listing of their own booking orders
+     */
+    public function customerIndex(Request $request): JsonResponse
+    {
+        try {
+            $user = Auth::user();
+            
+            $query = BookingOrder::with(['guest', 'property', 'bookingDetails.room', 'invoice'])
+                ->where('guest_id', $user->id);
+
+            // Filter by status
+            if ($request->has('status') && $request->status !== 'all') {
+                if (is_string($request->status)) {
+                    $statuses = explode(',', $request->status);
+                    $query->whereIn('status', $statuses);
+                } else {
+                    $query->where('status', $request->status);
+                }
+            }
+
+            // Sort
+            $sort = $request->get('sort', '-created_at');
+            if ($sort === '-created_at') {
+                $query->orderBy('created_at', 'desc');
+            } elseif ($sort === 'created_at') {
+                $query->orderBy('created_at', 'asc');
+            } else {
+                $query->orderBy('created_at', 'desc');
+            }
+
+            // Pagination
+            $perPage = $request->get('per_page', 15);
+            $bookings = $query->paginate($perPage);
+
+            // Format response
+            $bookings->getCollection()->transform(function ($booking) {
+                $details = $booking->bookingDetails;
+                $checkinDate = $details->isNotEmpty() ? $details->min('check_in_date') : null;
+                $checkoutDate = $details->isNotEmpty() ? $details->max('check_out_date') : null;
+                
+                $booking->checkin_date = $checkinDate ? $checkinDate->format('Y-m-d') : null;
+                $booking->checkout_date = $checkoutDate ? $checkoutDate->format('Y-m-d') : null;
+                $booking->code = $booking->order_code;
+                $booking->details_count = $details->count();
+                
+                return $booking;
+            });
+
+            return response()->json([
+                'success' => true,
+                'data' => $bookings->items(),
+                'meta' => [
+                    'pagination' => [
+                        'current_page' => $bookings->currentPage(),
+                        'per_page' => $bookings->perPage(),
+                        'total' => $bookings->total(),
+                        'last_page' => $bookings->lastPage(),
+                    ]
+                ]
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Không thể tải dữ liệu: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Customer: Display the specified booking order (only their own)
+     */
+    public function customerShow(Request $request, string $id): JsonResponse
+    {
+        try {
+            $user = Auth::user();
+            
+            $booking = BookingOrder::with([
+                'guest', 
+                'property', 
+                'bookingDetails', 
+                'bookingDetails.room', 
+                'bookingDetails.room.roomType',
+                'bookingDetails.guests',
+                'invoice'
+            ])->where('guest_id', $user->id)->findOrFail($id);
+
+            // Format response
+            $details = $booking->bookingDetails;
+            $checkinDate = $details->isNotEmpty() ? $details->min('check_in_date') : null;
+            $checkoutDate = $details->isNotEmpty() ? $details->max('check_out_date') : null;
+            
+            $booking->checkin_date = $checkinDate ? $checkinDate->format('Y-m-d') : null;
+            $booking->checkout_date = $checkoutDate ? $checkoutDate->format('Y-m-d') : null;
+            $booking->code = $booking->order_code;
+            $booking->details_count = $details->count();
+            $booking->details = $details;
+
+            return response()->json([
+                'success' => true,
+                'data' => $booking
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Không thể tải thông tin đặt phòng: ' . $e->getMessage()
+            ], 404);
+        }
+    }
+
+    /**
+     * Customer: Store a newly created booking order
+     */
+    public function customerStore(Request $request): JsonResponse
+    {
+        $user = Auth::user();
+        
+        $request->validate([
+            'customer_name' => 'required|string|max:255',
+            'customer_phone' => 'required|string|max:20',
+            'customer_email' => 'nullable|email|max:255',
+            'total_amount' => 'required|numeric|min:0',
+            'payment_method' => 'nullable|in:credit_card,bank_transfer,cash,e_wallet',
+            'notes' => 'nullable|string',
+            'details' => 'required|array|min:1',
+            'details.*.room_id' => 'required|exists:rooms,id',
+            'details.*.check_in_date' => 'required|date',
+            'details.*.check_out_date' => 'required|date|after:details.*.check_in_date',
+            'details.*.num_adults' => 'required|integer|min:1',
+            'details.*.num_children' => 'required|integer|min:0',
+            'details.*.sub_total' => 'required|numeric|min:0',
+        ]);
+
+        try {
+            DB::beginTransaction();
+
+            // Generate order code
+            $orderCode = 'BK-' . strtoupper(Str::random(8));
+
+            // Create booking order with customer's user ID
+            $booking = BookingOrder::create([
+                'guest_id' => $user->id,
+                'property_id' => $request->property_id ?? null,
+                'order_code' => $orderCode,
+                'customer_name' => $request->customer_name,
+                'customer_phone' => $request->customer_phone,
+                'customer_email' => $request->customer_email ?? $user->email,
+                'total_amount' => $request->total_amount,
+                'payment_method' => $request->payment_method ?? 'cash',
+                'notes' => $request->notes ?? null,
+                'status' => 'pending',
+            ]);
+
+            // Create booking details
+            foreach ($request->details as $detailData) {
+                BookingDetail::create([
+                    'booking_order_id' => $booking->id,
+                    'room_id' => $detailData['room_id'],
+                    'check_in_date' => $detailData['check_in_date'],
+                    'check_out_date' => $detailData['check_out_date'],
+                    'num_adults' => $detailData['num_adults'],
+                    'num_children' => $detailData['num_children'],
+                    'sub_total' => $detailData['sub_total'],
+                    'status' => 'active',
+                ]);
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Đặt phòng đã được tạo thành công',
+                'data' => $booking->load(['bookingDetails.room', 'guest', 'property'])
+            ], 201);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi tạo đặt phòng: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Customer: Cancel their own booking
+     */
+    public function customerCancel(string $id): JsonResponse
+    {
+        try {
+            $user = Auth::user();
+            
+            $booking = BookingOrder::where('guest_id', $user->id)->findOrFail($id);
+            
+            // Only allow cancellation if booking is pending or confirmed
+            if (!in_array($booking->status, ['pending', 'confirmed'])) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Không thể hủy đặt phòng với trạng thái hiện tại'
+                ], 400);
+            }
+
+            $booking->update(['status' => 'cancelled']);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Đặt phòng đã được hủy thành công',
+                'data' => $booking
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi hủy đặt phòng: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Staff: Check-in booking
+     */
+    public function checkIn(Request $request, string $id): JsonResponse
+    {
+        try {
+            $booking = BookingOrder::with('bookingDetails')->findOrFail($id);
+            
+            // Check if booking is confirmed
+            if ($booking->status !== 'confirmed') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Chỉ có thể check-in đặt phòng đã được xác nhận'
+                ], 400);
+            }
+
+            // Update booking status to completed (checked in)
+            $booking->update(['status' => 'completed']);
+
+            // Update booking details status
+            $booking->bookingDetails()->update(['status' => 'checked_in']);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Check-in thành công',
+                'data' => $booking->load(['bookingDetails.room', 'guest', 'property'])
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi check-in: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Staff: Check-out booking
+     */
+    public function checkOut(Request $request, string $id): JsonResponse
+    {
+        try {
+            $booking = BookingOrder::with('bookingDetails')->findOrFail($id);
+            
+            // Check if booking is checked in
+            if ($booking->status !== 'completed') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Chỉ có thể check-out đặt phòng đã check-in'
+                ], 400);
+            }
+
+            // Update booking details status
+            $booking->bookingDetails()->update(['status' => 'checked_out']);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Check-out thành công',
+                'data' => $booking->load(['bookingDetails.room', 'guest', 'property'])
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi check-out: ' . $e->getMessage()
             ], 500);
         }
     }

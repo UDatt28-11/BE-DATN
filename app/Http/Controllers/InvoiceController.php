@@ -11,6 +11,7 @@ use App\Models\InvoiceDiscount;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
 
 /**
@@ -1422,6 +1423,88 @@ class InvoiceController extends Controller
                 'success' => false,
                 'message' => 'Có lỗi xảy ra khi gộp hóa đơn: ' . $e->getMessage()
             ], 500);
+        }
+    }
+
+    /**
+     * Customer: Display a listing of their own invoices
+     */
+    public function customerIndex(Request $request): JsonResponse
+    {
+        try {
+            $user = Auth::user();
+            
+            $query = Invoice::with(['bookingOrder', 'invoiceItems'])
+                ->whereHas('bookingOrder', function ($q) use ($user) {
+                    $q->where('guest_id', $user->id);
+                });
+
+            // Filter by status
+            if ($request->has('status')) {
+                $query->where('status', $request->status);
+            }
+
+            // Filter by payment status
+            if ($request->has('payment_status')) {
+                if ($request->payment_status === 'paid') {
+                    $query->paid();
+                } elseif ($request->payment_status === 'unpaid') {
+                    $query->unpaid();
+                } elseif ($request->payment_status === 'overdue') {
+                    $query->overdue();
+                }
+            }
+
+            // Search by invoice number
+            if ($request->has('search')) {
+                $query->where('invoice_number', 'like', '%' . $request->search . '%');
+            }
+
+            // Date range filter
+            if ($request->has('date_from')) {
+                $query->whereDate('created_at', '>=', $request->date_from);
+            }
+            if ($request->has('date_to')) {
+                $query->whereDate('created_at', '<=', $request->date_to);
+            }
+
+            $invoices = $query->orderBy('created_at', 'desc')->paginate(15);
+
+            return response()->json([
+                'success' => true,
+                'data' => $invoices
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Không thể tải dữ liệu: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Customer: Display the specified invoice (only their own)
+     */
+    public function customerShow(string $id): JsonResponse
+    {
+        try {
+            $user = Auth::user();
+            
+            $invoice = Invoice::with(['bookingOrder', 'invoiceItems', 'discounts', 'refundPolicy'])
+                ->whereHas('bookingOrder', function ($q) use ($user) {
+                    $q->where('guest_id', $user->id);
+                })
+                ->findOrFail($id);
+
+            return response()->json([
+                'success' => true,
+                'data' => $invoice
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Không thể tải thông tin hóa đơn: ' . $e->getMessage()
+            ], 404);
         }
     }
 }
