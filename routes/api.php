@@ -15,6 +15,8 @@ use App\Http\Controllers\User\VerifyEmailController;
 use App\Http\Controllers\User\ResetPasswordController;
 use App\Http\Controllers\User\AuthController;
 
+use App\Http\Controllers\Api\FileController;
+
 // === GOOGLE LOGIN ===
 use App\Http\Controllers\Auth\GoogleController;
 
@@ -47,6 +49,8 @@ use App\Http\Controllers\Api\Admin\EmailConfigController;
 use App\Http\Controllers\Api\Admin\AnalyticsController;
 use App\Http\Controllers\Api\Public\HomeController;
 use App\Http\Controllers\Auth\AdminPasswordResetController;
+use App\Http\Controllers\Api\User\VoucherController as UserVoucherController;
+use App\Http\Controllers\Api\Staff\BookingController as StaffBookingController;
 
 // ==================================================================
 // 1. GOOGLE LOGIN (PUBLIC)
@@ -72,7 +76,7 @@ Route::prefix('admin')->group(function () {
     Route::post('login', [AdminAuthController::class, 'login'])
         ->middleware('throttle:10,1');
     Route::middleware('auth:sanctum')->post('logout', LogoutController::class);
-    
+
     // Password reset with OTP
     Route::post('forgot-password', [AdminPasswordResetController::class, 'sendOtp']);
     Route::post('reset-password', [AdminPasswordResetController::class, 'resetPassword']);
@@ -108,17 +112,26 @@ Route::prefix('user')->group(function () {
 // ==================================================================
 // 6. ADMIN ROUTES (role:admin)
 // ==================================================================
+// Tất cả routes trong group này yêu cầu: Bearer Token + Role: Admin
 Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(function () {
 
-    // Properties
+    // ========================================
+    // 🏠 PROPERTIES MANAGEMENT (Quản lý Homestay)
+    // ========================================
     Route::post('properties/{property}/verify', [PropertyController::class, 'verify']);
     Route::post('properties/{property}/reject', [PropertyController::class, 'reject']);
     Route::apiResource('properties', PropertyController::class);
     Route::post('properties/{property}/upload-images', [PropertyImageController::class, 'store']);
-    Route::delete('property-images/{propertyImage}', [PropertyImageController::class, 'destroy']);
-    Route::post('property-images/{propertyImage}/set-primary', [PropertyImageController::class, 'setPrimary']);
+    // Bulk delete cần khai báo TRƯỚC route có {propertyImage} để tránh Laravel bind 'bulk' thành id
+    Route::delete('property-images/bulk', [PropertyImageController::class, 'bulkDestroy']);
+    Route::delete('property-images/{propertyImage}', [PropertyImageController::class, 'destroy'])
+        ->whereNumber('propertyImage');
+    Route::post('property-images/{propertyImage}/set-primary', [PropertyImageController::class, 'setPrimary'])
+        ->whereNumber('propertyImage');
 
-    // Users
+    // ========================================
+    // 👥 USERS MANAGEMENT (Quản lý Người dùng)
+    // ========================================
     Route::get('users/lookup', [UserController::class, 'lookup']);
     Route::get('users/locked', [UserController::class, 'locked']);
     Route::post('users/bulk-lock', [UserController::class, 'bulkLock']);
@@ -128,15 +141,28 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
     Route::post('users/{user}/reject-identity', [UserController::class, 'rejectIdentity']);
     Route::apiResource('users', UserController::class);
 
-    // Amenities
+    // ========================================
+    // 🛎️ AMENITIES MANAGEMENT (Quản lý Tiện ích)
+    // ========================================
+    Route::get('amenities/history', [AmenityController::class, 'history']);
+    Route::post('amenities/{id}/restore', [AmenityController::class, 'restore'])->whereNumber('id');
+    Route::delete('amenities/{id}/force', [AmenityController::class, 'forceDelete'])->whereNumber('id');
     Route::apiResource('amenities', AmenityController::class);
 
-    // Room Types
+    // ========================================
+    // 🏨 ROOM TYPES MANAGEMENT (Quản lý Loại phòng)
+    // ========================================
+    Route::get('room-types/history', [RoomTypeController::class, 'history']);
+    Route::post('room-types/{id}/restore', [RoomTypeController::class, 'restore'])->whereNumber('id');
+    Route::delete('room-types/{id}/force', [RoomTypeController::class, 'forceDelete'])->whereNumber('id');
     Route::patch('room-types/{roomType}/status', [RoomTypeController::class, 'updateStatus']);
     Route::get('room-types/{roomType}/amenities', [RoomTypeController::class, 'showWithAmenities']);
     Route::apiResource('room-types', RoomTypeController::class);
 
-    // Rooms - Admin routes (lấy tất cả rooms kể cả chưa verified)
+    // ========================================
+    // 🛏️ ROOMS MANAGEMENT (Quản lý Phòng)
+    // ========================================
+    // Admin routes: lấy tất cả rooms kể cả chưa verified
     Route::get('rooms', [RoomController::class, 'index']);
     Route::get('rooms/{room}', [RoomController::class, 'show']);
     Route::patch('rooms/{room}/status', [RoomController::class, 'updateStatus']);
@@ -147,33 +173,39 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
     Route::delete('rooms/{room}', [RoomController::class, 'destroy']);
     Route::post('rooms/{room}/upload-images', [RoomImageController::class, 'store']);
     Route::delete('room-images/{roomImage}', [RoomImageController::class, 'destroy']);
+    Route::delete('room-images/bulk', [RoomImageController::class, 'bulkDestroy']);
 
-    // Booking Orders
+    // ========================================
+    // 📅 BOOKING ORDERS MANAGEMENT (Quản lý Đặt phòng)
+    // ========================================
     Route::get('booking-orders/statistics', [BookingOrderController::class, 'statistics']);
     Route::patch('booking-orders/{id}/status', [BookingOrderController::class, 'updateStatus']);
+    Route::get('booking-orders/export', [BookingOrderController::class, 'export']);
     Route::apiResource('booking-orders', BookingOrderController::class);
-    
-    // Email Templates
+
+    // ========================================
+    // 📧 EMAIL MANAGEMENT (Quản lý Email)
+    // ========================================
     Route::apiResource('email-templates', EmailTemplateController::class);
-    
-    // Email Logs
     Route::get('email-logs/statistics', [EmailLogController::class, 'statistics']);
     Route::apiResource('email-logs', EmailLogController::class)->only(['index', 'show']);
-    
-    // Email Config
     Route::get('email-configs', [EmailConfigController::class, 'index']);
     Route::put('email-configs', [EmailConfigController::class, 'update']);
     Route::get('email-configs/smtp', [EmailConfigController::class, 'getSmtpConfig']);
     Route::put('email-configs/smtp', [EmailConfigController::class, 'updateSmtpConfig']);
-    
-    // Analytics
+
+    // ========================================
+    // 📊 ANALYTICS (Thống kê & Phân tích)
+    // ========================================
     Route::get('analytics/dashboard', [AnalyticsController::class, 'dashboard']);
     Route::get('analytics/revenue', [AnalyticsController::class, 'revenue']);
     Route::get('analytics/customers', [AnalyticsController::class, 'customers']);
     Route::get('analytics/bookings', [AnalyticsController::class, 'bookings']);
     Route::get('analytics/properties', [AnalyticsController::class, 'properties']);
 
-    // Promotions
+    // ========================================
+    // 🎉 PROMOTIONS MANAGEMENT (Quản lý Khuyến mãi)
+    // ========================================
     Route::post('promotions/bulk-delete', [PromotionController::class, 'bulkDelete']);
     Route::post('promotions/bulk-update-status', [PromotionController::class, 'bulkUpdateStatus']);
     Route::get('promotions/{id}/usage', [PromotionController::class, 'usage']);
@@ -181,20 +213,26 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
     Route::get('promotions/statistics/overview', [PromotionController::class, 'statistics']);
     Route::post('promotions/validate', [PromotionController::class, 'validate']);
 
-    // Reviews
+    // ========================================
+    // ⭐ REVIEWS MANAGEMENT (Quản lý Đánh giá)
+    // ========================================
     Route::apiResource('reviews', ReviewController::class);
     Route::get('reviews/statistics/overview', [ReviewController::class, 'statistics']);
     Route::post('reviews/{id}/approve', [ReviewController::class, 'approve'])->where('id', '[0-9]+');
     Route::post('reviews/{id}/reject', [ReviewController::class, 'reject'])->where('id', '[0-9]+');
 
-    // Supplies
+    // ========================================
+    // 📦 SUPPLIES MANAGEMENT (Quản lý Vật tư)
+    // ========================================
     Route::apiResource('supplies', SupplyController::class);
     Route::get('supplies/low-stock/items', [SupplyController::class, 'getLowStockItems']);
     Route::get('supplies/out-of-stock/items', [SupplyController::class, 'getOutOfStockItems']);
     Route::get('supplies/statistics/overview', [SupplyController::class, 'getStatistics']);
     Route::post('supplies/{id}/adjust-stock', [SupplyController::class, 'adjustStock']);
 
-    // Supply Logs
+    // ========================================
+    // 📋 SUPPLY LOGS (Lịch sử Vật tư)
+    // ========================================
     Route::prefix('supply-logs')->group(function () {
         Route::get('/', [SupplyLogController::class, 'index']);
         Route::get('/activities/recent', [SupplyLogController::class, 'getRecentActivities']);
@@ -203,9 +241,12 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
         Route::get('/{id}', [SupplyLogController::class, 'show'])->where('id', '[0-9]+');
     });
 
-    // Invoices
+    // ========================================
+    // 💰 INVOICES MANAGEMENT (Quản lý Hóa đơn)
+    // ========================================
     Route::prefix('invoices')->group(function () {
         Route::get('/', [InvoiceController::class, 'index']);
+        Route::get('/export', [InvoiceController::class, 'export']);
         Route::get('/config/calculation', [InvoiceController::class, 'getCalculationConfig']);
         Route::get('/config/refund-policies', [InvoiceController::class, 'getRefundPolicyConfig']);
         Route::get('/statistics/overview', [InvoiceController::class, 'statistics']);
@@ -229,7 +270,9 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
         Route::post('/{id}/apply-refund-policy', [InvoiceController::class, 'applyRefundPolicy']);
     });
 
-    // Invoice Items
+    // ========================================
+    // 📝 INVOICE ITEMS (Mục Hóa đơn)
+    // ========================================
     Route::prefix('invoices/{invoiceId}/items')->group(function () {
         Route::get('/', [InvoiceItemController::class, 'index']);
         Route::get('/penalties', [InvoiceItemController::class, 'getPenaltyItems']);
@@ -248,47 +291,73 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
         Route::delete('/bulk/delete', [InvoiceItemController::class, 'bulkDelete']);
     });
 
-    // Payments
+    // ========================================
+    // 💳 PAYMENTS MANAGEMENT (Quản lý Thanh toán)
+    // ========================================
     Route::apiResource('payments', PaymentController::class);
 
-    // Vouchers
+    // ========================================
+    // 🎟️ VOUCHERS MANAGEMENT (Quản lý Voucher)
+    // ========================================
     Route::apiResource('vouchers', VoucherController::class);
     Route::post('vouchers/validate', [VoucherController::class, 'validateVoucher']);
 
-    // Services
+    // ========================================
+    // 🛎️ SERVICES MANAGEMENT (Quản lý Dịch vụ)
+    // ========================================
     Route::apiResource('services', ServiceController::class);
 
-    // Subscriptions
+    // ========================================
+    // 📅 SUBSCRIPTIONS MANAGEMENT (Quản lý Đăng ký)
+    // ========================================
     Route::apiResource('subscriptions', SubscriptionController::class);
 
-    // Price Rules
+    // ========================================
+    // 💵 PRICE RULES MANAGEMENT (Quản lý Quy tắc giá)
+    // ========================================
     Route::apiResource('price-rules', PriceRuleController::class);
 
-    // Conversations
+    // ========================================
+    // 💬 CONVERSATIONS MANAGEMENT (Quản lý Hội thoại)
+    // ========================================
     Route::apiResource('conversations', ConversationController::class);
 
-    // Payouts
+    // ========================================
+    // 💸 PAYOUTS MANAGEMENT (Quản lý Thanh toán chủ nhà)
+    // ========================================
     Route::apiResource('payouts', PayoutController::class);
 });
 
 // ==================================================================
-// 6. STAFF ROUTES
+// 7. STAFF ROUTES (role:staff,admin)
 // ==================================================================
-Route::middleware(['auth:sanctum', 'role:staff'])->prefix('staff')->group(function () {
-    // Check-in/Check-out
+// Tất cả routes trong group này yêu cầu: Bearer Token + Role: Staff hoặc Admin
+Route::middleware(['auth:sanctum', 'role:staff,admin'])->prefix('staff')->group(function () {
+    // ========================================
+    // 🚪 CHECK-IN/CHECK-OUT (Nhận/Trả phòng)
+    // ========================================
     Route::get('/check-in/list', [\App\Http\Controllers\Api\Staff\CheckInOutController::class, 'getCheckInList']);
     Route::get('/check-in/{id}', [\App\Http\Controllers\Api\Staff\CheckInOutController::class, 'getCheckInDetails']);
     Route::post('/check-in/{id}', [\App\Http\Controllers\Api\Staff\CheckInOutController::class, 'checkIn']);
     Route::get('/check-out/list', [\App\Http\Controllers\Api\Staff\CheckInOutController::class, 'getCheckOutList']);
     Route::get('/check-out/{id}', [\App\Http\Controllers\Api\Staff\CheckInOutController::class, 'getCheckOutDetails']);
     Route::post('/check-out/{id}', [\App\Http\Controllers\Api\Staff\CheckInOutController::class, 'checkOut']);
+
+    // ========================================
+    // 📅 BOOKING MANAGEMENT (Quản lý Đặt phòng - Staff)
+    // ========================================
+    Route::get('/booking-orders', [StaffBookingController::class, 'index']);
+    Route::get('/booking-orders/{id}', [StaffBookingController::class, 'show']);
+    Route::patch('/booking-orders/{id}/status', [StaffBookingController::class, 'updateStatus']);
+    Route::post('/booking-orders/{id}/change-detail', [StaffBookingController::class, 'changeDetail']);
 });
 
 // ==================================================================
 // 7. USER ROUTES (CẦN BỔ SUNG SAU)
 // ==================================================================
-Route::middleware(['auth:sanctum', 'role:user'])->prefix('user')->group(function () {
-    // TODO: Thêm route cho user
+Route::middleware(['auth:sanctum', 'role:user,staff,admin'])->prefix('user')->group(function () {
+    // Kho mã giảm giá của user (vouchers)
+    Route::get('vouchers', [UserVoucherController::class, 'index']);
 });
 
 // ==================================================================
@@ -508,7 +577,7 @@ Route::prefix('messages')->middleware('auth:sanctum')->group(function () {
     Route::put('/{id}', [MessageController::class, 'update'])->where('id', '[0-9]+');
     Route::delete('/{id}', [MessageController::class, 'destroy'])->where('id', '[0-9]+');
     Route::post('/{id}/mark-read', [MessageController::class, 'markAsRead'])->where('id', '[0-9]+');
-    
+
     // Admin only
     Route::middleware('role:admin')->group(function () {
         Route::post('/{id}/hide', [MessageController::class, 'hide'])->where('id', '[0-9]+');
@@ -551,7 +620,7 @@ Route::prefix('rooms')->group(function () {
     // Public routes - không cần đăng nhập
     Route::get('/', [RoomController::class, 'indexPublic']);
     Route::get('/{id}', [RoomController::class, 'showPublic'])->where('id', '[0-9]+');
-    
+
     // Protected routes - cần đăng nhập và role admin
     Route::middleware(['auth:sanctum', 'role:admin'])->group(function () {
         Route::patch('/{room}/status', [RoomController::class, 'updateStatus']);
@@ -605,3 +674,5 @@ Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
 Route::fallback(function () {
     return response()->json(['message' => 'Route not found.'], 404);
 });
+
+Route::post('/upload-file', [FileController::class, 'store']);

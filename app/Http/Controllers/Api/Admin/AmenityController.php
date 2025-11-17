@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Exception;
 
 /**
@@ -98,8 +99,8 @@ class AmenityController extends Controller
     public function index(Request $request): JsonResponse
     {
         try {
-            // Authorization is handled by route middleware (role:admin)
-            // Additional policy check if needed: $this->authorize('viewAny', Amenity::class);
+            // Authorization: Route middleware checks role, Policy checks permissions
+            $this->authorize('viewAny', Amenity::class);
             
             // Validate query parameters
             $request->validate([
@@ -177,6 +178,75 @@ class AmenityController extends Controller
     }
 
     /**
+     * Danh sách tiện ích đã bị xóa mềm (lịch sử/thùng rác)
+     */
+    public function history(Request $request): JsonResponse
+    {
+        try {
+            $request->validate([
+                'property_id' => 'sometimes|integer|exists:properties,id',
+                'type' => 'sometimes|string|in:basic,advanced,safety',
+                'search' => 'sometimes|string|max:255',
+                'sort_by' => 'sometimes|string|in:id,name,type,created_at,updated_at,deleted_at',
+                'sort_order' => 'sometimes|string|in:asc,desc',
+                'page' => 'sometimes|integer|min:1',
+                'per_page' => 'sometimes|integer|min:1|max:100',
+            ]);
+
+            $perPage = (int) ($request->get('per_page', self::DEFAULT_PER_PAGE));
+            $query = Amenity::onlyTrashed()->with('property:id,name');
+
+            if ($request->has('property_id')) {
+                $query->where('property_id', $request->property_id);
+            }
+
+            if ($request->has('type')) {
+                $query->where('type', $request->type);
+            }
+
+            if ($request->has('search') && !empty($request->search)) {
+                $query->where('name', 'like', '%' . $request->search . '%');
+            }
+
+            $sortBy = $request->get('sort_by', 'deleted_at');
+            $sortOrder = $request->get('sort_order', 'desc');
+            $query->orderBy($sortBy, $sortOrder);
+
+            $amenities = $query->paginate($perPage);
+
+            return response()->json([
+                'success' => true,
+                'data' => AmenityResource::collection($amenities),
+                'meta' => [
+                    'pagination' => [
+                        'current_page' => $amenities->currentPage(),
+                        'per_page' => $amenities->perPage(),
+                        'total' => $amenities->total(),
+                        'last_page' => $amenities->lastPage(),
+                    ],
+                ],
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Dữ liệu không hợp lệ',
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Exception $e) {
+            Log::error('AmenityController@history failed', [
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi lấy danh sách lịch sử tiện ích.',
+            ], 500);
+        }
+    }
+
+    /**
      * Store a newly created amenity
      *
      * @OA\Post(
@@ -215,8 +285,8 @@ class AmenityController extends Controller
     public function store(StoreAmenityRequest $request): JsonResponse
     {
         try {
-            // Authorization is handled by route middleware (role:admin)
-            // Additional policy check if needed: $this->authorize('create', Amenity::class);
+            // Authorization: Route middleware checks role, Policy checks permissions
+            $this->authorize('create', Amenity::class);
             
         $validatedData = $request->validated();
         $iconUrl = null;
@@ -292,8 +362,8 @@ class AmenityController extends Controller
     public function show(Amenity $amenity): JsonResponse
     {
         try {
-            // Authorization is handled by route middleware (role:admin)
-            // Additional policy check if needed: $this->authorize('view', $amenity);
+            // Authorization: Route middleware checks role, Policy checks permissions
+            $this->authorize('view', $amenity);
             
             return response()->json([
                 'success' => true,
@@ -357,8 +427,8 @@ class AmenityController extends Controller
     public function update(UpdateAmenityRequest $request, Amenity $amenity): JsonResponse
     {
         try {
-            // Authorization is handled by route middleware (role:admin)
-            // Additional policy check if needed: $this->authorize('update', $amenity);
+            // Authorization: Route middleware checks role, Policy checks permissions
+            $this->authorize('update', $amenity);
             
         $validatedData = $request->validated();
         $iconUrl = $amenity->icon_url;
@@ -440,12 +510,9 @@ class AmenityController extends Controller
             
             $amenityId = $amenity->id;
             $amenityName = $amenity->name;
-
-            // Delete associated icon file
-        $this->deleteLocalFile($amenity->icon_url);
-
-            // Delete amenity (relationships will be handled by database cascade)
-        $amenity->delete();
+            
+            // Soft delete amenity (giữ lại để xem lịch sử / có thể khôi phục)
+            $amenity->delete();
 
             Log::info('Amenity deleted', [
                 'amenity_id' => $amenityId,
@@ -454,7 +521,7 @@ class AmenityController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Xóa tiện ích thành công',
+                'message' => 'Đã chuyển tiện ích vào lịch sử (thùng rác)',
             ], 200);
         } catch (\Exception $e) {
             Log::error('AmenityController@destroy failed', [
@@ -472,7 +539,88 @@ class AmenityController extends Controller
     }
 
     /**
-     * Store uploaded file to local storage with unique filename
+     * Khôi phục tiện ích từ lịch sử (soft deleted)
+     */
+    public function restore(int $id): JsonResponse
+    {
+        try {
+            $amenity = Amenity::onlyTrashed()->findOrFail($id);
+
+            $this->authorize('update', $amenity);
+
+            $amenity->restore();
+
+            Log::info('Amenity restored', [
+                'amenity_id' => $amenity->id,
+                'name' => $amenity->name,
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Khôi phục tiện ích thành công',
+                'data' => new AmenityResource($amenity->fresh('property:id,name')),
+            ]);
+        } catch (ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Không tìm thấy tiện ích trong lịch sử.',
+            ], 404);
+        } catch (\Exception $e) {
+            Log::error('AmenityController@restore failed', [
+                'amenity_id' => $id,
+                'message' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi khôi phục tiện ích: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Xóa vĩnh viễn tiện ích (force delete) khỏi hệ thống
+     */
+    public function forceDelete(int $id): JsonResponse
+    {
+        try {
+            $amenity = Amenity::onlyTrashed()->findOrFail($id);
+
+            $this->authorize('delete', $amenity);
+
+            // Xóa file icon trên S3 nếu có
+            $this->deleteLocalFile($amenity->icon_url);
+
+            $amenity->forceDelete();
+
+            Log::info('Amenity force deleted', [
+                'amenity_id' => $id,
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Đã xóa vĩnh viễn tiện ích.',
+            ]);
+        } catch (ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Không tìm thấy tiện ích trong lịch sử.',
+            ], 404);
+        } catch (\Exception $e) {
+            Log::error('AmenityController@forceDelete failed', [
+                'amenity_id' => $id,
+                'message' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi xóa vĩnh viễn tiện ích: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Store uploaded file to S3 with unique filename
      *
      * @param \Illuminate\Http\UploadedFile $file
      * @return string|null Full URL of the stored file
@@ -481,52 +629,38 @@ class AmenityController extends Controller
     private function storeLocalFile($file): ?string
     {
         try {
-            // Generate unique filename to avoid overwriting
             $extension = $file->getClientOriginalExtension();
             $filename = Str::uuid() . '.' . $extension;
-            
-            // Store file in public disk with unique filename
-            $path = $file->storeAs('amenity_icons', $filename, 'public');
-            
-            // Verify file was actually saved
-            if (!Storage::disk('public')->exists($path)) {
-                throw new Exception('File không được lưu vào storage. Path: ' . $path);
+
+            $path = Storage::disk('s3')->putFileAs('amenity_icons', $file, $filename);
+
+            if (!$path) {
+                throw new Exception('File không được lưu lên S3.');
             }
-            
-            // Get file size for logging
-            $fileSize = Storage::disk('public')->size($path);
-            
-            // Generate full URL using Storage disk URL
-            // Storage::disk('public')->url() returns relative path like /storage/amenity_icons/...
-            // We need to prepend APP_URL to make it a full URL
-            $relativeUrl = Storage::disk('public')->url($path);
-            $appUrl = rtrim(config('app.url'), '/');
-            $url = $appUrl . $relativeUrl;
-            
-            // Log successful upload for debugging
-            Log::info('AmenityController@storeLocalFile - File uploaded successfully', [
+
+            $url = Storage::disk('s3')->url($path);
+
+            Log::info('AmenityController@storeLocalFile - File uploaded to S3 successfully', [
                 'original_name' => $file->getClientOriginalName(),
                 'stored_path' => $path,
-                'file_size' => $fileSize,
                 'full_url' => $url,
-                'storage_path' => storage_path('app/public/' . $path),
             ]);
-            
+
             return $url;
         } catch (Exception $e) {
-            Log::error('Failed to store amenity icon', [
+            Log::error('Failed to store amenity icon (S3)', [
                 'original_name' => $file->getClientOriginalName() ?? 'unknown',
                 'error' => $e->getMessage(),
                 'file' => $e->getFile(),
                 'line' => $e->getLine(),
                 'trace' => $e->getTraceAsString(),
             ]);
-            throw new Exception('Lỗi khi tải file icon: ' . $e->getMessage());
+            throw new Exception('Lỗi khi tải file icon lên S3: ' . $e->getMessage());
         }
     }
 
     /**
-     * Delete file from local storage
+     * Delete file from S3
      *
      * @param string|null $url Full URL of the file to delete
      * @return void
@@ -538,24 +672,15 @@ class AmenityController extends Controller
         }
 
         try {
-            // Extract relative path from URL
-            // URL format: http://example.com/storage/amenity_icons/file.png
-            // We need: amenity_icons/file.png
             $parsedUrl = parse_url($url);
             $path = $parsedUrl['path'] ?? '';
-            
-            // Remove /storage prefix if present
             $path = ltrim($path, '/');
-            if (Str::startsWith($path, 'storage/')) {
-                $path = Str::after($path, 'storage/');
-            }
-            
-            // Delete file if exists
-            if ($path && Storage::disk('public')->exists($path)) {
-                Storage::disk('public')->delete($path);
+
+            if ($path && Storage::disk('s3')->exists($path)) {
+                Storage::disk('s3')->delete($path);
             }
         } catch (Exception $e) {
-            Log::error('Failed to delete amenity icon', [
+            Log::error('Failed to delete amenity icon (S3)', [
                 'url' => $url,
                 'error' => $e->getMessage(),
                 'file' => $e->getFile(),

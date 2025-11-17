@@ -3,8 +3,10 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\IndexVoucherRequest;
 use App\Models\Voucher;
 use App\Http\Resources\VoucherResource;
+use App\Services\Voucher\QueryService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -20,70 +22,19 @@ class VoucherController extends Controller
     /**
      * Display a listing of vouchers
      */
-    public function index(Request $request): JsonResponse
+    public function index(IndexVoucherRequest $request, QueryService $service): JsonResponse
     {
         try {
-            $request->validate([
-                'property_id' => 'sometimes|integer|exists:properties,id',
-                'is_active' => 'sometimes|boolean',
-                'discount_type' => 'sometimes|string|max:50',
-                'search' => 'sometimes|string|max:255',
-                'page' => 'sometimes|integer|min:1',
-                'per_page' => 'sometimes|integer|min:1|max:100',
-            ], [
-                'property_id.exists' => 'Property không tồn tại.',
-                'per_page.max' => 'Số lượng bản ghi mỗi trang không được vượt quá 100.',
-            ]);
-
-            $perPage = (int) ($request->get('per_page', self::DEFAULT_PER_PAGE));
-            $query = Voucher::query()->with('property:id,name');
-
-            // Filter by property_id
-            if ($request->has('property_id')) {
-                $query->where('property_id', $request->property_id);
-            }
-
-            // Filter by is_active
-            if ($request->has('is_active')) {
-                $query->where('is_active', $request->boolean('is_active'));
-            }
-
-            // Filter by discount_type
-            if ($request->has('discount_type')) {
-                $query->where('discount_type', $request->discount_type);
-            }
-
-            // Search by code or name
-            if ($request->has('search') && !empty($request->search)) {
-                $query->where(function ($q) use ($request) {
-                    $q->where('code', 'like', '%' . $request->search . '%');
-                });
-            }
-
-            // Sort by latest
-            $query->latest();
-
-            // Paginate results
-            $vouchers = $query->paginate($perPage);
+            // Use QueryService để xử lý logic query phức tạp
+            // Use raw query params to avoid dropping filters when validation is lenient
+            $result = $service->index($request->query());
 
             return response()->json([
                 'success' => true,
-                'data' => VoucherResource::collection($vouchers),
-                'meta' => [
-                    'pagination' => [
-                        'current_page' => $vouchers->currentPage(),
-                        'per_page' => $vouchers->perPage(),
-                        'total' => $vouchers->total(),
-                        'last_page' => $vouchers->lastPage(),
-                    ],
-                ],
+                'data' => VoucherResource::collection(collect($result['data'])),
+                'meta' => $result['meta'],
+                'links' => $result['links'] ?? null,
             ]);
-        } catch (\Illuminate\Validation\ValidationException $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Dữ liệu không hợp lệ',
-                'errors' => $e->errors(),
-            ], 422);
         } catch (\Exception $e) {
             Log::error('VoucherController@index failed', [
                 'message' => $e->getMessage(),

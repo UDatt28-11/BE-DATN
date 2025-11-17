@@ -16,7 +16,7 @@ use Exception;
 class RoomImageController extends Controller
 {
     /**
-     * Store uploaded file to local storage with unique filename
+     * Store uploaded file to S3 with unique filename
      *
      * @param \Illuminate\Http\UploadedFile $file
      * @return array ['path' => string, 'url' => string]
@@ -25,87 +25,70 @@ class RoomImageController extends Controller
     private function storeLocalFile($file)
     {
         try {
-            // Ensure directory exists
             $directory = 'room_images';
-            if (!Storage::disk('public')->exists($directory)) {
-                Storage::disk('public')->makeDirectory($directory);
-            }
-            
+
             // Generate unique filename to avoid overwriting
             $extension = $file->getClientOriginalExtension();
             $filename = Str::uuid() . '.' . $extension;
-            
-            // Store file in public disk with unique filename
-            $path = $file->storeAs($directory, $filename, 'public');
-            
-            // Verify file was actually saved
-            if (!Storage::disk('public')->exists($path)) {
-                throw new Exception('File không được lưu vào storage. Path: ' . $path);
+
+            // Store file to S3 (publicly readable or via configured URL)
+            $path = Storage::disk('s3')->putFileAs($directory, $file, $filename);
+
+            if (!$path) {
+                throw new Exception('File không được lưu lên S3.');
             }
-            
-            // Get file size for logging
-            $fileSize = Storage::disk('public')->size($path);
-            
-            // Generate full URL
-            // Path format: room_images/filename.jpg
-            // We need: http://localhost:8000/storage/room_images/filename.jpg
-            $appUrl = rtrim(config('app.url'), '/');
-            $url = $appUrl . '/storage/' . $path;
-            
-            // Log successful upload for debugging
-            Log::info('RoomImageController@storeLocalFile - File uploaded successfully', [
+
+            // Generate public URL using S3 disk configuration
+            $url = Storage::disk('s3')->url($path);
+
+            Log::info('RoomImageController@storeLocalFile - File uploaded to S3 successfully', [
                 'original_name' => $file->getClientOriginalName(),
                 'stored_path' => $path,
-                'file_size' => $fileSize,
                 'full_url' => $url,
-                'storage_path' => storage_path('app/public/' . $path),
             ]);
-            
+
             return ['path' => $path, 'url' => $url];
         } catch (Exception $e) {
-            Log::error('RoomImageController@storeLocalFile failed', [
+            Log::error('RoomImageController@storeLocalFile failed (S3)', [
                 'original_name' => $file->getClientOriginalName() ?? 'unknown',
                 'error' => $e->getMessage(),
                 'file' => $e->getFile(),
                 'line' => $e->getLine(),
                 'trace' => $e->getTraceAsString(),
             ]);
-            throw new Exception('Lỗi khi tải file ảnh phòng: ' . $e->getMessage());
+            throw new Exception('Lỗi khi tải file ảnh phòng lên S3: ' . $e->getMessage());
         }
     }
 
     /**
-     * Delete file from local storage
+     * Delete file from S3
      *
-     * @param string|null $url Full URL of the file to delete
+     * @param string|null $urlOrPath Stored S3 path or URL
      * @return void
      */
-    private function deleteLocalFile($url)
+    private function deleteLocalFile($urlOrPath)
     {
-        if (!$url) {
+        if (!$urlOrPath) {
             return;
         }
 
         try {
-            // Extract relative path from URL
-            // URL format: http://example.com/storage/room_images/file.png
-            // We need: room_images/file.png
-            $parsedUrl = parse_url($url);
-            $path = $parsedUrl['path'] ?? '';
-            
-            // Remove /storage prefix if present
-            $path = ltrim($path, '/');
-            if (Str::startsWith($path, 'storage/')) {
-                $path = Str::after($path, 'storage/');
+            // If full URL is stored, extract path part after bucket domain
+            $path = $urlOrPath;
+
+            // If looks like a URL, parse it
+            if (filter_var($urlOrPath, FILTER_VALIDATE_URL)) {
+                $parsedUrl = parse_url($urlOrPath);
+                $path = $parsedUrl['path'] ?? '';
+                $path = ltrim($path, '/');
             }
-            
-            // Delete file if exists
-            if ($path && Storage::disk('public')->exists($path)) {
-                Storage::disk('public')->delete($path);
+
+            if ($path && Storage::disk('s3')->exists($path)) {
+                Storage::disk('s3')->delete($path);
             }
         } catch (Exception $e) {
-            Log::error('RoomImageController@deleteLocalFile failed', [
-                'url' => $url,
+            Log::error('RoomImageController@deleteLocalFile failed (S3)', [
+                'input' => $urlOrPath,
                 'error' => $e->getMessage(),
                 'file' => $e->getFile(),
                 'line' => $e->getLine(),
@@ -249,6 +232,80 @@ class RoomImageController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Có lỗi xảy ra khi xóa ảnh.',
+            ], 500);
+        }
+    }
+
+    /**
+     * Xóa nhiều ảnh phòng cùng lúc
+     * Body: { "ids": [1,2,3] }
+     */
+    public function bulkDestroy(Request $request): JsonResponse
+    {
+        try {
+            $validated = $request->validate([
+                'ids' => 'required|array|min:1',
+                'ids.*' => 'integer|exists:room_images,id',
+            ]);
+
+            $ids = $validated['ids'];
+
+            $images = RoomImage::whereIn('id', $ids)->get();
+
+            if ($images->isEmpty()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Không tìm thấy ảnh để xóa.',
+                ], 404);
+            }
+
+            // Nhóm theo room_id để xử lý ảnh primary
+            $imagesByRoom = $images->groupBy('room_id');
+
+            foreach ($imagesByRoom as $roomId => $roomImages) {
+                $primaryDeleted = $roomImages->contains(function (RoomImage $img) {
+                    return $img->is_primary;
+                });
+
+                // Xóa từng ảnh (file + record)
+                foreach ($roomImages as $image) {
+                    $this->deleteLocalFile($image->image_url);
+                    $image->delete();
+                }
+
+                // Nếu ảnh primary bị xóa, chọn ảnh khác làm primary
+                if ($primaryDeleted) {
+                    $newPrimary = RoomImage::where('room_id', $roomId)
+                        ->orderBy('created_at', 'asc')
+                        ->first();
+
+                    if ($newPrimary) {
+                        $newPrimary->update(['is_primary' => true]);
+                    }
+                }
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Đã xóa ' . $images->count() . ' ảnh thành công.',
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Dữ liệu không hợp lệ',
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Exception $e) {
+            Log::error('RoomImageController@bulkDestroy failed', [
+                'ids' => $request->get('ids'),
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi xóa nhiều ảnh: ' . $e->getMessage(),
             ], 500);
         }
     }

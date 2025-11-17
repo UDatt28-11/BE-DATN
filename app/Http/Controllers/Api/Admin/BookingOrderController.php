@@ -7,10 +7,14 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\Admin\BookingOrderResource;
 use App\Http\Requests\Admin\StoreBookingOrderRequest;
 use App\Http\Requests\Admin\UpdateBookingOrderRequest;
+use App\Http\Requests\Admin\IndexBookingOrderRequest;
 use App\Models\BookingOrder;
+use App\Services\BookingOrder\QueryService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Symfony\Component\HttpFoundation\StreamedResponse;
+use App\Http\Requests\Admin\UpdateBookingStatusRequest;
 
 /**
  * @OA\Tag(
@@ -33,7 +37,7 @@ class BookingOrderController extends Controller
      *     operationId="getBookingOrders",
      *     tags={"Booking Orders"},
      *     summary="Danh sách đơn đặt phòng",
-     *     description="Lấy danh sách tất cả đơn đặt phòng với hỗ trợ phân trang",
+     *     description="Lấy danh sách tất cả đơn đặt phòng với hỗ trợ phân trang và bộ lọc",
      *     security={{"bearerAuth":{}}},
      *     @OA\Parameter(
      *         name="page",
@@ -49,168 +53,60 @@ class BookingOrderController extends Controller
      *         required=false,
      *         @OA\Schema(type="integer")
      *     ),
+     *     @OA\Parameter(
+     *         name="include",
+     *         in="query",
+     *         description="Include relationships (details, details.room, details.guests)",
+     *         required=false,
+     *         @OA\Schema(type="string", example="details,details.room,details.guests")
+     *     ),
+     *     @OA\Parameter(
+     *         name="status",
+     *         in="query",
+     *         description="Filter by status (có thể dùng comma-separated: pending,confirmed)",
+     *         required=false,
+     *         @OA\Schema(type="string")
+     *     ),
+     *     @OA\Parameter(
+     *         name="keyword",
+     *         in="query",
+     *         description="Tìm kiếm theo order_code, customer name hoặc phone",
+     *         required=false,
+     *         @OA\Schema(type="string")
+     *     ),
      *     @OA\Response(
      *         response=200,
      *         description="Danh sách đơn đặt phòng",
      *         @OA\JsonContent(
      *             @OA\Property(property="success", type="boolean", example=true),
      *             @OA\Property(property="data", type="array", @OA\Items(type="object")),
-     *             @OA\Property(property="meta", type="object")
+     *             @OA\Property(property="meta", type="object"),
+     *             @OA\Property(property="links", type="object")
      *         )
      *     ),
      *     @OA\Response(response=401, description="Unauthorized"),
      *     @OA\Response(response=403, description="Forbidden")
      * )
      */
-    public function index(Request $request): JsonResponse
+    public function index(IndexBookingOrderRequest $request, QueryService $service): JsonResponse
     {
         try {
-            // Authorization is handled by route middleware (role:admin)
+            // Authorization: Route middleware checks role, Policy checks permissions
+            $this->authorize('viewAny', BookingOrder::class);
             
-            $request->validate([
-                'order_code' => 'sometimes|string|max:255',
-                'customer_name' => 'sometimes|string|max:255',
-                'customer_email' => 'sometimes|string|email',
-                'property_id' => 'sometimes|integer|exists:properties,id',
-                'status' => 'sometimes|string|in:pending,confirmed,cancelled,completed',
-                'staff_id' => 'sometimes|integer|exists:users,id',
-                'date_from' => 'sometimes|date',
-                'date_to' => 'sometimes|date|after_or_equal:date_from',
-                'check_in_from' => 'sometimes|date',
-                'check_in_to' => 'sometimes|date|after_or_equal:check_in_from',
-                'check_out_from' => 'sometimes|date',
-                'check_out_to' => 'sometimes|date|after_or_equal:check_out_from',
-                'search' => 'sometimes|string|max:255',
-                'sort_by' => 'sometimes|string|in:id,order_code,total_amount,status,created_at,updated_at',
-                'sort_order' => 'sometimes|string|in:asc,desc',
-                'page' => 'sometimes|integer|min:1',
-                'per_page' => 'sometimes|integer|min:1|max:100',
-            ], [
-                'property_id.exists' => 'Property không tồn tại.',
-                'staff_id.exists' => 'Staff không tồn tại.',
-                'status.in' => 'Trạng thái không hợp lệ. Chỉ chấp nhận: pending, confirmed, cancelled, completed.',
-                'per_page.max' => 'Số lượng bản ghi mỗi trang không được vượt quá 100.',
-            ]);
-
-            $perPage = (int) ($request->get('per_page', self::DEFAULT_PER_PAGE));
-            $query = BookingOrder::with([
-                'guest:id,full_name,email',
-                'staff:id,full_name,email',
-                'details.room:id,name,room_type_id,property_id',
-                'details.room.roomType:id,name',
-                'details.room.property:id,name'
-            ]);
-
-            // Filter by order_code
-            if ($request->has('order_code')) {
-                $query->where('order_code', 'like', '%' . $request->order_code . '%');
-            }
-
-            // Filter by customer_name
-            if ($request->has('customer_name')) {
-                $query->where('customer_name', 'like', '%' . $request->customer_name . '%');
-            }
-
-            // Filter by customer_email
-            if ($request->has('customer_email')) {
-                $query->where('customer_email', $request->customer_email);
-            }
-
-            // Filter by status
-            if ($request->has('status')) {
-                $query->where('status', $request->status);
-            }
-
-            // Filter by staff_id
-            if ($request->has('staff_id')) {
-                $query->where('staff_id', $request->staff_id);
-            }
-
-            // Filter by property_id (via details.room.property_id)
-            if ($request->has('property_id')) {
-                $query->whereHas('details.room', function ($q) use ($request) {
-                    $q->where('property_id', $request->property_id);
-                });
-            }
-
-            // Filter by date range (created_at)
-            if ($request->has('date_from')) {
-                $query->whereDate('created_at', '>=', $request->date_from);
-            }
-            if ($request->has('date_to')) {
-                $query->whereDate('created_at', '<=', $request->date_to);
-            }
-
-            // Filter by check-in date range
-            if ($request->has('check_in_from') || $request->has('check_in_to')) {
-                $query->whereHas('details', function ($q) use ($request) {
-                    if ($request->has('check_in_from')) {
-                        $q->whereDate('check_in_date', '>=', $request->check_in_from);
-                    }
-                    if ($request->has('check_in_to')) {
-                        $q->whereDate('check_in_date', '<=', $request->check_in_to);
-                    }
-                });
-            }
-
-            // Filter by check-out date range
-            if ($request->has('check_out_from') || $request->has('check_out_to')) {
-                $query->whereHas('details', function ($q) use ($request) {
-                    if ($request->has('check_out_from')) {
-                        $q->whereDate('check_out_date', '>=', $request->check_out_from);
-                    }
-                    if ($request->has('check_out_to')) {
-                        $q->whereDate('check_out_date', '<=', $request->check_out_to);
-                    }
-                });
-            }
-
-            // Search (order_code, customer_name, customer_email)
-            if ($request->has('search') && !empty($request->search)) {
-                $search = $request->search;
-                $query->where(function ($q) use ($search) {
-                    $q->where('order_code', 'like', '%' . $search . '%')
-                        ->orWhere('customer_name', 'like', '%' . $search . '%')
-                        ->orWhere('customer_email', 'like', '%' . $search . '%')
-                        ->orWhereHas('guest', function ($q) use ($search) {
-                            $q->where('full_name', 'like', '%' . $search . '%')
-                                ->orWhere('email', 'like', '%' . $search . '%');
-                        });
-                });
-            }
-
-            // Sorting
-            $sortBy = $request->get('sort_by', 'created_at');
-            $sortOrder = $request->get('sort_order', 'desc');
-            $query->orderBy($sortBy, $sortOrder);
-
-            // Paginate
-            $orders = $query->paginate($perPage);
+            // Use QueryService để xử lý logic query phức tạp
+            // Use raw query params to avoid dropping filters when validation is lenient
+            $result = $service->index($request->query());
 
             return response()->json([
                 'success' => true,
-                'data' => BookingOrderResource::collection($orders),
-                'meta' => [
-                    'pagination' => [
-                        'current_page' => $orders->currentPage(),
-                        'per_page' => $orders->perPage(),
-                        'total' => $orders->total(),
-                        'last_page' => $orders->lastPage(),
-                    ],
-                ],
+                ...$result,
             ]);
-        } catch (\Illuminate\Validation\ValidationException $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Dữ liệu không hợp lệ',
-                'errors' => $e->errors(),
-            ], 422);
         } catch (\Exception $e) {
             Log::error('BookingOrderController@index failed', [
                 'message' => $e->getMessage(),
                 'file' => $e->getFile(),
                 'line' => $e->getLine(),
-                'trace' => $e->getTraceAsString(),
             ]);
 
             return response()->json([
@@ -246,7 +142,8 @@ class BookingOrderController extends Controller
     public function store(StoreBookingOrderRequest $request): JsonResponse
     {
         try {
-            // Authorization is handled by route middleware (role:admin)
+            // Authorization: Route middleware checks role, Policy checks permissions
+            $this->authorize('create', BookingOrder::class);
             
         $order = BookingOrder::create($request->validated());
 
@@ -287,13 +184,20 @@ class BookingOrderController extends Controller
      *     operationId="getBookingOrder",
      *     tags={"Booking Orders"},
      *     summary="Chi tiết đơn đặt phòng",
-     *     description="Lấy thông tin chi tiết của một đơn đặt phòng",
+     *     description="Lấy thông tin chi tiết của một đơn đặt phòng. Có thể sử dụng 'include' parameter để chỉ load relationships cần thiết.",
      *     security={{"bearerAuth":{}}},
      *     @OA\Parameter(
      *         name="id",
      *         in="path",
      *         required=true,
      *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\Parameter(
+     *         name="include",
+     *         in="query",
+     *         description="Include relationships (details, details.room, details.room.roomType, details.guests, invoice, promotions). Ví dụ: 'details,details.room,invoice'",
+     *         required=false,
+     *         @OA\Schema(type="string", example="details,details.room,invoice")
      *     ),
      *     @OA\Response(
      *         response=200,
@@ -307,21 +211,82 @@ class BookingOrderController extends Controller
      *     @OA\Response(response=403, description="Forbidden")
      * )
      */
-    public function show(BookingOrder $booking_order): JsonResponse
+    public function show(Request $request, BookingOrder $booking_order): JsonResponse
     {
         try {
-            // Authorization is handled by route middleware (role:admin)
+            // Authorization: Route middleware checks role, Policy checks permissions
+            $this->authorize('view', $booking_order);
             
-            // Load đầy đủ relationships
-            $booking_order->load([
-                'guest:id,full_name,email',
-                'details.room:id,name,room_type_id,property_id',
-                'details.room.roomType:id,name',
-                'details.room.property:id,name',
-                'details.bookingServices.service:id,name',
-                'invoices',
-                'promotions:id,name'
-            ]);
+            // Parse include parameter
+            $includes = $request->get('include', '');
+            $with = ['guest:id,full_name,email']; // Always load guest
+            
+            if ($includes) {
+                // Parse include string (e.g., "details,details.room,invoice")
+                $includeArray = array_map('trim', explode(',', $includes));
+                $hasDetails = false;
+                
+                foreach ($includeArray as $include) {
+                    if ($include === 'details') {
+                        $with[] = 'details';
+                        $hasDetails = true;
+                    } elseif ($include === 'details.room') {
+                        $with[] = 'details.room:id,name,room_type_id,property_id';
+                        $hasDetails = true;
+                    } elseif ($include === 'details.room.roomType') {
+                        $with[] = 'details.room.roomType:id,name';
+                        $hasDetails = true;
+                    } elseif ($include === 'details.room.property') {
+                        $with[] = 'details.room.property:id,name';
+                        $hasDetails = true;
+                    } elseif ($include === 'details.guests' || $include === 'details.checkedInGuests') {
+                        $with[] = 'details.checkedInGuests';
+                        $hasDetails = true;
+                    } elseif ($include === 'details.bookingServices') {
+                        $with[] = 'details.bookingServices.service:id,name';
+                        $hasDetails = true;
+                    } elseif ($include === 'invoice' || $include === 'invoices') {
+                        $with[] = 'invoices';
+                    } elseif ($include === 'promotions') {
+                        $with[] = 'promotions:id,name';
+                    }
+                }
+                
+                // Đảm bảo luôn load room và roomType nếu có details
+                if ($hasDetails) {
+                    // Nếu có details.room nhưng chưa có details, tự động thêm
+                    if (in_array('details.room:id,name,room_type_id,property_id', $with) && !in_array('details', $with)) {
+                        $with[] = 'details';
+                    }
+                    // Nếu có details nhưng chưa có room, tự động thêm room và roomType
+                    if (in_array('details', $with) && !in_array('details.room:id,name,room_type_id,property_id', $with)) {
+                        $with[] = 'details.room:id,name,room_type_id,property_id';
+                        $with[] = 'details.room.roomType:id,name';
+                    }
+                    // Luôn load roomType nếu có room
+                    if (in_array('details.room:id,name,room_type_id,property_id', $with) && !in_array('details.room.roomType:id,name', $with)) {
+                        $with[] = 'details.room.roomType:id,name';
+                    }
+                }
+            } else {
+                // Default: Load tất cả relationships (backward compatibility)
+                $with = [
+                    'guest:id,full_name,email',
+                    'details.room:id,name,room_type_id,property_id',
+                    'details.room.roomType:id,name',
+                    'details.room.property:id,name',
+                    'details.bookingServices.service:id,name',
+                    'details.checkedInGuests',
+                    'invoices',
+                    'promotions:id,name'
+                ];
+            }
+            
+            // Loại bỏ duplicates
+            $with = array_unique($with);
+            
+            // Load relationships
+            $booking_order->load($with);
             
             return response()->json([
                 'success' => true,
@@ -376,7 +341,8 @@ class BookingOrderController extends Controller
     public function update(UpdateBookingOrderRequest $request, BookingOrder $booking_order): JsonResponse
     {
         try {
-            // Authorization is handled by route middleware (role:admin)
+            // Authorization: Route middleware checks role, Policy checks permissions
+            $this->authorize('update', $booking_order);
             
         $booking_order->update($request->validated());
 
@@ -441,7 +407,8 @@ class BookingOrderController extends Controller
     public function destroy(BookingOrder $booking_order): JsonResponse
     {
         try {
-            // Authorization is handled by route middleware (role:admin)
+            // Authorization: Route middleware checks role, Policy checks permissions
+            $this->authorize('delete', $booking_order);
             
             $bookingOrderId = $booking_order->id;
             
@@ -506,21 +473,41 @@ class BookingOrderController extends Controller
      *     @OA\Response(response=403, description="Forbidden")
      * )
      */
-    public function updateStatus(Request $request, $id): JsonResponse
+    public function updateStatus(UpdateBookingStatusRequest $request, $id): JsonResponse
     {
         try {
-            // Authorization is handled by route middleware (role:admin)
-            
-            $request->validate([
-                'status' => 'required|string',
-            ]);
-
+            // Authorization: Route middleware checks role, Policy checks permissions
             $bookingOrder = BookingOrder::findOrFail($id);
-            $bookingOrder->update(['status' => $request->status]);
+            $this->authorize('update', $bookingOrder);
+
+            $from = $bookingOrder->status;
+            $to = $request->validated()['status'];
+
+            // State machine: chỉ cho phép các bước chuyển hợp lệ
+            $valid = match ($from) {
+                'pending'   => in_array($to, ['confirmed', 'cancelled'], true),
+                'confirmed' => in_array($to, ['checked_in', 'cancelled'], true),
+                'checked_in' => in_array($to, ['checked_out', 'cancelled'], true),
+                'checked_out' => in_array($to, ['completed'], true),
+                default     => false,
+            };
+
+            if (!$valid) {
+                return response()->json([
+                    'success' => false,
+                    'error' => [
+                        'code' => 'INVALID_TRANSITION',
+                        'message' => "Trạng thái không hợp lệ từ {$from} → {$to}",
+                    ],
+                ], 422);
+            }
+
+            $bookingOrder->update(['status' => $to]);
 
             Log::info('BookingOrder status updated', [
                 'booking_order_id' => $bookingOrder->id,
-                'status' => $request->status,
+                'from' => $from,
+                'to' => $to,
             ]);
 
             return response()->json([
@@ -677,5 +664,94 @@ class BookingOrderController extends Controller
                 ];
             })
             ->toArray();
+    }
+
+    /**
+     * Export booking orders to CSV (for Excel)
+     *
+     * @OA\Get(
+     *     path="/api/admin/booking-orders/export",
+     *     operationId="exportBookingOrders",
+     *     tags={"Booking Orders"},
+     *     summary="Xuất danh sách đơn đặt phòng ra CSV",
+     *     description="Xuất danh sách đơn đặt phòng (sử dụng cùng filter như API index) ra file CSV để mở bằng Excel.",
+     *     security={{"bearerAuth":{}}},
+     *     @OA\Response(
+     *         response=200,
+     *         description="File CSV",
+     *         @OA\Schema(type="string", format="binary")
+     *     )
+     * )
+     */
+    public function export(Request $request): StreamedResponse
+    {
+        // Tái sử dụng logic filter từ index, nhưng không phân trang
+        $query = BookingOrder::with([
+            'guest:id,full_name,email',
+            'staff:id,full_name,email',
+            'details.room:id,name,property_id',
+            'details.room.property:id,name',
+        ]);
+
+        // Áp dụng các filter giống index (giữ code ngắn gọn bằng cách gọi lại index-like logic)
+        // Để tránh lặp lại quá nhiều, chỉ lấy subset filter quan trọng cho export
+        if ($request->filled('order_code')) {
+            $query->where('order_code', 'like', '%' . $request->order_code . '%');
+        }
+        if ($request->filled('status')) {
+            $query->where('status', $request->status);
+        }
+        if ($request->filled('customer_name')) {
+            $query->where('customer_name', 'like', '%' . $request->customer_name . '%');
+        }
+        if ($request->filled('date_from')) {
+            $query->whereDate('created_at', '>=', $request->date_from);
+        }
+        if ($request->filled('date_to')) {
+            $query->whereDate('created_at', '<=', $request->date_to);
+        }
+
+        $fileName = 'booking_orders_' . now()->format('Ymd_His') . '.csv';
+
+        return response()->streamDownload(function () use ($query) {
+            $handle = fopen('php://output', 'w');
+
+            // Header row
+            fputcsv($handle, [
+                'ID',
+                'Mã đơn',
+                'Khách hàng',
+                'Email',
+                'Số điện thoại',
+                'Homestay',
+                'Tổng tiền',
+                'Trạng thái',
+                'Ngày tạo',
+                'Nhân viên xử lý',
+            ]);
+
+            $query->orderBy('created_at', 'desc')->chunk(500, function ($orders) use ($handle) {
+                foreach ($orders as $order) {
+                    $propertyName = optional($order->details->first()->room->property ?? null)->name ?? '';
+                    fputcsv($handle, [
+                        $order->id,
+                        $order->order_code,
+                        $order->customer_name ?? optional($order->guest)->full_name,
+                        $order->customer_email ?? optional($order->guest)->email,
+                        $order->customer_phone,
+                        $propertyName,
+                        (float) $order->total_amount,
+                        $order->status,
+                        optional($order->created_at)->format('Y-m-d H:i'),
+                        optional($order->staff)->full_name,
+                    ]);
+                }
+            });
+
+            fclose($handle);
+        }, $fileName, [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+            'Cache-Control' => 'no-store, no-cache, must-revalidate',
+        ]);
     }
 }

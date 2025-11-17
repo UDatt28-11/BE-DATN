@@ -3,8 +3,10 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\IndexUserRequest;
 use App\Http\Resources\Admin\UserResource;
 use App\Models\User;
+use App\Services\User\QueryService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -95,62 +97,20 @@ class UserController extends Controller
      *     @OA\Response(response=403, description="Forbidden")
      * )
      */
-    public function index(Request $request): JsonResponse
+    public function index(IndexUserRequest $request, QueryService $service): JsonResponse
     {
         try {
             // Authorization is handled by route middleware (role:admin)
-            
-            $perPage = (int) ($request->get('per_page', self::DEFAULT_PER_PAGE));
-        $search = $request->get('search');
-        $status = $request->get('status');
-            $role = $request->get('role');
-            $identityVerified = $request->get('identity_verified');
-        $sortBy = $request->get('sort_by', 'created_at');
-        $sortOrder = $request->get('sort_order', 'desc');
+            // Use QueryService để xử lý logic query phức tạp
+            // Use raw query params to avoid dropping filters when validation is lenient
+            $result = $service->index($request->query());
 
-        $query = User::query()->with('verifier:id,full_name');
-
-        // Tìm kiếm theo tên, email, số điện thoại
-        if ($search) {
-            $query->where(function ($q) use ($search) {
-                $q->where('full_name', 'like', "%{$search}%")
-                    ->orWhere('email', 'like', "%{$search}%")
-                    ->orWhere('phone_number', 'like', "%{$search}%");
-            });
-        }
-
-        // Lọc theo trạng thái
-        if ($status) {
-            $query->where('status', $status);
-        }
-
-            // Lọc theo role
-            if ($role) {
-                $query->where('role', $role);
-            }
-
-            // Lọc theo identity_verified
-            if ($identityVerified !== null) {
-                $query->where('identity_verified', filter_var($identityVerified, FILTER_VALIDATE_BOOLEAN));
-            }
-
-        // Sắp xếp
-        $query->orderBy($sortBy, $sortOrder);
-
-        $users = $query->paginate($perPage);
-
-        return response()->json([
+            return response()->json([
                 'success' => true,
-            'data' => UserResource::collection($users),
-            'meta' => [
-                'pagination' => [
-                    'current_page' => $users->currentPage(),
-                    'per_page' => $users->perPage(),
-                    'total' => $users->total(),
-                    'last_page' => $users->lastPage(),
-                ],
-            ],
-        ]);
+                'data' => UserResource::collection(collect($result['data'])),
+                'meta' => $result['meta'],
+                'links' => $result['links'] ?? null,
+            ]);
         } catch (\Exception $e) {
             Log::error('UserController@index failed', [
                 'message' => $e->getMessage(),

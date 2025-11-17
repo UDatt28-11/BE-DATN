@@ -3,9 +3,11 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\IndexPropertyRequest;
 use App\Models\Property;
 use App\Http\Requests\Admin\StorePropertyRequest;
 use App\Http\Requests\Admin\UpdatePropertyRequest;
+use App\Services\Property\QueryService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -83,76 +85,18 @@ class PropertyController extends Controller
      *     @OA\Response(response=403, description="Forbidden")
      * )
      */
-    public function index(Request $request): JsonResponse
+    public function index(IndexPropertyRequest $request, QueryService $service): JsonResponse
     {
         try {
             // Authorization is handled by route middleware (role:admin)
-            
-            // Validate query parameters
-            $request->validate([
-                'owner_id' => 'sometimes|integer|exists:users,id',
-                'status' => 'sometimes|string|in:active,inactive,pending_approval',
-                'verification_status' => 'sometimes|string|in:pending,verified,rejected',
-                'search' => 'sometimes|string|max:255',
-                'page' => 'sometimes|integer|min:1',
-                'per_page' => 'sometimes|integer|min:1|max:100',
-            ], [
-                'owner_id.exists' => 'Owner không tồn tại.',
-                'status.in' => 'Trạng thái không hợp lệ.',
-                'verification_status.in' => 'Trạng thái xác minh không hợp lệ.',
-                'per_page.max' => 'Số lượng bản ghi mỗi trang không được vượt quá 100.',
-            ]);
-
-            $perPage = (int) ($request->get('per_page', self::DEFAULT_PER_PAGE));
-            $query = Property::query()->with(['owner:id,full_name', 'verifier:id,full_name', 'images']);
-
-            // Filter by owner_id
-            if ($request->has('owner_id')) {
-                $query->where('owner_id', $request->owner_id);
-            }
-
-            // Filter by status
-            if ($request->has('status')) {
-                $query->where('status', $request->status);
-            }
-
-            // Filter by verification_status
-            if ($request->has('verification_status')) {
-                $query->where('verification_status', $request->verification_status);
-            }
-
-            // Search by name or address
-            if ($request->has('search') && !empty($request->search)) {
-                $query->where(function ($q) use ($request) {
-                    $q->where('name', 'like', '%' . $request->search . '%')
-                        ->orWhere('address', 'like', '%' . $request->search . '%');
-                });
-            }
-
-            // Sort by latest
-            $query->latest();
-
-            // Paginate results
-            $properties = $query->paginate($perPage);
+            // Use QueryService để xử lý logic query phức tạp
+            // Use raw query params to avoid dropping filters when validation is lenient
+            $result = $service->index($request->query());
 
             return response()->json([
                 'success' => true,
-                'data' => $properties->items(),
-                'meta' => [
-                    'pagination' => [
-                        'current_page' => $properties->currentPage(),
-                        'per_page' => $properties->perPage(),
-                        'total' => $properties->total(),
-                        'last_page' => $properties->lastPage(),
-                    ],
-                ],
+                ...$result,
             ]);
-        } catch (\Illuminate\Validation\ValidationException $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Dữ liệu không hợp lệ',
-                'errors' => $e->errors(),
-            ], 422);
         } catch (\Exception $e) {
             Log::error('PropertyController@index failed', [
                 'message' => $e->getMessage(),
@@ -270,14 +214,85 @@ class PropertyController extends Controller
      *     @OA\Response(response=403, description="Forbidden")
      * )
      */
-    public function show(Property $property): JsonResponse
+    /**
+     * Display the specified property
+     *
+     * @OA\Get(
+     *     path="/api/admin/properties/{id}",
+     *     operationId="getProperty",
+     *     tags={"Properties"},
+     *     summary="Chi tiết property",
+     *     description="Lấy thông tin chi tiết của một property. Có thể sử dụng 'include' parameter để chỉ load relationships cần thiết.",
+     *     security={{"bearerAuth":{}}},
+     *     @OA\Parameter(
+     *         name="id",
+     *         in="path",
+     *         required=true,
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\Parameter(
+     *         name="include",
+     *         in="query",
+     *         description="Include relationships (owner, verifier, images, rooms). Ví dụ: 'owner,images'",
+     *         required=false,
+     *         @OA\Schema(type="string", example="owner,images")
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Chi tiết property",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="success", type="boolean", example=true),
+     *             @OA\Property(property="data", type="object")
+     *         )
+     *     ),
+     *     @OA\Response(response=404, description="Property not found"),
+     *     @OA\Response(response=403, description="Forbidden")
+     * )
+     */
+    public function show(Request $request, Property $property): JsonResponse
     {
         try {
             // Authorization is handled by route middleware (role:admin)
             
+            // Parse include parameter
+            $includes = $request->get('include', '');
+            $with = [];
+            
+            if ($includes) {
+                // Parse include string (e.g., "owner,images")
+                $includeArray = array_map('trim', explode(',', $includes));
+                
+                foreach ($includeArray as $include) {
+                    if ($include === 'owner') {
+                        $with[] = 'owner:id,full_name';
+                    } elseif ($include === 'verifier') {
+                        $with[] = 'verifier:id,full_name';
+                    } elseif ($include === 'images') {
+                        $with[] = 'images';
+                    } elseif ($include === 'rooms') {
+                        $with[] = 'rooms:id,name,property_id';
+                    }
+                }
+            } else {
+                // Default: Load tất cả relationships (backward compatibility)
+                $with = [
+                    'owner:id,full_name',
+                    'verifier:id,full_name',
+                    'images'
+                ];
+            }
+            
+            // Loại bỏ duplicates
+            $with = array_unique($with);
+            
+            // Load relationships
+            if (!empty($with)) {
+                $property->load($with);
+            }
+            
             return response()->json([
                 'success' => true,
-                'data' => $property->load(['owner:id,full_name', 'verifier:id,full_name', 'images']),
+                'data' => $property,
             ]);
         } catch (\Exception $e) {
             Log::error('PropertyController@show failed', [

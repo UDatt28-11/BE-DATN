@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Exception;
 
 /**
@@ -153,6 +154,75 @@ class RoomTypeController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Có lỗi xảy ra khi lấy danh sách loại phòng.',
+            ], 500);
+        }
+    }
+
+    /**
+     * Danh sách loại phòng đã bị xóa mềm (lịch sử/thùng rác)
+     */
+    public function history(Request $request): JsonResponse
+    {
+        try {
+            $request->validate([
+                'property_id' => 'sometimes|integer|exists:properties,id',
+                'status' => 'sometimes|string|in:active,inactive',
+                'search' => 'sometimes|string|max:255',
+                'sort_by' => 'sometimes|string|in:id,name,status,created_at,updated_at,deleted_at',
+                'sort_order' => 'sometimes|string|in:asc,desc',
+                'page' => 'sometimes|integer|min:1',
+                'per_page' => 'sometimes|integer|min:1|max:100',
+            ]);
+
+            $perPage = (int) ($request->get('per_page', self::DEFAULT_PER_PAGE));
+            $query = RoomType::onlyTrashed()->with('property:id,name');
+
+            if ($request->has('property_id')) {
+                $query->where('property_id', $request->property_id);
+            }
+
+            if ($request->has('status')) {
+                $query->where('status', $request->status);
+            }
+
+            if ($request->has('search') && !empty($request->search)) {
+                $query->where('name', 'like', '%' . $request->search . '%');
+            }
+
+            $sortBy = $request->get('sort_by', 'deleted_at');
+            $sortOrder = $request->get('sort_order', 'desc');
+            $query->orderBy($sortBy, $sortOrder);
+
+            $roomTypes = $query->paginate($perPage);
+
+            return response()->json([
+                'success' => true,
+                'data' => $roomTypes->items(),
+                'meta' => [
+                    'pagination' => [
+                        'current_page' => $roomTypes->currentPage(),
+                        'per_page' => $roomTypes->perPage(),
+                        'total' => $roomTypes->total(),
+                        'last_page' => $roomTypes->lastPage(),
+                    ],
+                ],
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Dữ liệu không hợp lệ',
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Exception $e) {
+            Log::error('RoomTypeController@history failed', [
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi lấy danh sách lịch sử loại phòng.',
             ], 500);
         }
     }
@@ -417,20 +487,17 @@ class RoomTypeController extends Controller
             $roomTypeId = $roomType->id;
             $roomTypeName = $roomType->name;
 
-            // Delete associated image file
-        $this->deleteLocalFile($roomType->image_url);
+            // Soft delete room type (không xóa file ngay để có thể khôi phục)
+            $roomType->delete();
 
-            // Delete room type
-        $roomType->delete();
-
-            Log::info('RoomType deleted', [
+            Log::info('RoomType soft deleted', [
                 'room_type_id' => $roomTypeId,
                 'name' => $roomTypeName,
             ]);
 
             return response()->json([
                 'success' => true,
-                'message' => 'Xóa loại phòng thành công',
+                'message' => 'Đã chuyển loại phòng vào lịch sử (thùng rác)',
             ], 200);
         } catch (\Exception $e) {
             Log::error('RoomTypeController@destroy failed', [
@@ -443,6 +510,83 @@ class RoomTypeController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Có lỗi xảy ra khi xóa loại phòng: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Khôi phục loại phòng từ lịch sử (soft deleted)
+     */
+    public function restore(int $id): JsonResponse
+    {
+        try {
+            $roomType = RoomType::onlyTrashed()->findOrFail($id);
+
+            $roomType->restore();
+
+            Log::info('RoomType restored', [
+                'room_type_id' => $roomType->id,
+                'name' => $roomType->name,
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Khôi phục loại phòng thành công',
+                'data' => $roomType->fresh('property:id,name'),
+            ]);
+        } catch (ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Không tìm thấy loại phòng trong lịch sử.',
+            ], 404);
+        } catch (\Exception $e) {
+            Log::error('RoomTypeController@restore failed', [
+                'room_type_id' => $id,
+                'message' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi khôi phục loại phòng: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Xóa vĩnh viễn loại phòng (force delete) khỏi hệ thống
+     */
+    public function forceDelete(int $id): JsonResponse
+    {
+        try {
+            $roomType = RoomType::onlyTrashed()->findOrFail($id);
+
+            // Xóa file ảnh trên S3 nếu có
+            $this->deleteLocalFile($roomType->image_url);
+
+            $roomType->forceDelete();
+
+            Log::info('RoomType force deleted', [
+                'room_type_id' => $id,
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Đã xóa vĩnh viễn loại phòng.',
+            ]);
+        } catch (ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Không tìm thấy loại phòng trong lịch sử.',
+            ], 404);
+        } catch (\Exception $e) {
+            Log::error('RoomTypeController@forceDelete failed', [
+                'room_type_id' => $id,
+                'message' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi xóa vĩnh viễn loại phòng: ' . $e->getMessage(),
             ], 500);
         }
     }
@@ -525,91 +669,73 @@ class RoomTypeController extends Controller
     }
 
     /**
-     * Store uploaded file to local storage with unique filename
+     * Store uploaded file to S3 with unique filename
      *
      * @param \Illuminate\Http\UploadedFile $file
-     * @return string|null Full URL of the stored file
+     * @return string|null S3 path of the stored file
      * @throws Exception
      */
     private function storeLocalFile($file): ?string
     {
         try {
-            // Generate unique filename to avoid overwriting
             $extension = $file->getClientOriginalExtension();
             $filename = Str::uuid() . '.' . $extension;
             
-            // Store file in public disk with unique filename
-            $path = $file->storeAs('room_type_images', $filename, 'public');
-            
-            // Verify file was actually saved
-            if (!Storage::disk('public')->exists($path)) {
-                throw new Exception('File không được lưu vào storage. Path: ' . $path);
+            $path = Storage::disk('s3')->putFileAs('room_type_images', $file, $filename);
+
+            if (!$path) {
+                throw new Exception('File không được lưu lên S3.');
             }
             
-            // Get file size for logging
-            $fileSize = Storage::disk('public')->size($path);
-            
-            // Generate full URL using Storage disk URL
-            // Storage::disk('public')->url() returns relative path like /storage/room_type_images/...
-            // We need to prepend APP_URL to make it a full URL
-            $relativeUrl = Storage::disk('public')->url($path);
-            $appUrl = rtrim(config('app.url'), '/');
-            $url = $appUrl . $relativeUrl;
-            
-            // Log successful upload for debugging
-            Log::info('RoomTypeController@storeLocalFile - File uploaded successfully', [
+            $url = Storage::disk('s3')->url($path);
+
+            Log::info('RoomTypeController@storeLocalFile - File uploaded to S3 successfully', [
                 'original_name' => $file->getClientOriginalName(),
                 'stored_path' => $path,
-                'file_size' => $fileSize,
                 'full_url' => $url,
-                'storage_path' => storage_path('app/public/' . $path),
             ]);
             
+            // Lưu full URL vào DB (giống local trước đây, FE dễ dùng)
             return $url;
         } catch (Exception $e) {
-            Log::error('Failed to store room type image', [
+            Log::error('Failed to store room type image (S3)', [
                 'original_name' => $file->getClientOriginalName() ?? 'unknown',
                 'error' => $e->getMessage(),
                 'file' => $e->getFile(),
                 'line' => $e->getLine(),
                 'trace' => $e->getTraceAsString(),
             ]);
-            throw new Exception('Lỗi khi tải file hình ảnh: ' . $e->getMessage());
+            throw new Exception('Lỗi khi tải file hình ảnh lên S3: ' . $e->getMessage());
         }
     }
 
     /**
-     * Delete file from local storage
+     * Delete file from S3
      *
-     * @param string|null $url Full URL of the file to delete
+     * @param string|null $urlOrPath Stored S3 path or full URL
      * @return void
      */
-    private function deleteLocalFile(?string $url): void
+    private function deleteLocalFile(?string $urlOrPath): void
     {
-        if (!$url) {
+        if (!$urlOrPath) {
             return;
         }
 
         try {
-            // Extract relative path from URL
-            // URL format: http://example.com/storage/room_type_images/file.png
-            // We need: room_type_images/file.png
-            $parsedUrl = parse_url($url);
+            $path = $urlOrPath;
+
+            if (filter_var($urlOrPath, FILTER_VALIDATE_URL)) {
+                $parsedUrl = parse_url($urlOrPath);
             $path = $parsedUrl['path'] ?? '';
-            
-            // Remove /storage prefix if present
             $path = ltrim($path, '/');
-            if (Str::startsWith($path, 'storage/')) {
-                $path = Str::after($path, 'storage/');
             }
             
-            // Delete file if exists
-            if ($path && Storage::disk('public')->exists($path)) {
-                Storage::disk('public')->delete($path);
+            if ($path && Storage::disk('s3')->exists($path)) {
+                Storage::disk('s3')->delete($path);
             }
         } catch (Exception $e) {
-            Log::error('Failed to delete room type image', [
-                'url' => $url,
+            Log::error('Failed to delete room type image (S3)', [
+                'input' => $urlOrPath,
                 'error' => $e->getMessage(),
                 'file' => $e->getFile(),
                 'line' => $e->getLine(),

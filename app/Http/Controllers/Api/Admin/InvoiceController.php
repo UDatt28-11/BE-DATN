@@ -3,17 +3,21 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\IndexInvoiceRequest;
 use App\Models\Invoice;
 use App\Models\BookingOrder;
 use App\Models\InvoiceItem;
 use App\Models\InvoiceConfig;
 use App\Models\RefundPolicy;
 use App\Models\InvoiceDiscount;
+use App\Services\Invoice\QueryService;
+use App\Support\LogHelper;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Log;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
  * @OA\Tag(
@@ -85,77 +89,21 @@ class InvoiceController extends Controller
      *     )
      * )
      */
-    public function index(Request $request): JsonResponse
+    public function index(IndexInvoiceRequest $request, QueryService $service): JsonResponse
     {
-        Log::info('Invoices#index called', ['query' => $request->all()]);
+        // Filter sensitive data before logging
+        Log::info('Invoices#index called', ['query' => LogHelper::filterQuery($request)]);
         try {
-            $request->validate([
-                'status' => 'sometimes|string',
-                'payment_status' => 'sometimes|string|in:paid,unpaid,overdue',
-                'search' => 'sometimes|string|max:255',
-                'date_from' => 'sometimes|date',
-                'date_to' => 'sometimes|date|after_or_equal:date_from',
-                'sort_by' => 'sometimes|string|in:id,invoice_number,total_amount,status,created_at,updated_at',
-                'sort_order' => 'sometimes|string|in:asc,desc',
-                'page' => 'sometimes|integer|min:1',
-                'per_page' => 'sometimes|integer|min:1|max:100',
-            ], [
-                'payment_status.in' => 'Trạng thái thanh toán không hợp lệ. Chỉ chấp nhận: paid, unpaid, overdue.',
-                'sort_by.in' => 'Trường sắp xếp không hợp lệ.',
-                'sort_order.in' => 'Thứ tự sắp xếp không hợp lệ. Chỉ chấp nhận: asc, desc.',
-                'per_page.max' => 'Số lượng bản ghi mỗi trang không được vượt quá 100.',
-            ]);
+            // Use QueryService để xử lý logic query phức tạp
+            // Use raw query params to avoid dropping filters when validation is lenient
+            $result = $service->index($request->query());
 
-            $query = Invoice::with(['bookingOrder', 'invoiceItems']);
-
-            if ($request->has('status')) {
-                $query->where('status', $request->status);
-            }
-
-            if ($request->has('payment_status')) {
-                if ($request->payment_status === 'paid') {
-                    $query->paid();
-                } elseif ($request->payment_status === 'unpaid') {
-                    $query->unpaid();
-                } elseif ($request->payment_status === 'overdue') {
-                    $query->overdue();
-                }
-            }
-
-            if ($request->has('search')) {
-                $query->where('invoice_number', 'like', '%' . $request->search . '%');
-            }
-
-            if ($request->has('date_from')) {
-                $query->whereDate('created_at', '>=', $request->date_from);
-            }
-            if ($request->has('date_to')) {
-                $query->whereDate('created_at', '<=', $request->date_to);
-            }
-
-            // Sorting
-            $sortBy = $request->get('sort_by', 'created_at');
-            $sortOrder = $request->get('sort_order', 'desc');
-            $query->orderBy($sortBy, $sortOrder);
-
-            // Pagination
-            $perPage = (int) ($request->get('per_page', 15));
-            $invoices = $query->paginate($perPage);
-
-            Log::info('Invoices#index success', ['count' => $invoices->count()]);
+            Log::info('Invoices#index success', ['count' => count($result['data'])]);
             return response()->json([
                 'success' => true,
-                'data' => $invoices->items(),
-                'meta' => [
-                    'pagination' => [
-                        'current_page' => $invoices->currentPage(),
-                        'per_page' => $invoices->perPage(),
-                        'total' => $invoices->total(),
-                        'last_page' => $invoices->lastPage(),
-                    ],
-                ],
+                ...$result,
             ]);
-        } catch (\Throwable $e) {
+        } catch (\Exception $e) {
             Log::error('Invoices#index failed', [
                 'message' => $e->getMessage(),
                 'file' => $e->getFile(),
@@ -164,7 +112,7 @@ class InvoiceController extends Controller
             ]);
             return response()->json([
                 'success' => false,
-                'message' => 'Internal Server Error',
+                'message' => 'Có lỗi xảy ra khi lấy danh sách hóa đơn.',
             ], 500);
         }
     }
@@ -317,15 +265,93 @@ class InvoiceController extends Controller
      *     )
      * )
      */
-    public function show(string $id): JsonResponse
+    /**
+     * Display the specified invoice
+     *
+     * @OA\Get(
+     *     path="/api/invoices/{id}",
+     *     operationId="getInvoice",
+     *     tags={"Invoices"},
+     *     summary="Chi tiết hóa đơn",
+     *     description="Lấy thông tin chi tiết của một hóa đơn. Có thể sử dụng 'include' parameter để chỉ load relationships cần thiết.",
+     *     @OA\Parameter(
+     *         name="id",
+     *         in="path",
+     *         required=true,
+     *         @OA\Schema(type="string")
+     *     ),
+     *     @OA\Parameter(
+     *         name="include",
+     *         in="query",
+     *         description="Include relationships (bookingOrder, bookingOrder.guest, invoiceItems). Ví dụ: 'bookingOrder,invoiceItems'",
+     *         required=false,
+     *         @OA\Schema(type="string", example="bookingOrder,invoiceItems")
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Chi tiết hóa đơn",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="success", type="boolean", example=true),
+     *             @OA\Property(property="data", type="object")
+     *         )
+     *     ),
+     *     @OA\Response(response=404, description="Invoice not found")
+     * )
+     */
+    public function show(Request $request, string $id): JsonResponse
     {
-        $invoice = Invoice::with(['bookingOrder.guest', 'invoiceItems'])
-            ->findOrFail($id);
+        try {
+            // Parse include parameter
+            $includes = $request->get('include', '');
+            $with = [];
+            
+            if ($includes) {
+                // Parse include string (e.g., "bookingOrder,invoiceItems")
+                $includeArray = array_map('trim', explode(',', $includes));
+                
+                foreach ($includeArray as $include) {
+                    if ($include === 'bookingOrder') {
+                        $with[] = 'bookingOrder';
+                    } elseif ($include === 'bookingOrder.guest') {
+                        $with[] = 'bookingOrder.guest';
+                    } elseif ($include === 'invoiceItems') {
+                        $with[] = 'invoiceItems';
+                    }
+                }
+            } else {
+                // Default: Load tất cả relationships (backward compatibility)
+                $with = [
+                    'bookingOrder.guest',
+                    'invoiceItems'
+                ];
+            }
+            
+            // Loại bỏ duplicates
+            $with = array_unique($with);
+            
+            // Load invoice with relationships
+            $invoice = Invoice::with($with)->findOrFail($id);
 
-        return response()->json([
-            'success' => true,
-            'data' => $invoice
-        ]);
+            return response()->json([
+                'success' => true,
+                'data' => $invoice
+            ]);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Không tìm thấy hóa đơn.',
+            ], 404);
+        } catch (\Exception $e) {
+            Log::error('InvoiceController@show failed', [
+                'invoice_id' => $id,
+                'message' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi lấy thông tin hóa đơn.',
+            ], 500);
+        }
     }
 
     /**
@@ -1309,5 +1335,95 @@ class InvoiceController extends Controller
                 'message' => 'Có lỗi xảy ra khi gộp hóa đơn: ' . $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * Export invoices to CSV (áp dụng cùng bộ lọc như index)
+     */
+    public function export(Request $request): StreamedResponse
+    {
+        $request->validate([
+            'status' => 'sometimes|string',
+            'payment_status' => 'sometimes|string|in:paid,unpaid,overdue',
+            'search' => 'sometimes|string|max:255',
+            'date_from' => 'sometimes|date',
+            'date_to' => 'sometimes|date|after_or_equal:date_from',
+        ]);
+
+        $query = Invoice::with(['bookingOrder.guest', 'payments']);
+
+        if ($request->has('status')) {
+            $query->where('status', $request->status);
+        }
+
+        if ($request->has('payment_status')) {
+            if ($request->payment_status === 'paid') {
+                $query->paid();
+            } elseif ($request->payment_status === 'unpaid') {
+                $query->unpaid();
+            } elseif ($request->payment_status === 'overdue') {
+                $query->overdue();
+            }
+        }
+
+        if ($request->has('search')) {
+            $query->where('invoice_number', 'like', '%' . $request->search . '%');
+        }
+
+        if ($request->has('date_from')) {
+            $query->whereDate('created_at', '>=', $request->date_from);
+        }
+        if ($request->has('date_to')) {
+            $query->whereDate('created_at', '<=', $request->date_to);
+        }
+
+        $fileName = 'invoices_' . now()->format('Ymd_His') . '.csv';
+
+        return response()->streamDownload(function () use ($query) {
+            $handle = fopen('php://output', 'w');
+
+            // Header
+            fputcsv($handle, [
+                'ID',
+                'Mã hóa đơn',
+                'Mã đơn đặt phòng',
+                'Khách hàng',
+                'Email',
+                'Số điện thoại',
+                'Ngày xuất',
+                'Hạn thanh toán',
+                'Tổng tiền',
+                'Giảm giá',
+                'Hoàn tiền',
+                'Trạng thái',
+            ]);
+
+            $query->orderBy('created_at', 'desc')->chunk(500, function ($invoices) use ($handle) {
+                foreach ($invoices as $invoice) {
+                    $booking = $invoice->bookingOrder;
+                    $guest = optional($booking)->guest;
+
+                    fputcsv($handle, [
+                        $invoice->id,
+                        $invoice->invoice_number ?? '',
+                        optional($booking)->order_code ?? optional($booking)->id,
+                        $booking->customer_name ?? optional($guest)->full_name ?? '',
+                        $booking->customer_email ?? optional($guest)->email ?? '',
+                        $booking->customer_phone ?? '',
+                        optional($invoice->issue_date)->format('Y-m-d'),
+                        optional($invoice->due_date)->format('Y-m-d'),
+                        (float) $invoice->total_amount,
+                        (float) $invoice->discount_amount,
+                        (float) $invoice->refund_amount,
+                        $invoice->status,
+                    ]);
+                }
+            });
+
+            fclose($handle);
+        }, $fileName, [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+            'Cache-Control' => 'no-store, no-cache, must-revalidate',
+        ]);
     }
 }

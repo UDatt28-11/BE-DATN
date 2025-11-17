@@ -14,7 +14,9 @@ class UpdateBookingStatusRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'status' => ['required','in:confirmed,completed,cancelled'],
+            // Cho phép các trạng thái của hệ thống hiện tại,
+            // logic state machine ở controller sẽ quyết định chuyển đổi nào hợp lệ
+            'status' => ['required','in:pending,confirmed,checked_in,checked_out,cancelled,completed'],
             'reason' => ['sometimes','string','max:255'],
         ];
     }

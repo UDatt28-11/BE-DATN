@@ -3,10 +3,12 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\IndexReviewRequest;
 use App\Models\Review;
 use App\Models\BookingDetail;
 use App\Models\Property;
 use App\Models\Room;
+use App\Services\Review\QueryService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
@@ -102,117 +104,23 @@ class ReviewController extends Controller
      *     )
      * )
      */
-    public function index(Request $request): JsonResponse
+    public function index(IndexReviewRequest $request, QueryService $service): JsonResponse
     {
         try {
             // Authorization is handled by route middleware (role:admin)
+            // Use QueryService để xử lý logic query phức tạp
+            // Use raw query params to avoid dropping filters when validation is lenient
+            $result = $service->index($request->query());
 
-            // Validate query parameters
-            $request->validate([
-                'property_id' => 'sometimes|integer|exists:properties,id',
-                'room_id' => 'sometimes|integer|exists:rooms,id',
-                'status' => 'sometimes|string|in:pending,approved,rejected',
-                'rating' => 'sometimes|integer|min:1|max:5',
-                'verified_only' => 'sometimes|boolean',
-                'date_from' => 'sometimes|date',
-                'date_to' => 'sometimes|date|after_or_equal:date_from',
-                'search' => 'sometimes|string|max:255',
-                'sort_by' => 'sometimes|string|in:reviewed_at,rating,created_at',
-                'sort_order' => 'sometimes|string|in:asc,desc',
-                'page' => 'sometimes|integer|min:1',
-                'per_page' => 'sometimes|integer|min:1|max:100',
-            ], [
-                'property_id.exists' => 'Property không tồn tại.',
-                'room_id.exists' => 'Room không tồn tại.',
-                'status.in' => 'Trạng thái không hợp lệ. Chỉ chấp nhận: pending, approved, rejected.',
-                'rating.min' => 'Rating phải từ 1 đến 5.',
-                'rating.max' => 'Rating phải từ 1 đến 5.',
-                'date_to.after_or_equal' => 'Ngày kết thúc phải sau hoặc bằng ngày bắt đầu.',
-                'per_page.max' => 'Số lượng bản ghi mỗi trang không được vượt quá 100.',
-            ]);
-
-            $perPage = (int) ($request->get('per_page', self::DEFAULT_PER_PAGE));
-            $query = Review::query()->with([
-                'user:id,full_name,email',
-                'property:id,name',
-                'room:id,name',
-                'bookingDetail:id,booking_order_id,room_id'
-            ]);
-
-        // Filter by property
-        if ($request->has('property_id')) {
-            $query->where('property_id', $request->property_id);
-        }
-
-        // Filter by room
-        if ($request->has('room_id')) {
-            $query->where('room_id', $request->room_id);
-        }
-
-        // Filter by status
-        if ($request->has('status')) {
-            $query->where('status', $request->status);
-        }
-
-        // Filter by rating
-        if ($request->has('rating')) {
-            $query->where('rating', $request->rating);
-        }
-
-        // Filter verified purchases only
-        if ($request->boolean('verified_only', false)) {
-            $query->where('is_verified_purchase', true);
-        }
-
-        // Filter by date range
-        if ($request->has('date_from') && $request->has('date_to')) {
-            $query->whereBetween('reviewed_at', [
-                $request->date_from,
-                $request->date_to
-            ]);
-        }
-
-        // Search in comment and title
-            if ($request->has('search') && !empty($request->search)) {
-            $search = $request->search;
-            $query->where(function ($q) use ($search) {
-                    $q->where('title', 'like', '%' . $search . '%')
-                        ->orWhere('comment', 'like', '%' . $search . '%');
-            });
-        }
-
-        // Sort options
-        $sortBy = $request->get('sort_by', 'reviewed_at');
-        $sortOrder = $request->get('sort_order', 'desc');
-        $query->orderBy($sortBy, $sortOrder);
-
-            // Paginate results
-            $reviews = $query->paginate($perPage);
-
-        return response()->json([
-            'success' => true,
-                'data' => $reviews->items(),
-                'meta' => [
-                    'pagination' => [
-                        'current_page' => $reviews->currentPage(),
-                        'per_page' => $reviews->perPage(),
-                        'total' => $reviews->total(),
-                        'last_page' => $reviews->lastPage(),
-                    ],
-                ],
-            ]);
-        } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json([
-                'success' => false,
-                'message' => 'Dữ liệu không hợp lệ',
-                'errors' => $e->errors(),
-            ], 422);
+                'success' => true,
+                ...$result,
+            ]);
         } catch (\Exception $e) {
             Log::error('ReviewController@index failed', [
                 'message' => $e->getMessage(),
                 'file' => $e->getFile(),
                 'line' => $e->getLine(),
-                'trace' => $e->getTraceAsString(),
             ]);
 
             return response()->json([
@@ -372,11 +280,76 @@ class ReviewController extends Controller
      *     @OA\Response(response=404, description="Không tìm thấy")
      * )
      */
-    public function show(int $id): JsonResponse
+    /**
+     * Display the specified review
+     *
+     * @OA\Get(
+     *     path="/api/reviews/{id}",
+     *     operationId="getReview",
+     *     tags={"Reviews"},
+     *     summary="Chi tiết đánh giá",
+     *     description="Lấy thông tin chi tiết của một đánh giá. Có thể sử dụng 'include' parameter để chỉ load relationships cần thiết.",
+     *     @OA\Parameter(
+     *         name="id",
+     *         in="path",
+     *         required=true,
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\Parameter(
+     *         name="include",
+     *         in="query",
+     *         description="Include relationships (user, property, room, bookingDetail). Ví dụ: 'user,property'",
+     *         required=false,
+     *         @OA\Schema(type="string", example="user,property")
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Chi tiết đánh giá",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="success", type="boolean", example=true),
+     *             @OA\Property(property="data", type="object")
+     *         )
+     *     ),
+     *     @OA\Response(response=404, description="Review not found")
+     * )
+     */
+    public function show(Request $request, int $id): JsonResponse
     {
         try {
-            $review = Review::with(['user', 'property', 'room', 'bookingDetail'])
-                ->findOrFail($id);
+            // Parse include parameter
+            $includes = $request->get('include', '');
+            $with = [];
+            
+            if ($includes) {
+                // Parse include string (e.g., "user,property")
+                $includeArray = array_map('trim', explode(',', $includes));
+                
+                foreach ($includeArray as $include) {
+                    if ($include === 'user') {
+                        $with[] = 'user';
+                    } elseif ($include === 'property') {
+                        $with[] = 'property';
+                    } elseif ($include === 'room') {
+                        $with[] = 'room';
+                    } elseif ($include === 'bookingDetail') {
+                        $with[] = 'bookingDetail';
+                    }
+                }
+            } else {
+                // Default: Load tất cả relationships (backward compatibility)
+                $with = [
+                    'user',
+                    'property',
+                    'room',
+                    'bookingDetail'
+                ];
+            }
+            
+            // Loại bỏ duplicates
+            $with = array_unique($with);
+            
+            // Load review with relationships
+            $review = Review::with($with)->findOrFail($id);
 
             return response()->json([
                 'success' => true,

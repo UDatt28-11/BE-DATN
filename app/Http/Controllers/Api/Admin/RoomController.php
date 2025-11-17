@@ -3,10 +3,12 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\IndexRoomRequest;
 use App\Models\Room;
 use App\Models\Review;
 use App\Http\Requests\Admin\StoreRoomRequest;
 use App\Http\Requests\Admin\UpdateRoomRequest;
+use App\Services\Room\QueryService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -90,93 +92,18 @@ class RoomController extends Controller
      *     @OA\Response(response=403, description="Forbidden")
      * )
      */
-    public function index(Request $request): JsonResponse
+    public function index(IndexRoomRequest $request, QueryService $service): JsonResponse
     {
         try {
             // Authorization is handled by route middleware (role:admin)
-            
-            // Validate query parameters
-        $request->validate([
-                'property_id' => 'sometimes|integer|exists:properties,id',
-                'room_type_id' => 'sometimes|integer|exists:room_types,id',
-                'status' => 'sometimes|string|in:available,maintenance,occupied',
-                'verification_status' => 'sometimes|string|in:pending,verified,rejected',
-                'search' => 'sometimes|string|max:255',
-                'sort_by' => 'sometimes|string|in:id,name,price_per_night,created_at,updated_at',
-                'sort_order' => 'sometimes|string|in:asc,desc',
-                'page' => 'sometimes|integer|min:1',
-                'per_page' => 'sometimes|integer|min:1|max:100',
-            ], [
-                'property_id.exists' => 'Property không tồn tại.',
-                'room_type_id.exists' => 'Room type không tồn tại.',
-                'status.in' => 'Trạng thái không hợp lệ.',
-                'verification_status.in' => 'Trạng thái xác minh không hợp lệ.',
-                'sort_by.in' => 'Trường sắp xếp không hợp lệ.',
-                'sort_order.in' => 'Thứ tự sắp xếp không hợp lệ. Chỉ chấp nhận: asc, desc.',
-                'per_page.max' => 'Số lượng bản ghi mỗi trang không được vượt quá 100.',
-            ]);
-
-            $perPage = (int) ($request->get('per_page', self::DEFAULT_PER_PAGE));
-            $query = Room::query()
-                ->with(['property:id,name', 'roomType:id,name', 'amenities:id,name', 'images', 'verifier:id,full_name']);
-
-            // Filter by property_id
-            if ($request->has('property_id')) {
-                $query->where('property_id', $request->property_id);
-            }
-
-            // Filter by room_type_id
-            if ($request->has('room_type_id')) {
-                $query->where('room_type_id', $request->room_type_id);
-            }
-
-            // Filter by status
-            if ($request->has('status')) {
-                $query->where('status', $request->status);
-            }
-
-            // Filter by verification_status
-            if ($request->has('verification_status')) {
-                $query->where('verification_status', $request->verification_status);
-            }
-
-            // Search by name or property address
-            if ($request->has('search') && !empty($request->search)) {
-                $search = $request->search;
-                $query->where(function ($q) use ($search) {
-                    $q->where('name', 'like', '%' . $search . '%')
-                        ->orWhereHas('property', function ($q) use ($search) {
-                            $q->where('address', 'like', '%' . $search . '%');
-                        });
-                });
-            }
-
-            // Sorting
-            $sortBy = $request->get('sort_by', 'created_at');
-            $sortOrder = $request->get('sort_order', 'desc');
-            $query->orderBy($sortBy, $sortOrder);
-
-            // Paginate results
-            $rooms = $query->paginate($perPage);
+            // Use QueryService để xử lý logic query phức tạp
+            // Use raw query params to avoid dropping filters when validation is lenient
+            $result = $service->index($request->query());
 
             return response()->json([
                 'success' => true,
-                'data' => $rooms->items(),
-                'meta' => [
-                    'pagination' => [
-                        'current_page' => $rooms->currentPage(),
-                        'per_page' => $rooms->perPage(),
-                        'total' => $rooms->total(),
-                        'last_page' => $rooms->lastPage(),
-                    ],
-                ],
+                ...$result,
             ]);
-        } catch (\Illuminate\Validation\ValidationException $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Dữ liệu không hợp lệ',
-                'errors' => $e->errors(),
-            ], 422);
         } catch (\Exception $e) {
             Log::error('RoomController@index failed', [
                 'message' => $e->getMessage(),
@@ -431,7 +358,7 @@ class RoomController extends Controller
     public function showPublic(string $id): JsonResponse
     {
         try {
-            // Log request ID để debug
+            // Log request ID để debug (ID không phải sensitive data nên không cần filter)
             Log::info('RoomController@showPublic - Request ID', ['requested_id' => $id, 'type' => gettype($id)]);
             
             // Tìm phòng theo ID - QUAN TRỌNG: Phải tìm chính xác theo ID trước, không filter ngay
@@ -714,14 +641,20 @@ class RoomController extends Controller
      *     operationId="getRoom",
      *     tags={"Rooms"},
      *     summary="Chi tiết phòng",
-     *     description="Lấy thông tin chi tiết của một phòng",
+     *     description="Lấy thông tin chi tiết của một phòng. Có thể sử dụng 'include' parameter để chỉ load relationships cần thiết.",
      *     security={{"bearerAuth":{}}},
      *     @OA\Parameter(
      *         name="id",
      *         in="path",
      *         required=true,
-     *         description="ID phòng",
      *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\Parameter(
+     *         name="include",
+     *         in="query",
+     *         description="Include relationships (property, roomType, amenities, images, verifier). Ví dụ: 'property,roomType,images'",
+     *         required=false,
+     *         @OA\Schema(type="string", example="property,roomType,images")
      *     ),
      *     @OA\Response(
      *         response=200,
@@ -735,14 +668,54 @@ class RoomController extends Controller
      *     @OA\Response(response=403, description="Forbidden")
      * )
      */
-    public function show(Room $room): JsonResponse
+    public function show(Request $request, Room $room): JsonResponse
     {
         try {
             // Authorization is handled by route middleware (role:admin)
             
+            // Parse include parameter
+            $includes = $request->get('include', '');
+            $with = [];
+            
+            if ($includes) {
+                // Parse include string (e.g., "property,roomType,images")
+                $includeArray = array_map('trim', explode(',', $includes));
+                
+                foreach ($includeArray as $include) {
+                    if ($include === 'property') {
+                        $with[] = 'property:id,name';
+                    } elseif ($include === 'roomType') {
+                        $with[] = 'roomType:id,name';
+                    } elseif ($include === 'amenities') {
+                        $with[] = 'amenities:id,name';
+                    } elseif ($include === 'images') {
+                        $with[] = 'images';
+                    } elseif ($include === 'verifier') {
+                        $with[] = 'verifier:id,full_name';
+                    }
+                }
+            } else {
+                // Default: Load tất cả relationships (backward compatibility)
+                $with = [
+                    'property:id,name',
+                    'roomType:id,name',
+                    'amenities:id,name',
+                    'images',
+                    'verifier:id,full_name'
+                ];
+            }
+            
+            // Loại bỏ duplicates
+            $with = array_unique($with);
+            
+            // Load relationships
+            if (!empty($with)) {
+                $room->load($with);
+            }
+            
             return response()->json([
                 'success' => true,
-                'data' => $room->load(['property:id,name', 'roomType:id,name', 'amenities:id,name', 'images', 'verifier:id,full_name']),
+                'data' => $room,
             ]);
         } catch (\Exception $e) {
             Log::error('RoomController@show failed', [

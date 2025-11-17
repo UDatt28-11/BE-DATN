@@ -447,25 +447,28 @@ class CheckInOutController extends Controller
     }
 
     /**
-     * Store identity image
+     * Store identity image to PRIVATE S3 bucket (s3_private disk)
      */
     private function storeIdentityImage($file): string
     {
         try {
             $extension = $file->getClientOriginalExtension();
             $filename = Str::uuid() . '.' . $extension;
-            $path = $file->storeAs('identity_images', $filename, 'public');
-            
-            $relativeUrl = Storage::disk('public')->url($path);
-            $appUrl = rtrim(config('app.url'), '/');
-            $url = $appUrl . $relativeUrl;
-            
-            return $url;
+
+            // Lưu vào bucket private, KHÔNG public
+            $path = Storage::disk('s3_private')->putFileAs('identity_images', $file, $filename);
+
+            if (!$path) {
+                throw new \Exception('File không được lưu lên S3 (private).');
+            }
+
+            // DB chỉ lưu key/path; khi cần xem sẽ tạo temporaryUrl
+            return $path;
         } catch (\Exception $e) {
-            Log::error('CheckInOutController@storeIdentityImage failed', [
+            Log::error('CheckInOutController@storeIdentityImage failed (S3 private)', [
                 'error' => $e->getMessage(),
             ]);
-            throw new \Exception('Lỗi khi tải file giấy tờ tùy thân: ' . $e->getMessage());
+            throw new \Exception('Lỗi khi tải file giấy tờ tùy thân lên S3 (private): ' . $e->getMessage());
         }
     }
 }

@@ -3,11 +3,13 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\IndexPromotionRequest;
 use App\Models\Promotion;
 use App\Models\Property;
 use App\Models\Room;
 use App\Models\RoomType;
 use App\Models\BookingOrder;
+use App\Services\Promotion\QueryService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Validation\ValidationException;
@@ -73,98 +75,18 @@ class PromotionController extends Controller
      *     )
      * )
      */
-    public function index(Request $request): JsonResponse
+    public function index(IndexPromotionRequest $request, QueryService $service): JsonResponse
     {
         try {
             // Authorization is handled by route middleware (role:admin)
-
-            // Validate query parameters
-            $request->validate([
-                'property_id' => 'sometimes|integer|exists:properties,id',
-                'is_active' => 'sometimes|boolean',
-                'search' => 'sometimes|string|max:255',
-                'sort_by' => 'sometimes|string|in:id,code,name,is_active,created_at,updated_at',
-                'sort_order' => 'sometimes|string|in:asc,desc',
-                'page' => 'sometimes|integer|min:1',
-                'per_page' => 'sometimes|integer|min:1|max:100',
-            ], [
-                'property_id.exists' => 'Property không tồn tại.',
-                'sort_by.in' => 'Trường sắp xếp không hợp lệ.',
-                'sort_order.in' => 'Thứ tự sắp xếp không hợp lệ. Chỉ chấp nhận: asc, desc.',
-                'per_page.max' => 'Số lượng bản ghi mỗi trang không được vượt quá 100.',
-            ]);
-
-            $perPage = (int) ($request->get('per_page', self::DEFAULT_PER_PAGE));
-            $query = Promotion::query()->with([
-                'property:id,name',
-                'rooms:id,name',
-                'roomTypes:id,name'
-            ]);
-
-            // Filter by property_id
-            if ($request->has('property_id')) {
-                $query->where('property_id', $request->property_id);
-            }
-
-            // Filter by is_active
-            if ($request->has('is_active')) {
-                $query->where('is_active', $request->boolean('is_active') ? 1 : 0);
-            }
-
-            // Search by code or description
-            if ($request->has('search') && !empty($request->search)) {
-                $search = $request->search;
-                $query->where(function ($q) use ($search) {
-                    $q->where('code', 'like', '%' . $search . '%')
-                        ->orWhere('description', 'like', '%' . $search . '%');
-                });
-            }
-
-            // Sorting
-            $sortBy = $request->get('sort_by', 'created_at');
-            $sortOrder = $request->get('sort_order', 'desc');
-            $query->orderBy($sortBy, $sortOrder);
-
-            // Paginate results
-            $promotions = $query->paginate($perPage);
-
-            // Transform data to include relationships conditionally
-        $promotions->getCollection()->transform(function ($promotion) {
-            $data = $promotion->toArray();
-            if ($promotion->applicable_to !== 'all') {
-                    $data['rooms'] = $promotion->relationLoaded('rooms') ? $promotion->rooms->map(fn($room) => [
-                        'id' => $room->id,
-                        'name' => $room->name,
-                    ]) : [];
-                    $data['room_types'] = $promotion->relationLoaded('roomTypes') ? $promotion->roomTypes->map(fn($roomType) => [
-                        'id' => $roomType->id,
-                        'name' => $roomType->name,
-                    ]) : [];
-            } else {
-                $data['rooms'] = [];
-                $data['room_types'] = [];
-            }
-            return $data;
-        });
+            // Use QueryService để xử lý logic query phức tạp
+            // Use raw query params to avoid dropping filters when validation is lenient
+            $result = $service->index($request->query());
 
             return response()->json([
                 'success' => true,
-                'data' => $promotions->items(),
-                'meta' => [
-                    'pagination' => [
-                        'current_page' => $promotions->currentPage(),
-                        'per_page' => $promotions->perPage(),
-                        'total' => $promotions->total(),
-                        'last_page' => $promotions->lastPage(),
-                    ],
-                ],
+                ...$result,
             ]);
-        } catch (\Illuminate\Validation\ValidationException $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Dữ liệu không hợp lệ',
-                'errors' => $e->errors(),
-            ], 422);
         } catch (\Exception $e) {
             Log::error('PromotionController@index failed', [
                 'message' => $e->getMessage(),

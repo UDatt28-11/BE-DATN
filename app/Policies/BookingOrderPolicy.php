@@ -8,12 +8,28 @@ use App\Models\User;
 
 class BookingOrderPolicy
 {
-    public function viewAny(User $user) { return $user->hasRole('admin'); }
-    public function view(User $user, BookingOrder $order)
+    public function viewAny(User $user): bool
     {
-        return $user->hasRole('admin');
+        return $user->role === 'admin';
     }
-    public function create(User $user) { return $user->hasRole('admin'); }
-    public function update(User $user, BookingOrder $order) { return $user->hasRole('admin'); }
-    public function delete(User $user, BookingOrder $order) { return $user->hasRole('admin'); }
+
+    public function view(User $user, BookingOrder $order): bool
+    {
+        return $user->role === 'admin';
+    }
+
+    public function create(User $user): bool
+    {
+        return $user->role === 'admin';
+    }
+
+    public function update(User $user, BookingOrder $order): bool
+    {
+        return $user->role === 'admin';
+    }
+
+    public function delete(User $user, BookingOrder $order): bool
+    {
+        return $user->role === 'admin';
+    }
 }

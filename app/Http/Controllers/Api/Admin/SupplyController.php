@@ -78,96 +78,18 @@ class SupplyController extends Controller
      *     )
      * )
      */
-    public function index(Request $request): JsonResponse
+    public function index(IndexSupplyRequest $request, QueryService $service): JsonResponse
     {
         try {
             // Authorization is handled by route middleware (role:admin)
+            // Use QueryService để xử lý logic query phức tạp
+            // Use raw query params to avoid dropping filters when validation is lenient
+            $result = $service->index($request->query());
 
-            // Validate query parameters
-            $request->validate([
-                'room_id' => 'sometimes|integer|exists:rooms,id',
-                'category' => 'sometimes|string|max:100',
-                'status' => 'sometimes|string|in:active,inactive,discontinued',
-                'stock_status' => 'sometimes|string|in:low_stock,out_of_stock,in_stock',
-                'search' => 'sometimes|string|max:255',
-                'sort_by' => 'sometimes|string|in:id,name,category,status,current_stock,unit_price,created_at,updated_at',
-                'sort_order' => 'sometimes|string|in:asc,desc',
-                'page' => 'sometimes|integer|min:1',
-                'per_page' => 'sometimes|integer|min:1|max:100',
-            ], [
-                'room_id.exists' => 'Phòng không tồn tại.',
-                'status.in' => 'Trạng thái không hợp lệ. Chỉ chấp nhận: active, inactive, discontinued.',
-                'stock_status.in' => 'Trạng thái tồn kho không hợp lệ. Chỉ chấp nhận: low_stock, out_of_stock, in_stock.',
-                'sort_by.in' => 'Trường sắp xếp không hợp lệ.',
-                'sort_order.in' => 'Thứ tự sắp xếp không hợp lệ. Chỉ chấp nhận: asc, desc.',
-                'per_page.max' => 'Số lượng bản ghi mỗi trang không được vượt quá 100.',
-            ]);
-
-            $perPage = (int) ($request->get('per_page', self::DEFAULT_PER_PAGE));
-            $query = Supply::with('room:id,name');
-
-        // Filter by room_id
-        if ($request->has('room_id')) {
-            $query->where('room_id', $request->room_id);
-        }
-
-        // Filter by category
-        if ($request->has('category')) {
-            $query->where('category', $request->category);
-        }
-
-        // Filter by status
-        if ($request->has('status')) {
-            $query->where('status', $request->status);
-        }
-
-        // Filter by stock status
-        if ($request->has('stock_status')) {
-            switch ($request->stock_status) {
-                case 'low_stock':
-                    $query->lowStock();
-                    break;
-                case 'out_of_stock':
-                    $query->outOfStock();
-                    break;
-                case 'in_stock':
-                        $query->whereColumn('current_stock', '>', 'min_stock_level')
-                        ->where('current_stock', '>', 0);
-                    break;
-            }
-        }
-
-        // Search by name
-        if ($request->has('search') && !empty($request->search)) {
-            $query->where('name', 'like', '%' . $request->search . '%');
-        }
-
-        // Sorting
-        $sortBy = $request->get('sort_by', 'created_at');
-        $sortOrder = $request->get('sort_order', 'desc');
-        $query->orderBy($sortBy, $sortOrder);
-
-            // Paginate results
-            $supplies = $query->paginate($perPage);
-
-        return response()->json([
-            'success' => true,
-                'data' => $supplies->items(),
-                'meta' => [
-                    'pagination' => [
-                        'current_page' => $supplies->currentPage(),
-                        'per_page' => $supplies->perPage(),
-                        'total' => $supplies->total(),
-                        'last_page' => $supplies->lastPage(),
-                    ],
-                ],
-            ]);
-        } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json([
-                'success' => false,
-                'message' => 'Dữ liệu không hợp lệ',
-                'errors' => $e->errors(),
-            ], 422);
+                'success' => true,
+                ...$result,
+            ]);
         } catch (\Exception $e) {
             Log::error('SupplyController@index failed', [
                 'message' => $e->getMessage(),

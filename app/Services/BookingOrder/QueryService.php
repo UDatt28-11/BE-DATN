@@ -39,16 +39,55 @@ class QueryService
                 'booking_orders.created_at',
             ]);
 
-        // Tìm kiếm theo từ khóa
-        if (!empty($q['keyword'])) {
-            $keyword = '%' . trim($q['keyword']) . '%';
+        // Tìm kiếm theo từ khóa (keyword hoặc search)
+        $searchTerm = $q['keyword'] ?? $q['search'] ?? null;
+        if (!empty($searchTerm)) {
+            $keyword = '%' . trim($searchTerm) . '%';
             $query->where(function (Builder $b) use ($keyword) {
                 $b->where('booking_orders.order_code', 'like', $keyword)
+                  ->orWhere('booking_orders.customer_name', 'like', $keyword)
+                  ->orWhere('booking_orders.customer_email', 'like', $keyword)
                   ->orWhereHas('guest', function (Builder $g) use ($keyword) {
                       $g->where('full_name', 'like', $keyword)
-                        ->orWhere('phone_number', 'like', $keyword);
+                        ->orWhere('phone_number', 'like', $keyword)
+                        ->orWhere('email', 'like', $keyword);
                   });
             });
+        }
+
+        // Filter by order_code
+        if (!empty($q['order_code'])) {
+            $query->where('booking_orders.order_code', 'like', '%' . $q['order_code'] . '%');
+        }
+
+        // Filter by customer_name
+        if (!empty($q['customer_name'])) {
+            $query->where('booking_orders.customer_name', 'like', '%' . $q['customer_name'] . '%');
+        }
+
+        // Filter by customer_email
+        if (!empty($q['customer_email'])) {
+            $query->where('booking_orders.customer_email', $q['customer_email']);
+        }
+
+        // Filter by staff_id
+        if (!empty($q['staff_id'])) {
+            $query->where('booking_orders.staff_id', $q['staff_id']);
+        }
+
+        // Filter by property_id (via details.room.property_id)
+        if (!empty($q['property_id'])) {
+            $query->whereHas('details.room', function (Builder $r) use ($q) {
+                $r->where('property_id', $q['property_id']);
+            });
+        }
+
+        // Filter by date range (created_at)
+        if (!empty($q['date_from'])) {
+            $query->whereDate('booking_orders.created_at', '>=', $q['date_from']);
+        }
+        if (!empty($q['date_to'])) {
+            $query->whereDate('booking_orders.created_at', '<=', $q['date_to']);
         }
 
         // Lọc theo trạng thái
@@ -78,20 +117,42 @@ class QueryService
             'booking_orders.created_at'
         );
 
-        // Lọc theo ngày và tên phòng
+        // Filter by check-in date range
+        if (!empty($q['check_in_from']) || !empty($q['check_in_to'])) {
+            $query->whereHas('details', function (Builder $d) use ($q) {
+                if (!empty($q['check_in_from'])) {
+                    $d->whereDate('check_in_date', '>=', $q['check_in_from']);
+                }
+                if (!empty($q['check_in_to'])) {
+                    $d->whereDate('check_in_date', '<=', $q['check_in_to']);
+                }
+            });
+        }
+
+        // Filter by check-out date range
+        if (!empty($q['check_out_from']) || !empty($q['check_out_to'])) {
+            $query->whereHas('details', function (Builder $d) use ($q) {
+                if (!empty($q['check_out_from'])) {
+                    $d->whereDate('check_out_date', '>=', $q['check_out_from']);
+                }
+                if (!empty($q['check_out_to'])) {
+                    $d->whereDate('check_out_date', '<=', $q['check_out_to']);
+                }
+            });
+        }
+
+        // Lọc theo ngày và tên phòng (date_field, room_name - backward compatibility)
         $dateField = $q['date_field'] ?? null;
-        $dateFrom = $q['date_from'] ?? null;
-        $dateTo = $q['date_to'] ?? null;
         $roomName = $q['room_name'] ?? null;
 
         if ($dateField || $roomName) {
-            $query->whereHas('details', function (Builder $d) use ($dateField, $dateFrom, $dateTo, $roomName) {
-                if ($dateField && ($dateFrom || $dateTo)) {
-                    if ($dateFrom) {
-                        $d->where($dateField, '>=', $dateFrom);
+            $query->whereHas('details', function (Builder $d) use ($dateField, $q, $roomName) {
+                if ($dateField && (!empty($q['date_from']) || !empty($q['date_to']))) {
+                    if (!empty($q['date_from'])) {
+                        $d->where($dateField, '>=', $q['date_from']);
                     }
-                    if ($dateTo) {
-                        $d->where($dateField, '<=', $dateTo);
+                    if (!empty($q['date_to'])) {
+                        $d->where($dateField, '<=', $q['date_to']);
                     }
                 }
                 if ($roomName) {
@@ -126,16 +187,27 @@ class QueryService
         }
 
         // Sắp xếp
-        $sort = $q['sort'] ?? 'created_at';
-        $direction = str_starts_with((string)$sort, '-') ? 'desc' : 'asc';
-        $sortField = ltrim((string)$sort, '-');
+        $sortBy = $q['sort_by'] ?? $q['sort'] ?? 'created_at';
+        $sortOrder = $q['sort_order'] ?? 'desc';
+        
+        // Nếu sort có dạng "-field" thì parse
+        if (str_starts_with((string)$sortBy, '-')) {
+            $sortOrder = 'desc';
+            $sortBy = ltrim((string)$sortBy, '-');
+        }
+        
         $map = [
-            'created_at'   => 'booking_orders.created_at',
+            'id' => 'booking_orders.id',
+            'order_code' => 'booking_orders.order_code',
+            'created_at' => 'booking_orders.created_at',
+            'updated_at' => 'booking_orders.updated_at',
             'checkin_date' => 'details_min_check_in_date',
+            'checkout_date' => 'details_max_check_out_date',
             'total_amount' => 'booking_orders.total_amount',
+            'status' => 'booking_orders.status',
         ];
-        $orderBy = $map[$sortField] ?? 'booking_orders.created_at';
-        $query->orderBy($orderBy, $direction);
+        $orderBy = $map[$sortBy] ?? 'booking_orders.created_at';
+        $query->orderBy($orderBy, $sortOrder);
 
         /** @var LengthAwarePaginator $paginator */
         $paginator = $query->paginate($perPage, ['*'], 'page', $page);
