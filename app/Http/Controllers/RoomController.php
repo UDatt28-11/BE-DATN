@@ -46,9 +46,24 @@ class RoomController extends Controller
      */
     public function index(): JsonResponse
     {
-        $rooms = Room::select('id', 'name', 'room_type', 'capacity', 'price_per_night', 'status', 'description')
+        $rooms = Room::with('roomType:id,name')
+            ->select('id', 'name', 'room_type_id', 'max_adults', 'max_children', 'price_per_night', 'status', 'description')
             ->orderBy('name')
-            ->get();
+            ->get()
+            ->map(function ($room) {
+                return [
+                    'id' => $room->id,
+                    'name' => $room->name,
+                    'room_type' => $room->roomType ? $room->roomType->name : null,
+                    'room_type_id' => $room->room_type_id,
+                    'capacity' => ($room->max_adults ?? 0) + ($room->max_children ?? 0),
+                    'max_adults' => $room->max_adults,
+                    'max_children' => $room->max_children,
+                    'price_per_night' => (float) $room->price_per_night,
+                    'status' => $room->status,
+                    'description' => $room->description,
+                ];
+            });
 
         return response()->json([
             'data' => $rooms,
@@ -94,10 +109,85 @@ class RoomController extends Controller
      */
     public function show(int $id): JsonResponse
     {
-        $room = Room::findOrFail($id);
+        $room = Room::with('roomType:id,name')->findOrFail($id);
+
+        return response()->json([
+            'data' => [
+                'id' => $room->id,
+                'name' => $room->name,
+                'property_id' => $room->property_id,
+                'room_type_id' => $room->room_type_id,
+                'room_type' => $room->roomType ? $room->roomType->name : null,
+                'max_adults' => $room->max_adults,
+                'max_children' => $room->max_children,
+                'capacity' => ($room->max_adults ?? 0) + ($room->max_children ?? 0),
+                'price_per_night' => (float) $room->price_per_night,
+                'status' => $room->status,
+                'description' => $room->description,
+            ],
+        ]);
+    }
+
+    /**
+     * Tạo phòng mới
+     */
+    public function store(\Illuminate\Http\Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'property_id' => 'required|integer|exists:properties,id',
+            'room_type_id' => 'required|integer|exists:room_types,id',
+            'name' => 'required|string|max:255',
+            'description' => 'nullable|string',
+            'max_adults' => 'required|integer|min:1',
+            'max_children' => 'nullable|integer|min:0',
+            'price_per_night' => 'required|numeric|min:0',
+            'status' => 'nullable|string|in:available,occupied,maintenance',
+        ]);
+
+        $room = Room::create($validated);
 
         return response()->json([
             'data' => $room,
+            'message' => 'Phòng đã được tạo thành công',
+        ], 201);
+    }
+
+    /**
+     * Cập nhật phòng
+     */
+    public function update(\Illuminate\Http\Request $request, int $id): JsonResponse
+    {
+        $room = Room::findOrFail($id);
+
+        $validated = $request->validate([
+            'property_id' => 'sometimes|integer|exists:properties,id',
+            'room_type_id' => 'sometimes|integer|exists:room_types,id',
+            'name' => 'sometimes|string|max:255',
+            'description' => 'nullable|string',
+            'max_adults' => 'sometimes|integer|min:1',
+            'max_children' => 'nullable|integer|min:0',
+            'price_per_night' => 'sometimes|numeric|min:0',
+            'status' => 'nullable|string|in:available,occupied,maintenance',
+        ]);
+
+        $room->update($validated);
+
+        return response()->json([
+            'data' => $room,
+            'message' => 'Phòng đã được cập nhật thành công',
+        ]);
+    }
+
+    /**
+     * Xóa phòng
+     */
+    public function destroy(int $id): JsonResponse
+    {
+        $room = Room::findOrFail($id);
+        $room->delete();
+
+        return response()->json([
+            'message' => 'Phòng đã được xóa thành công',
         ]);
     }
 }

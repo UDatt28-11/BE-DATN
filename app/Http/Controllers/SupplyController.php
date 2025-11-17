@@ -153,6 +153,7 @@ class SupplyController extends Controller
     public function store(Request $request): JsonResponse
     {
         $request->validate([
+            'room_id' => 'required|exists:rooms,id',
             'name' => 'required|string|max:255',
             'description' => 'nullable|string|max:1000',
             'category' => 'required|string|max:100',
@@ -170,6 +171,7 @@ class SupplyController extends Controller
             DB::beginTransaction();
 
             $supply = Supply::create([
+                'room_id' => $request->room_id,
                 'name' => $request->name,
                 'description' => $request->description,
                 'category' => $request->category,
@@ -417,6 +419,50 @@ class SupplyController extends Controller
         return response()->json([
             'success' => true,
             'data' => $outOfStockItems
+        ]);
+    }
+
+    /**
+     * Get supplies by room ID
+     * 
+     * @OA\Get(
+     *     path="/api/supplies/room/{room_id}",
+     *     operationId="getSuppliesByRoom",
+     *     tags={"Supplies"},
+     *     summary="Danh sách vật tư theo phòng",
+     *     description="Lấy danh sách vật tư của một phòng cụ thể",
+     *     @OA\Parameter(
+     *         name="room_id",
+     *         in="path",
+     *         required=true,
+     *         description="ID của phòng",
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Danh sách vật tư của phòng",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="success", type="boolean", example=true),
+     *             @OA\Property(property="data", type="array", items={"type": "object"})
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=404,
+     *         description="Không tìm thấy phòng"
+     *     )
+     * )
+     */
+    public function getSuppliesByRoom(string $room_id): JsonResponse
+    {
+        $supplies = Supply::where('room_id', $room_id)
+            ->where('status', 'active')
+            ->orderBy('category')
+            ->orderBy('name')
+            ->get();
+
+        return response()->json([
+            'success' => true,
+            'data' => $supplies
         ]);
     }
 

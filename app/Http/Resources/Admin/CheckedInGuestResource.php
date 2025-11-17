@@ -22,5 +22,3 @@ class CheckedInGuestResource extends JsonResource
 }
 
 
-
-

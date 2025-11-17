@@ -40,6 +40,9 @@ Route::prefix('admin')->group(function () {
         // Rooms Management
         Route::get('/rooms', [RoomController::class, 'index']);
         Route::get('/rooms/{id}', [RoomController::class, 'show']);
+        Route::post('/rooms', [RoomController::class, 'store']);
+        Route::put('/rooms/{id}', [RoomController::class, 'update']);
+        Route::delete('/rooms/{id}', [RoomController::class, 'destroy']);
 
         // Room Types Management
         Route::get('/room-types', [RoomTypeController::class, 'index']);
@@ -190,6 +193,7 @@ Route::prefix('supplies')->group(function () {
     Route::get('/{id}', [SupplyController::class, 'show'])->where('id', '[0-9]+');
 
     Route::middleware(['auth:sanctum', 'role:staff,admin'])->group(function () {
+        Route::get('/room/{room_id}', [SupplyController::class, 'getSuppliesByRoom'])->where('room_id', '[0-9]+');
         Route::get('/low-stock/items', [SupplyController::class, 'getLowStockItems']);
         Route::get('/out-of-stock/items', [SupplyController::class, 'getOutOfStockItems']);
         Route::get('/statistics/overview', [SupplyController::class, 'getStatistics']);

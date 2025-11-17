@@ -40,14 +40,14 @@ class Room extends Model
         return $this->belongsTo(RoomType::class);
     }
 
-    public function supplies(): HasMany
-    {
-        return $this->hasMany(Supply::class);
-    }
-
     public function bookingDetails(): HasMany
     {
         return $this->hasMany(BookingDetail::class, 'room_id');
+    }
+
+    public function supplies(): HasMany
+    {
+        return $this->hasMany(Supply::class);
     }
 
     public function promotions(): BelongsToMany

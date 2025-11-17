@@ -4344,6 +4344,54 @@
                 }
             }
         },
+        "/api/supplies/room/{room_id}": {
+            "get": {
+                "tags": [
+                    "Supplies"
+                ],
+                "summary": "Danh sách vật tư theo phòng",
+                "description": "Lấy danh sách vật tư của một phòng cụ thể",
+                "operationId": "getSuppliesByRoom",
+                "parameters": [
+                    {
+                        "name": "room_id",
+                        "in": "path",
+                        "description": "ID của phòng",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Danh sách vật tư của phòng",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "object"
+                                            }
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Không tìm thấy phòng"
+                    }
+                }
+            }
+        },
         "/api/supplies/{id}/adjust-stock": {
             "patch": {
                 "tags": [

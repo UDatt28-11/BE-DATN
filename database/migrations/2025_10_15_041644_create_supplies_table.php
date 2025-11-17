@@ -12,8 +12,16 @@ return new class extends Migration
             $table->id();
             $table->foreignId('room_id')->constrained()->onDelete('cascade');
             $table->string('name');
-            $table->unsignedInteger('quantity_in_stock')->default(0);
-            $table->decimal('price_on_damage', 10, 2)->default(0);
+            $table->text('description')->nullable();
+            $table->string('category');
+            $table->string('unit'); // đơn vị tính (cái, hộp, lít, v.v.)
+            $table->integer('current_stock')->default(0);
+            $table->integer('min_stock_level')->default(0);
+            $table->integer('max_stock_level')->nullable();
+            $table->decimal('unit_price', 12, 2)->default(0);
+            $table->string('supplier')->nullable();
+            $table->string('supplier_contact')->nullable();
+            $table->enum('status', ['active', 'inactive', 'discontinued'])->default('active');
             $table->timestamps();
         });
     }

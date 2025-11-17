@@ -121,6 +121,9 @@ class QueryService
                 $relations[] = 'details.guests';
             }
         }
+        if (in_array('invoice', $include, true)) {
+            $relations[] = 'invoice';
+        }
         if (!empty($relations)) {
             $query->with($relations);
         }

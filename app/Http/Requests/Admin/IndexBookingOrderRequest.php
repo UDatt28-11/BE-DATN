@@ -13,7 +13,7 @@ class IndexBookingOrderRequest extends FormRequest
 
     public function rules(): array
     {
-        // Loosen validation to avoid 422 due to empty strings from URL
+        // Loosen validation để tránh lỗi 422 khi FE gửi query rỗng/không chuẩn
         return [];
     }
 
@@ -21,7 +21,9 @@ class IndexBookingOrderRequest extends FormRequest
     {
         $status = $this->input('status');
         if (is_string($status)) {
-            $this->merge(['status' => array_values(array_filter(explode(',', $status)))]);
+            $this->merge([
+                'status' => array_values(array_filter(explode(',', $status))),
+            ]);
         }
     }
 }

@@ -47,6 +47,12 @@ class BookingOrder extends Model
         return $this->hasMany(BookingDetail::class, 'booking_order_id');
     }
 
+    // Alias for bookingDetails relationship (used in Resources and Services)
+    public function details(): HasMany
+    {
+        return $this->bookingDetails();
+    }
+
     public function checkedInGuests(): HasManyThrough
     {
         return $this->hasManyThrough(
