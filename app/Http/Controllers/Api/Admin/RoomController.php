@@ -13,6 +13,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Storage;
 
 /**
  * @OA\Tag(
@@ -174,7 +175,7 @@ class RoomController extends Controller
             $query->with([
                 'property:id,name,address', 
                 'roomType:id,name', 
-                'amenities:id,name', 
+                'amenities:id,name,filter_category', // NEW: Include filter_category
                 'images',
                 'reviews' => function ($q) {
                     if (Schema::hasColumn('reviews', 'status')) {
@@ -286,11 +287,13 @@ class RoomController extends Controller
                 // Đảm bảo room object có đầy đủ thuộc tính
                 $room->rating = $item['rating'];
                 $room->reviews_count = $item['reviews_count'];
+                
                 // Log để debug
                 Log::debug('RoomController@indexPublic - Room mapped', [
                     'id' => $room->id,
                     'name' => $room->name,
                     'rating' => $room->rating,
+                    'images_count' => $room->relationLoaded('images') ? $room->images->count() : 0,
                 ]);
                 return $room;
             });
@@ -319,9 +322,47 @@ class RoomController extends Controller
                 ['path' => $request->url(), 'query' => $request->query()]
             );
 
+            // Convert rooms to array để đảm bảo images được serialize đúng
+            $roomsArray = collect($rooms->items())->map(function($room) {
+                // Convert room to array
+                $roomArray = $room->toArray();
+                
+                // Serialize images đúng format
+                if ($room->relationLoaded('images') && $room->images) {
+                    $roomArray['images'] = $room->images->map(function($image) {
+                        return [
+                            'id' => $image->id,
+                            'image_url' => $image->image_url,
+                            'is_primary' => (bool)($image->is_primary ?? false),
+                        ];
+                    })->values()->toArray();
+                } else {
+                    $roomArray['images'] = [];
+                }
+                
+                // Serialize amenities với filter_category
+                if ($room->relationLoaded('amenities') && $room->amenities) {
+                    $roomArray['amenities'] = $room->amenities->map(function($amenity) {
+                        return [
+                            'id' => $amenity->id,
+                            'name' => $amenity->name,
+                            'filter_category' => $amenity->filter_category ?? null, // NEW: filter_category
+                        ];
+                    })->values()->toArray();
+                } else {
+                    $roomArray['amenities'] = [];
+                }
+                
+                // Đảm bảo floor_number và floor_category được trả về (NEW)
+                $roomArray['floor_number'] = $room->floor_number ?? null;
+                $roomArray['floor_category'] = $room->floor_category ?? null;
+                
+                return $roomArray;
+            })->toArray();
+
             return response()->json([
                 'success' => true,
-                'data' => $rooms->items(),
+                'data' => $roomsArray,
                 'meta' => [
                     'pagination' => [
                         'current_page' => $rooms->currentPage(),
@@ -413,9 +454,23 @@ class RoomController extends Controller
                 'images',
             ]);
 
+            // Serialize room với images đúng format
+            $roomArray = $room->toArray();
+            if ($room->relationLoaded('images')) {
+                $roomArray['images'] = $room->images->map(function($image) {
+                    return [
+                        'id' => $image->id,
+                        'image_url' => $image->image_url,
+                        'is_primary' => (bool)($image->is_primary ?? false),
+                    ];
+                })->values()->toArray();
+            } else {
+                $roomArray['images'] = [];
+            }
+
             return response()->json([
                 'success' => true,
-                'data' => $room,
+                'data' => $roomArray,
             ]);
         } catch (\Exception $e) {
             Log::error('RoomController@showPublic failed', [
@@ -862,12 +917,28 @@ class RoomController extends Controller
     {
         try {
             // Authorization is handled by route middleware (role:admin)
-        // TODO: Xóa các ảnh liên quan (RoomImage) trên server trước
 
             $roomId = $room->id;
             $roomName = $room->name;
 
-            // Xóa phòng (tự động xóa các liên kết trong 'room_amenities' do cascade)
+            // Xóa tất cả ảnh của phòng trên S3 trước khi xóa phòng
+            $images = $room->images;
+            foreach ($images as $image) {
+                try {
+                    // Xóa file trên S3
+                    $this->deleteImageFromS3($image->image_url);
+                } catch (\Exception $e) {
+                    // Log lỗi nhưng không dừng quá trình xóa phòng
+                    Log::warning('RoomController@destroy - Failed to delete image from S3', [
+                        'room_id' => $roomId,
+                        'image_id' => $image->id,
+                        'image_url' => $image->image_url,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+
+            // Xóa phòng (tự động xóa các liên kết trong 'room_amenities' và 'room_images' do cascade)
             $room->delete();
 
             Log::info('Room deleted', [
@@ -891,6 +962,47 @@ class RoomController extends Controller
                 'success' => false,
                 'message' => 'Có lỗi xảy ra khi xóa phòng: ' . $e->getMessage(),
             ], 500);
+        }
+    }
+
+    /**
+     * Xóa file ảnh từ S3
+     *
+     * @param string|null $urlOrPath Stored S3 path or URL
+     * @return void
+     */
+    private function deleteImageFromS3($urlOrPath)
+    {
+        if (!$urlOrPath) {
+            return;
+        }
+
+        try {
+            // If full URL is stored, extract path part after bucket domain
+            $path = $urlOrPath;
+
+            // If looks like a URL, parse it
+            if (filter_var($urlOrPath, FILTER_VALIDATE_URL)) {
+                $parsedUrl = parse_url($urlOrPath);
+                $path = $parsedUrl['path'] ?? '';
+                $path = ltrim($path, '/');
+            }
+
+            if ($path && Storage::disk('s3')->exists($path)) {
+                Storage::disk('s3')->delete($path);
+                Log::info('RoomController@deleteImageFromS3 - Image deleted from S3', [
+                    'path' => $path,
+                    'original_url' => $urlOrPath,
+                ]);
+            }
+        } catch (\Exception $e) {
+            Log::error('RoomController@deleteImageFromS3 failed (S3)', [
+                'input' => $urlOrPath,
+                'error' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ]);
+            // Don't throw exception, just log the error to avoid breaking the flow
         }
     }
 

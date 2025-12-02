@@ -18,6 +18,9 @@ class BookingOrder extends Model
         'staff_id',
         'order_code',
         'total_amount',
+        'deposit_amount',
+        'paid_amount',
+        'payment_status',
         'status',
         'customer_name',
         'customer_phone',
@@ -28,6 +31,8 @@ class BookingOrder extends Model
 
     protected $casts = [
         'total_amount' => 'decimal:2',
+        'deposit_amount' => 'decimal:2',
+        'paid_amount' => 'decimal:2',
         'created_at'   => 'datetime',
         'updated_at'   => 'datetime',
     ];
@@ -64,6 +69,11 @@ class BookingOrder extends Model
             'id',                 // PK của booking_orders
             'id'                  // PK của booking_details
         );
+    }
+
+    public function checkInRequests(): HasMany
+    {
+        return $this->hasMany(CheckInRequest::class, 'booking_order_id');
     }
 
     public function bookingServices(): HasManyThrough

@@ -39,7 +39,7 @@ class BookingDetail extends Model
 
     public function bookingServices(): HasMany
     {
-        return $this->hasMany(BookingService::class);
+        return $this->hasMany(BookingService::class, 'booking_details_id');
     }
 
     public function checkedInGuests(): HasMany
@@ -47,8 +47,21 @@ class BookingDetail extends Model
         return $this->hasMany(CheckedInGuest::class, 'booking_details_id');
     }
 
+    /**
+     * Alias cho checkedInGuests để tương thích với include 'details.guests' ở BookingOrderController@showUser
+     */
+    public function guests(): HasMany
+    {
+        return $this->hasMany(CheckedInGuest::class, 'booking_details_id');
+    }
+
     public function review(): HasMany
     {
         return $this->hasMany(Review::class, 'booking_details_id');
+    }
+
+    public function checkInRequests(): HasMany
+    {
+        return $this->hasMany(CheckInRequest::class, 'booking_detail_id');
     }
 }

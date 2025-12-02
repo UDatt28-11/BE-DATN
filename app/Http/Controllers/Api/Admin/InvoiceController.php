@@ -214,9 +214,27 @@ class InvoiceController extends Controller
                 $totalAmount += $servicePrice;
             }
 
+            // Trừ tiền cọc đã thanh toán (nếu có)
+            $paidAmount = $bookingOrder->paid_amount ?? 0;
+            if ($paidAmount > 0) {
+                // Thêm invoice item để hiển thị tiền cọc đã thanh toán
+                InvoiceItem::create([
+                    'invoice_id' => $invoice->id,
+                    'description' => 'Tiền cọc đã thanh toán',
+                    'quantity' => 1,
+                    'unit_price' => -$paidAmount, // Giá trị âm để trừ
+                    'total_line' => -$paidAmount, // Giá trị âm để trừ
+                    'item_type' => 'deposit',
+                ]);
+                $totalAmount -= $paidAmount; // Trừ tiền cọc vào tổng tiền
+            }
+
+            // Đảm bảo total_amount không âm
+            $finalAmount = max(0, $totalAmount);
+
             // Update invoice totals
             $invoice->update([
-                'total_amount' => $totalAmount
+                'total_amount' => $finalAmount
             ]);
 
             DB::commit();
@@ -401,11 +419,497 @@ class InvoiceController extends Controller
             'status' => 'paid'
         ]);
 
+        // Cập nhật booking order status thành completed nếu đã checkout và thanh toán
+        if ($invoice->bookingOrder) {
+            $booking = $invoice->bookingOrder;
+            if (in_array($booking->status, ['checked_out', 'partially_checked_out'])) {
+                $booking->update([
+                    'status' => 'completed',
+                    'payment_method' => $request->payment_method ?? $booking->payment_method,
+                ]);
+            }
+        }
+
         return response()->json([
             'success' => true,
             'message' => 'Hóa đơn đã được đánh dấu là đã thanh toán',
             'data' => $invoice
         ]);
+    }
+
+    /**
+     * Admin/Staff xác nhận invoice sẵn sàng thanh toán
+     * Sau khi đã kiểm tra và thêm service/damage (nếu có)
+     */
+    public function approveForPayment(Request $request, string $id): JsonResponse
+    {
+        try {
+            DB::beginTransaction();
+            
+            $invoice = Invoice::findOrFail($id);
+
+            // Kiểm tra invoice chưa được thanh toán
+            if ($invoice->status === 'paid') {
+                DB::rollBack();
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Hóa đơn này đã được thanh toán.',
+                ], 400);
+            }
+
+            // Cập nhật trạng thái thành 'paid' khi admin xác nhận
+            $invoice->update([
+                'status' => 'paid',
+            ]);
+
+            // Cập nhật booking order status thành completed nếu đã checkout
+            if ($invoice->bookingOrder) {
+                $booking = $invoice->bookingOrder;
+                if (in_array($booking->status, ['checked_out', 'partially_checked_out'])) {
+                    $booking->update([
+                        'status' => 'completed',
+                    ]);
+                }
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Hóa đơn đã được xác nhận và đánh dấu là đã thanh toán.',
+                'data' => $invoice->fresh(['invoiceItems', 'bookingOrder']),
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('InvoiceController@approveForPayment failed', [
+                'invoice_id' => $id,
+                'message' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi xác nhận hóa đơn.',
+                'error' => config('app.debug') ? $e->getMessage() : null,
+            ], 500);
+        }
+    }
+
+    /**
+     * User thanh toán invoice
+     * User có thể thanh toán invoice của chính mình
+     * Chỉ thanh toán được khi invoice đã được admin/staff xác nhận
+     */
+    public function payInvoice(Request $request, string $id): JsonResponse
+    {
+        try {
+            $user = $request->user();
+            
+            if (!$user) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Unauthorized',
+                ], 401);
+            }
+
+            $request->validate([
+                'payment_method' => 'required|string|in:cash,bank,momo,card',
+                'payment_notes' => 'nullable|string|max:500',
+            ]);
+
+            DB::beginTransaction();
+
+            $invoice = Invoice::with('bookingOrder')->findOrFail($id);
+
+            // Kiểm tra invoice có thuộc về user hiện tại không
+            if ($invoice->bookingOrder && $invoice->bookingOrder->guest_id !== $user->id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Bạn không có quyền thanh toán hóa đơn này.',
+                ], 403);
+            }
+
+            // Kiểm tra invoice đã được thanh toán chưa
+            if ($invoice->status === 'paid') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Hóa đơn này đã được thanh toán.',
+                ], 400);
+            }
+
+            // Kiểm tra invoice có status là 'pending' mới cho phép thanh toán
+            if ($invoice->status !== 'pending') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Hóa đơn này không thể thanh toán. Trạng thái hiện tại: ' . $invoice->status,
+                ], 400);
+            }
+
+            // Cập nhật trạng thái invoice
+            $invoice->update([
+                'status' => 'paid',
+            ]);
+
+            // Tạo payment record nếu có Payment model
+            if (class_exists(\App\Models\Payment::class)) {
+                \App\Models\Payment::create([
+                    'invoice_id' => $invoice->id,
+                    'amount' => $invoice->total_amount,
+                    'payment_method' => $request->payment_method,
+                    'status' => 'success',
+                    'paid_at' => now(),
+                ]);
+            }
+
+            // Cập nhật booking order
+            if ($invoice->bookingOrder) {
+                $booking = $invoice->bookingOrder;
+                $booking->update([
+                    'payment_method' => $request->payment_method,
+                    'status' => 'completed', // Hoàn thành sau khi thanh toán
+                ]);
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Thanh toán thành công!',
+                'data' => [
+                    'invoice' => $invoice->fresh(['bookingOrder']),
+                    'booking' => $invoice->bookingOrder ? (new \App\Http\Resources\Admin\BookingOrderResource($invoice->bookingOrder->fresh(['guest', 'details.room'])))->toArray($request) : null,
+                ],
+            ]);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Không tìm thấy hóa đơn.',
+            ], 404);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('InvoiceController@payInvoice failed', [
+                'invoice_id' => $id,
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi thanh toán.',
+                'error' => config('app.debug') ? $e->getMessage() : null,
+            ], 500);
+        }
+    }
+
+    /**
+     * User: Lấy danh sách invoices của user hiện tại
+     */
+    public function getUserInvoices(Request $request): JsonResponse
+    {
+        try {
+            $user = $request->user();
+            
+            if (!$user) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Unauthorized',
+                ], 401);
+            }
+
+            $perPage = (int) ($request->get('per_page', 15));
+            $invoices = Invoice::with(['bookingOrder.guest'])
+                ->whereHas('bookingOrder', function ($q) use ($user) {
+                    $q->where('guest_id', $user->id);
+                })
+                ->orderBy('created_at', 'desc')
+                ->paginate($perPage);
+
+            return response()->json([
+                'success' => true,
+                'data' => $invoices->items(),
+                'meta' => [
+                    'pagination' => [
+                        'page' => $invoices->currentPage(),
+                        'per_page' => $invoices->perPage(),
+                        'total' => $invoices->total(),
+                        'last_page' => $invoices->lastPage(),
+                    ],
+                ],
+            ]);
+        } catch (\Exception $e) {
+            Log::error('InvoiceController@getUserInvoices failed', [
+                'message' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi lấy danh sách hóa đơn.',
+                'error' => config('app.debug') ? $e->getMessage() : null,
+            ], 500);
+        }
+    }
+
+    /**
+     * User: Lấy chi tiết invoice của user hiện tại
+     */
+    public function getUserInvoice(Request $request, string $id): JsonResponse
+    {
+        try {
+            $user = $request->user();
+            
+            if (!$user) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Unauthorized',
+                ], 401);
+            }
+
+            $invoice = Invoice::with(['bookingOrder.guest', 'invoiceItems'])
+                ->whereHas('bookingOrder', function ($q) use ($user) {
+                    $q->where('guest_id', $user->id);
+                })
+                ->findOrFail($id);
+
+            return response()->json([
+                'success' => true,
+                'data' => $invoice,
+            ]);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Không tìm thấy hóa đơn.',
+            ], 404);
+        } catch (\Exception $e) {
+            Log::error('InvoiceController@getUserInvoice failed', [
+                'invoice_id' => $id,
+                'message' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi lấy chi tiết hóa đơn.',
+                'error' => config('app.debug') ? $e->getMessage() : null,
+            ], 500);
+        }
+    }
+
+    /**
+     * Thêm service vào invoice
+     */
+    public function addService(Request $request, string $id): JsonResponse
+    {
+        try {
+            $request->validate([
+                'service_id' => 'required|exists:services,id',
+                'quantity' => 'required|integer|min:1',
+                'description' => 'nullable|string|max:500',
+            ]);
+
+            DB::beginTransaction();
+
+            $invoice = Invoice::with('invoiceItems')->findOrFail($id);
+
+            // Kiểm tra invoice chưa được thanh toán
+            if ($invoice->status === 'paid') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Không thể thêm dịch vụ vào hóa đơn đã thanh toán.',
+                ], 400);
+            }
+
+            // Lấy thông tin service
+            $service = \App\Models\Service::findOrFail($request->service_id);
+            $unitPrice = $service->price ?? 0;
+            $quantity = $request->quantity;
+            $totalLine = $unitPrice * $quantity;
+
+            // Tạo invoice item
+            $item = InvoiceItem::create([
+                'invoice_id' => $invoice->id,
+                'description' => $request->description ?? "Dịch vụ: {$service->name}",
+                'quantity' => $quantity,
+                'unit_price' => $unitPrice,
+                'total_line' => $totalLine,
+                'item_type' => 'service_charge',
+            ]);
+
+            // Cập nhật tổng tiền invoice
+            $newTotal = $invoice->invoiceItems()->sum('total_line');
+            $invoice->update(['total_amount' => $newTotal]);
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Đã thêm dịch vụ vào hóa đơn.',
+                'data' => [
+                    'item' => $item,
+                    'invoice' => $invoice->fresh(['invoiceItems']),
+                ],
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Dữ liệu không hợp lệ',
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('InvoiceController@addService failed', [
+                'invoice_id' => $id,
+                'message' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi thêm dịch vụ.',
+                'error' => config('app.debug') ? $e->getMessage() : null,
+            ], 500);
+        }
+    }
+
+    /**
+     * Thêm thiệt hại vật tư vào invoice
+     */
+    public function addDamage(Request $request, string $id): JsonResponse
+    {
+        try {
+            $request->validate([
+                'supply_id' => 'required|exists:supplies,id',
+                'quantity' => 'required|integer|min:1',
+                'description' => 'nullable|string|max:500',
+                'notes' => 'nullable|string|max:1000',
+            ]);
+
+            DB::beginTransaction();
+
+            $invoice = Invoice::with('invoiceItems')->findOrFail($id);
+
+            // Kiểm tra invoice chưa được thanh toán
+            if ($invoice->status === 'paid') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Không thể thêm thiệt hại vào hóa đơn đã thanh toán.',
+                ], 400);
+            }
+
+            // Lấy thông tin supply
+            $supply = \App\Models\Supply::findOrFail($request->supply_id);
+            $unitPrice = $supply->unit_price ?? 0;
+            $quantity = $request->quantity;
+            $totalLine = $unitPrice * $quantity;
+
+            // Tạo invoice item
+            $item = InvoiceItem::create([
+                'invoice_id' => $invoice->id,
+                'description' => $request->description ?? "Thiệt hại: {$supply->name} ({$request->notes})",
+                'quantity' => $quantity,
+                'unit_price' => $unitPrice,
+                'total_line' => $totalLine,
+                'item_type' => 'damage_fee',
+            ]);
+
+            // Cập nhật tổng tiền invoice
+            $newTotal = $invoice->invoiceItems()->sum('total_line');
+            $invoice->update(['total_amount' => $newTotal]);
+
+            // Trừ stock của supply nếu cần
+            if ($supply->current_stock >= $quantity) {
+                $supply->decrement('current_stock', $quantity);
+                
+                // Tạo supply log
+                if (class_exists(\App\Models\SupplyLog::class)) {
+                    \App\Models\SupplyLog::create([
+                        'supply_id' => $supply->id,
+                        'user_id' => $request->user()->id ?? null,
+                        'change_quantity' => -$quantity,
+                        'reason' => "Thiệt hại từ hóa đơn #{$invoice->id}: " . ($request->notes ?? ''),
+                    ]);
+                }
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Đã thêm thiệt hại vào hóa đơn.',
+                'data' => [
+                    'item' => $item,
+                    'invoice' => $invoice->fresh(['invoiceItems']),
+                ],
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Dữ liệu không hợp lệ',
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('InvoiceController@addDamage failed', [
+                'invoice_id' => $id,
+                'message' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi thêm thiệt hại.',
+                'error' => config('app.debug') ? $e->getMessage() : null,
+            ], 500);
+        }
+    }
+
+    /**
+     * Xóa item khỏi invoice
+     */
+    public function removeItem(Request $request, string $id, string $itemId): JsonResponse
+    {
+        try {
+            DB::beginTransaction();
+
+            $invoice = Invoice::with('invoiceItems')->findOrFail($id);
+
+            // Kiểm tra invoice chưa được thanh toán
+            if ($invoice->status === 'paid') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Không thể xóa item khỏi hóa đơn đã thanh toán.',
+                ], 400);
+            }
+
+            $item = InvoiceItem::where('invoice_id', $invoice->id)
+                ->findOrFail($itemId);
+
+            $item->delete();
+
+            // Cập nhật tổng tiền invoice
+            $newTotal = $invoice->invoiceItems()->sum('total_line');
+            $invoice->update(['total_amount' => $newTotal]);
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Đã xóa item khỏi hóa đơn.',
+                'data' => $invoice->fresh(['invoiceItems']),
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('InvoiceController@removeItem failed', [
+                'invoice_id' => $id,
+                'item_id' => $itemId,
+                'message' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi xóa item.',
+                'error' => config('app.debug') ? $e->getMessage() : null,
+            ], 500);
+        }
     }
 
     /**

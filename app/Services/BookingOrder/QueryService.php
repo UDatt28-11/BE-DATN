@@ -75,6 +75,11 @@ class QueryService
             $query->where('booking_orders.staff_id', $q['staff_id']);
         }
 
+        // Filter by guest_id (để user lấy bookings của mình)
+        if (!empty($q['guest_id'])) {
+            $query->where('booking_orders.guest_id', $q['guest_id']);
+        }
+
         // Filter by property_id (via details.room.property_id)
         if (!empty($q['property_id'])) {
             $query->whereHas('details.room', function (Builder $r) use ($q) {
@@ -172,16 +177,29 @@ class QueryService
         }
 
         // Bao gồm các quan hệ
+        // Lưu ý: Phải load relations SAU khi paginate để tránh conflict với groupBy
         $relations = [];
         if (in_array('details', $include, true)) {
             $relations[] = 'details';
             if (in_array('details.room', $include, true)) {
+                // Load nested relations đúng cách
                 $relations[] = 'details.room';
+                // Nếu có details.room.images, load thêm images
+                if (in_array('details.room.images', $include, true)) {
+                    $relations[] = 'details.room.images';
+                }
             }
             if (in_array('details.guests', $include, true)) {
                 $relations[] = 'details.guests';
             }
         }
+        
+        // Load check-in requests nếu có trong include
+        if (in_array('checkInRequests', $include, true)) {
+            $relations[] = 'checkInRequests';
+        }
+        
+        // Load relations trước khi paginate
         if (!empty($relations)) {
             $query->with($relations);
         }

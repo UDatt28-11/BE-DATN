@@ -13,8 +13,9 @@ return new class extends Migration
             $table->foreignId('property_id')->constrained()->onDelete('cascade');
             $table->string('name');
             $table->decimal('price', 10, 2);
-            $table->enum('unit', ['per_person', 'per_day', 'per_item', 'per_booking'])->default('per_item');
+            $table->string('unit', 50)->default('per_night'); // Changed from enum to string to match frontend
             $table->timestamps();
+            $table->softDeletes(); // Added for SoftDeletes trait
         });
     }
 

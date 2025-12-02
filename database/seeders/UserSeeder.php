@@ -31,7 +31,7 @@ class UserSeeder extends Seeder
         $admin = User::firstOrCreate(
             ['email' => 'admin@staybook.com'],
             [
-                'full_name'    => 'Admin',
+                'full_name'    => 'Nguyễn Văn A',
                 'role'         => 'admin',
                 'password'     => Hash::make('password'),
                 'status'       => 'active',
@@ -44,7 +44,7 @@ class UserSeeder extends Seeder
         $owner = User::firstOrCreate(
             ['email' => 'owner@staybook.com'],
             [
-                'full_name'    => 'Owner User',
+                'full_name'    => 'Trần Văn Chủ',
                 'role'         => 'owner',
                 'password'     => Hash::make('password'),
                 'status'       => 'active',
@@ -57,7 +57,7 @@ class UserSeeder extends Seeder
         $user = User::firstOrCreate(
             ['email' => 'user@staybook.com'],
             [
-                'full_name'    => 'User',
+                'full_name'    => 'Nguyễn Văn Khách',
                 'role'         => 'user',
                 'password'     => Hash::make('password'),
                 'status'       => 'active',
@@ -66,18 +66,13 @@ class UserSeeder extends Seeder
         );
         $user->roles()->syncWithoutDetaching($userRole->id);
 
-        // 5. Tạo thêm 5 Owner
-        User::factory(5)->create()->each(function ($user) use ($ownerRole) {
-            $user->roles()->syncWithoutDetaching($ownerRole->id);
-            $user->phone_number = '0' . rand(100000000, 999999999);
-            $user->save();
-        });
-
-        // 6. Tạo thêm 10 User
-        User::factory(10)->create()->each(function ($user) use ($userRole) {
+        // 5. Tạo thêm 2 User để test (giảm từ 10 xuống 2)
+        User::factory(2)->create()->each(function ($user) use ($userRole) {
             $user->roles()->syncWithoutDetaching($userRole->id);
             $user->phone_number = '0' . rand(100000000, 999999999);
             $user->save();
         });
+
+        $this->command->info('✅ Created users: admin, owner, staff, and 2 test users');
     }
 }

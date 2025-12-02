@@ -471,7 +471,20 @@ class RoomTypeController extends Controller
      *         description="Xóa thành công",
      *         @OA\JsonContent(
      *             @OA\Property(property="success", type="boolean", example=true),
-     *             @OA\Property(property="message", type="string", example="Xóa loại phòng thành công")
+     *             @OA\Property(property="message", type="string", example="Đã chuyển loại phòng vào lịch sử (thùng rác)")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=422,
+     *         description="Không thể xóa vì đang có phòng sử dụng loại phòng này",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="success", type="boolean", example=false),
+     *             @OA\Property(property="message", type="string", example="Không thể xóa loại phòng 'Deluxe' vì đang có 5 phòng đang sử dụng loại phòng này. Vui lòng xóa hoặc thay đổi loại phòng của các phòng liên quan trước."),
+     *             @OA\Property(property="data", type="object",
+     *                 @OA\Property(property="room_type_id", type="integer", example=1),
+     *                 @OA\Property(property="room_type_name", type="string", example="Deluxe"),
+     *                 @OA\Property(property="rooms_count", type="integer", example=5)
+     *             )
      *         )
      *     ),
      *     @OA\Response(response=403, description="Forbidden"),
@@ -486,6 +499,21 @@ class RoomTypeController extends Controller
             
             $roomTypeId = $roomType->id;
             $roomTypeName = $roomType->name;
+
+            // Kiểm tra xem có phòng nào đang sử dụng loại phòng này không
+            $roomsCount = Room::where('room_type_id', $roomTypeId)->count();
+            
+            if ($roomsCount > 0) {
+                return response()->json([
+                    'success' => false,
+                    'message' => "Không thể xóa loại phòng '{$roomTypeName}' vì đang có {$roomsCount} phòng đang sử dụng loại phòng này. Vui lòng xóa hoặc thay đổi loại phòng của các phòng liên quan trước.",
+                    'data' => [
+                        'room_type_id' => $roomTypeId,
+                        'room_type_name' => $roomTypeName,
+                        'rooms_count' => $roomsCount,
+                    ],
+                ], 422);
+            }
 
             // Soft delete room type (không xóa file ngay để có thể khôi phục)
             $roomType->delete();

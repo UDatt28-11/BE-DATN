@@ -37,8 +37,18 @@ class ReviewSeeder extends Seeder
             return;
         }
         
-        // Tạo reviews cho các booking details có sẵn
-        $selectedBookingDetails = $bookingDetails->random(min(20, $bookingDetails->count()));
+        // Tạo reviews cho các booking details đã completed (tối đa 5 reviews)
+        $completedBookingDetails = $bookingDetails->filter(function ($detail) {
+            $booking = $detail->bookingOrder;
+            return $booking && in_array($booking->status, ['checked_out', 'completed']);
+        });
+        
+        if ($completedBookingDetails->isEmpty()) {
+            $this->command->warn('⚠️  No completed booking details found. Skipping reviews creation.');
+            return;
+        }
+        
+        $selectedBookingDetails = $completedBookingDetails->random(min(5, $completedBookingDetails->count()));
         
         foreach ($selectedBookingDetails as $bookingDetail) {
             $reviewData = $reviews[array_rand($reviews)];

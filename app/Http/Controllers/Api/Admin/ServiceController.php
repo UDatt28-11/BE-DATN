@@ -34,7 +34,9 @@ class ServiceController extends Controller
             ]);
 
             $perPage = (int) ($request->get('per_page', self::DEFAULT_PER_PAGE));
-            $query = Service::query()->with('property:id,name');
+            $query = Service::query()->with(['property' => function ($query) {
+                $query->select('id', 'name');
+            }]);
 
             // Filter by property_id
             if ($request->has('property_id')) {

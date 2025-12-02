@@ -20,8 +20,15 @@ class InvoiceSeeder extends Seeder
             return;
         }
 
-        // Tạo invoices cho một số booking orders
-        $selectedBookings = $bookingOrders->random(min(10, $bookingOrders->count()));
+        // Tạo invoices cho tất cả booking orders đã checked_out hoặc completed
+        $selectedBookings = $bookingOrders->filter(function ($booking) {
+            return in_array($booking->status, ['checked_out', 'completed']);
+        });
+        
+        if ($selectedBookings->isEmpty()) {
+            $this->command->warn('⚠️  No completed bookings found. Skipping invoices creation.');
+            return;
+        }
         
         foreach ($selectedBookings as $booking) {
             // Kiểm tra xem đã có invoice chưa

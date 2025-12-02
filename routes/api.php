@@ -51,6 +51,7 @@ use App\Http\Controllers\Api\Public\HomeController;
 use App\Http\Controllers\Auth\AdminPasswordResetController;
 use App\Http\Controllers\Api\User\VoucherController as UserVoucherController;
 use App\Http\Controllers\Api\Staff\BookingController as StaffBookingController;
+use App\Http\Controllers\Api\PayOSController;
 
 // ==================================================================
 // 1. GOOGLE LOGIN (PUBLIC)
@@ -92,19 +93,53 @@ Route::prefix('staff')->group(function () {
 });
 
 // ==================================================================
-// 5. USER AUTH
+// 5. USER AUTH (PUBLIC ROUTES - Đặt trước protected routes)
 // ==================================================================
+// ========================================
+// TEST ROUTES (KHÔNG CẦN AUTH - Đặt TRƯỚC để test)
+// ========================================
+// PAYOS WEBHOOK (PUBLIC ROUTE - Không cần auth)
+// ========================================
+Route::post('payos/webhook', [PayOSController::class, 'webhook'])->name('payos.webhook');
+
+// ========================================
+// Route test đơn giản nhất - không có prefix
+Route::get('/test-route-simple', function () {
+    return response()->json([
+        'success' => true,
+        'message' => 'Simple test route works!',
+    ]);
+});
+
+// Route test với prefix user nhưng không có middleware
+Route::get('/user/bookings/test-public', function (Request $request) {
+    return response()->json([
+        'success' => true,
+        'message' => 'Public test route works! Route exists and is accessible.',
+        'url' => $request->fullUrl(),
+        'method' => $request->method(),
+        'headers' => $request->headers->all(),
+        'query' => $request->query(),
+        'path' => $request->path(),
+        'route' => $request->route()?->getName(),
+    ]);
+});
+
 Route::prefix('user')->group(function () {
+    // Register (public, không cần auth) - dùng User\AuthController
+    Route::post('register', [\App\Http\Controllers\User\AuthController::class, 'register'])
+        ->middleware('throttle:10,1');
+    
+    // Login - dùng Auth\UserAuthController
     Route::post('login', [UserAuthController::class, 'login'])
         ->middleware('throttle:10,1');
-    Route::middleware('auth:sanctum')->post('logout', LogoutController::class);
 
-    // Verify email, forgot password, reset password
+    // Verify email, forgot password, reset password - dùng User\AuthController
     Route::get('email/verify/{id}/{hash}', [VerifyEmailController::class, 'verify'])
         ->middleware(['signed'])
         ->name('verification.verify');
-    Route::post('forgot-password', [AuthController::class, 'forgotPassword']);
-    Route::post('reset-password', [AuthController::class, 'resetPassword']);
+    Route::post('forgot-password', [\App\Http\Controllers\User\AuthController::class, 'forgotPassword']);
+    Route::post('reset-password', [\App\Http\Controllers\User\AuthController::class, 'resetPassword']);
     Route::get('reset-password/{token}', [ResetPasswordController::class, 'showResetForm'])
         ->name('password.reset');
 });
@@ -172,16 +207,32 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
     Route::put('rooms/{room}', [RoomController::class, 'update']);
     Route::delete('rooms/{room}', [RoomController::class, 'destroy']);
     Route::post('rooms/{room}/upload-images', [RoomImageController::class, 'store']);
-    Route::delete('room-images/{roomImage}', [RoomImageController::class, 'destroy']);
-    Route::delete('room-images/bulk', [RoomImageController::class, 'bulkDestroy']);
+    // Bulk delete cần khai báo TRƯỚC route có {roomImage} để tránh Laravel bind 'bulk' thành id
+    // Dùng POST thay vì DELETE vì một số server không hỗ trợ body trong DELETE request
+    Route::post('room-images/bulk-delete', [RoomImageController::class, 'bulkDestroy']);
+    Route::delete('room-images/{roomImage}', [RoomImageController::class, 'destroy'])
+        ->whereNumber('roomImage');
 
     // ========================================
     // 📅 BOOKING ORDERS MANAGEMENT (Quản lý Đặt phòng)
     // ========================================
     Route::get('booking-orders/statistics', [BookingOrderController::class, 'statistics']);
     Route::patch('booking-orders/{id}/status', [BookingOrderController::class, 'updateStatus']);
+    Route::post('booking-orders/{id}/confirm-deposit', [BookingOrderController::class, 'confirmDeposit'])->where('id', '[0-9]+')->name('admin.bookings.confirmDeposit');
     Route::get('booking-orders/export', [BookingOrderController::class, 'export']);
     Route::apiResource('booking-orders', BookingOrderController::class);
+    
+    // ========================================
+    // 🚪 CHECK-IN MANAGEMENT (Quản lý Check-in)
+    // ========================================
+    // Xem danh sách check-in requests
+    Route::get('check-in-requests', [BookingOrderController::class, 'getCheckInRequests']);
+    Route::get('check-in-requests/{id}', [BookingOrderController::class, 'getCheckInRequest']);
+    // Approve/Reject check-in requests
+    Route::post('check-in-requests/{id}/approve', [BookingOrderController::class, 'approveCheckInRequest']);
+    Route::post('check-in-requests/{id}/reject', [BookingOrderController::class, 'rejectCheckInRequest']);
+    // Admin check-in trực tiếp
+    Route::post('booking-orders/{id}/check-in-direct', [BookingOrderController::class, 'checkInDirect']);
 
     // ========================================
     // 📧 EMAIL MANAGEMENT (Quản lý Email)
@@ -257,6 +308,10 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
         Route::put('/{id}', [InvoiceController::class, 'update'])->where('id', '[0-9]+');
         Route::match(['post', 'patch'], '/{id}/mark-paid', [InvoiceController::class, 'markAsPaid']);
         Route::patch('/{id}/status', [InvoiceController::class, 'updateStatus']);
+        Route::post('/{id}/add-service', [InvoiceController::class, 'addService'])->where('id', '[0-9]+');
+        Route::post('/{id}/add-damage', [InvoiceController::class, 'addDamage'])->where('id', '[0-9]+');
+        Route::post('/{id}/approve-for-payment', [InvoiceController::class, 'approveForPayment'])->where('id', '[0-9]+');
+        Route::delete('/{id}/items/{itemId}', [InvoiceController::class, 'removeItem'])->where('id', '[0-9]+')->where('itemId', '[0-9]+');
 
         Route::post('/config/calculation', [InvoiceController::class, 'setCalculationConfig']);
         Route::post('/config/refund-policies', [InvoiceController::class, 'createRefundPolicy']);
@@ -353,12 +408,70 @@ Route::middleware(['auth:sanctum', 'role:staff,admin'])->prefix('staff')->group(
 });
 
 // ==================================================================
-// 7. USER ROUTES (CẦN BỔ SUNG SAU)
+// 7. USER ROUTES (PROTECTED - Đặt sau public routes để tránh conflict)
 // ==================================================================
+// ========================================
+// TEST ROUTES (KHÔNG CẦN AUTH - Để debug)
+// ========================================
+Route::get('user/bookings/test-auth', function (Request $request) {
+    return response()->json([
+        'success' => true,
+        'message' => 'Auth test route works!',
+        'user' => $request->user() ? [
+            'id' => $request->user()->id,
+            'email' => $request->user()->email,
+            'role' => $request->user()->role,
+        ] : 'not authenticated',
+        'headers' => $request->headers->all(),
+    ]);
+})->middleware('auth:sanctum');
+
+// Route test với controller (không cần auth)
+Route::get('user/bookings/test-controller', [BookingOrderController::class, 'indexUser']);
+
+// ========================================
+// USER/STAFF/ADMIN BOOKINGS ROUTES - Tất cả role đều có thể đặt phòng
+// Đặt trước để ưu tiên match, dùng role:user,staff,admin để cho phép tất cả
+// ========================================
 Route::middleware(['auth:sanctum', 'role:user,staff,admin'])->prefix('user')->group(function () {
-    // Kho mã giảm giá của user (vouchers)
-    Route::get('vouchers', [UserVoucherController::class, 'index']);
+    // Logout (chỉ user)
+    Route::post('logout', LogoutController::class)->middleware('role:user');
+    
+    // Kho mã giảm giá của user (vouchers) - chỉ user
+    Route::get('vouchers', [UserVoucherController::class, 'index'])->middleware('role:user');
+    
+    // Bookings - Tất cả role đều có thể xem và tạo bookings của chính mình
+    Route::get('bookings', [BookingOrderController::class, 'indexUser'])->name('user.bookings.index');
+    Route::get('bookings/counts', [BookingOrderController::class, 'getBookingCounts'])->name('user.bookings.counts');
+    Route::post('bookings', [BookingOrderController::class, 'storeUser'])->name('user.bookings.store');
+    Route::get('bookings/{id}', [BookingOrderController::class, 'showUser'])->where('id', '[0-9]+')->name('user.bookings.show');
+    Route::patch('bookings/{id}/payment', [BookingOrderController::class, 'updatePayment'])->where('id', '[0-9]+')->name('user.bookings.updatePayment');
+    Route::post('bookings/{id}/deposit', [BookingOrderController::class, 'payDeposit'])->where('id', '[0-9]+')->name('user.bookings.payDeposit');
+    Route::post('bookings/{id}/cancel', [BookingOrderController::class, 'cancelUserBooking'])->where('id', '[0-9]+')->name('user.bookings.cancel');
+    Route::post('bookings/{id}/check-in', [BookingOrderController::class, 'checkInUser'])->where('id', '[0-9]+')->name('user.bookings.checkIn');
+    Route::post('bookings/{id}/check-out', [BookingOrderController::class, 'checkOutUser'])->where('id', '[0-9]+')->name('user.bookings.checkOut');
+    
+    // PayOS payment routes (user và admin đều có thể sử dụng)
+    Route::post('payos/create-payment-link', [PayOSController::class, 'createPaymentLink'])->middleware('role:user,admin')->name('payos.createPaymentLink');
+    Route::get('payos/check-status/{orderCode}', [PayOSController::class, 'checkPaymentStatus'])->middleware('role:user,admin')->where('orderCode', '[0-9]+')->name('payos.checkStatus');
+    
+    // Invoices - User có thể xem và thanh toán invoice của chính mình
+    Route::get('invoices', [\App\Http\Controllers\Api\Admin\InvoiceController::class, 'getUserInvoices'])->name('user.invoices.index');
+    Route::get('invoices/{id}', [\App\Http\Controllers\Api\Admin\InvoiceController::class, 'getUserInvoice'])->where('id', '[0-9]+')->name('user.invoices.show');
+    Route::post('invoices/{id}/pay', [\App\Http\Controllers\Api\Admin\InvoiceController::class, 'payInvoice'])->where('id', '[0-9]+')->name('user.invoices.pay');
 });
+
+// ========================================
+// STAFF ROUTES (role:staff) - Đã được gộp vào route user ở trên
+// ========================================
+
+// ========================================
+// ADMIN ROUTES (role:admin) - Có thể xem và tạo bookings của chính mình
+// Đặt cuối cùng - XÓA route này vì admin có thể dùng route user với role:user,staff,admin
+// HOẶC tạo route riêng với prefix khác để tránh conflict
+// ========================================
+// NOTE: Admin có thể dùng route user nếu có role phù hợp, hoặc dùng route admin/booking-orders
+// Route này đã bị xóa để tránh conflict với route user
 
 // ==================================================================
 // 8. PROMOTIONS (PUBLIC + PROTECTED)
@@ -661,10 +774,14 @@ Route::get('/properties/{id}/comments', [HomeController::class, 'propertyComment
 Route::get('/rooms/{id}/reviews', [RoomController::class, 'roomReviews'])->where('id', '[0-9]+');
 Route::get('/rooms/{id}/comments', [RoomController::class, 'roomComments'])->where('id', '[0-9]+');
 
+// API danh sách rooms public (không cần auth)
+Route::get('/rooms', [RoomController::class, 'indexPublic']);
+
 // ==================================================================
 // 24. TEST: LẤY USER HIỆN TẠI (XÓA TRƯỚC DEPLOY)
 // ==================================================================
-Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
+// Route này được đặt sau user/bookings để tránh conflict
+Route::middleware('auth:sanctum')->get('/user/current', function (Request $request) {
     return $request->user();
 });
 

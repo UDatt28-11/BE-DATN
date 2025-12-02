@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\IndexSupplyRequest;
+use App\Services\Supply\QueryService;
 use App\Models\Supply;
 use App\Models\SupplyLog;
 use Illuminate\Http\Request;

@@ -106,13 +106,21 @@ class RoomImageController extends Controller
         try {
             // Authorization is handled by route middleware (role:admin)
 
-        $uploadedImages = [];
+            // Debug: Log request data
+            Log::info('RoomImageController@store - Request received', [
+                'room_id' => $room->id,
+                'has_images' => $request->has('images'),
+                'images_count' => $request->hasFile('images') ? count($request->file('images')) : 0,
+                'all_request_keys' => array_keys($request->all()),
+            ]);
+
+            $uploadedImages = [];
             
             // Kiểm tra xem phòng này đã có ảnh primary chưa
             $hasPrimaryImage = $room->images()->where('is_primary', true)->exists();
             $isFirstImage = !$hasPrimaryImage;
 
-        foreach ($request->file('images') as $file) {
+            foreach ($request->file('images') as $file) {
             try {
                 $uploadResult = $this->storeLocalFile($file);
 

@@ -11,6 +11,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Storage;
 
 /**
  * @OA\Tag(
@@ -485,6 +486,26 @@ class UserController extends Controller
             $userId = $user->id;
             $userEmail = $user->email;
 
+            // Xóa các file trên S3 trước khi xóa user
+            try {
+                // Xóa identity_image_url nếu có (lưu trong s3_private)
+                if ($user->identity_image_url) {
+                    $this->deleteFileFromS3($user->identity_image_url, 's3_private');
+                }
+                // Xóa avatar_url nếu có (lưu trong s3)
+                if ($user->avatar_url) {
+                    $this->deleteFileFromS3($user->avatar_url, 's3');
+                }
+            } catch (\Exception $e) {
+                // Log lỗi nhưng không dừng quá trình xóa user
+                Log::warning('UserController@destroy - Failed to delete files from S3', [
+                    'user_id' => $userId,
+                    'identity_image_url' => $user->identity_image_url,
+                    'avatar_url' => $user->avatar_url,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+
         $user->delete();
 
             Log::info('User deleted', [
@@ -513,6 +534,49 @@ class UserController extends Controller
                 'success' => false,
                 'message' => 'Có lỗi xảy ra khi xóa người dùng: ' . $e->getMessage(),
             ], 500);
+        }
+    }
+
+    /**
+     * Xóa file từ S3 (hỗ trợ cả s3 và s3_private disk)
+     *
+     * @param string|null $urlOrPath Stored S3 path or URL
+     * @param string $disk Disk name ('s3' or 's3_private')
+     * @return void
+     */
+    private function deleteFileFromS3($urlOrPath, string $disk = 's3'): void
+    {
+        if (!$urlOrPath) {
+            return;
+        }
+
+        try {
+            // If full URL is stored, extract path part after bucket domain
+            $path = $urlOrPath;
+
+            // If looks like a URL, parse it
+            if (filter_var($urlOrPath, FILTER_VALIDATE_URL)) {
+                $parsedUrl = parse_url($urlOrPath);
+                $path = $parsedUrl['path'] ?? '';
+                $path = ltrim($path, '/');
+            }
+
+            if ($path && Storage::disk($disk)->exists($path)) {
+                Storage::disk($disk)->delete($path);
+                Log::info("UserController@deleteFileFromS3 - File deleted from {$disk}", [
+                    'path' => $path,
+                    'original_url' => $urlOrPath,
+                ]);
+            }
+        } catch (\Exception $e) {
+            Log::error("UserController@deleteFileFromS3 failed ({$disk})", [
+                'input' => $urlOrPath,
+                'disk' => $disk,
+                'error' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ]);
+            // Don't throw exception, just log the error to avoid breaking the flow
         }
     }
 

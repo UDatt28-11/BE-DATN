@@ -31,6 +31,8 @@ class Invoice extends Model
         'refund_date' => 'date',
     ];
 
+    protected $appends = ['invoice_status', 'payment_status'];
+
     // Relationships
     public function bookingOrder(): BelongsTo
     {
@@ -112,5 +114,43 @@ class Invoice extends Model
     public function getAmountAfterRefund()
     {
         return $this->total_amount - $this->refund_amount;
+    }
+
+    /**
+     * Get invoice_status attribute (mapped from status)
+     * Frontend expects invoice_status: 'draft' | 'sent' | 'viewed' | 'paid' | 'cancelled'
+     */
+    public function getInvoiceStatusAttribute()
+    {
+        $status = $this->attributes['status'] ?? 'pending';
+        
+        // Map backend status to frontend invoice_status
+        $mapping = [
+            'pending' => 'sent',      // pending -> sent (đã gửi)
+            'paid' => 'paid',          // paid -> paid
+            'overdue' => 'sent',      // overdue -> sent
+            'cancelled' => 'cancelled', // cancelled -> cancelled
+        ];
+        
+        return $mapping[$status] ?? 'sent';
+    }
+
+    /**
+     * Get payment_status attribute (mapped from status)
+     * Frontend expects payment_status: 'pending' | 'partially_paid' | 'paid' | 'overdue' | 'cancelled'
+     */
+    public function getPaymentStatusAttribute()
+    {
+        $status = $this->attributes['status'] ?? 'pending';
+        
+        // Map backend status to frontend payment_status
+        $mapping = [
+            'pending' => 'pending',
+            'paid' => 'paid',
+            'overdue' => 'overdue',
+            'cancelled' => 'cancelled',
+        ];
+        
+        return $mapping[$status] ?? 'pending';
     }
 }

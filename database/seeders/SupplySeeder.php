@@ -3,56 +3,114 @@
 namespace Database\Seeders;
 
 use Illuminate\Database\Seeder;
-use App\Models\Room;
 use App\Models\Supply;
 
 class SupplySeeder extends Seeder
 {
     public function run(): void
     {
-        $rooms = Room::all();
-        
-        if ($rooms->isEmpty()) {
-            $this->command->warn('⚠️  No rooms found. Skipping supplies creation.');
-            return;
-        }
+        // Xóa supplies cũ
+        Supply::query()->delete();
 
+        // Tạo danh sách supplies sạch và thực tế (không gắn với room cụ thể)
         $supplies = [
-            ['name' => 'Khăn tắm', 'category' => 'Vật dụng phòng tắm', 'unit' => 'cái'],
-            ['name' => 'Chăn', 'category' => 'Đồ dùng giường', 'unit' => 'cái'],
-            ['name' => 'Gối', 'category' => 'Đồ dùng giường', 'unit' => 'cái'],
-            ['name' => 'Dầu gội', 'category' => 'Vật dụng phòng tắm', 'unit' => 'chai'],
-            ['name' => 'Sữa tắm', 'category' => 'Vật dụng phòng tắm', 'unit' => 'chai'],
-            ['name' => 'Bàn chải đánh răng', 'category' => 'Vật dụng phòng tắm', 'unit' => 'cái'],
-            ['name' => 'Kem đánh răng', 'category' => 'Vật dụng phòng tắm', 'unit' => 'tuýp'],
-            ['name' => 'Nước uống', 'category' => 'Đồ uống', 'unit' => 'chai'],
-            ['name' => 'Cà phê', 'category' => 'Đồ uống', 'unit' => 'gói'],
-            ['name' => 'Trà', 'category' => 'Đồ uống', 'unit' => 'gói'],
+            [
+                'name' => 'Khăn tắm lớn',
+                'category' => 'Vật dụng phòng tắm',
+                'unit' => 'cái',
+                'current_stock' => 50,
+                'min_stock_level' => 20,
+                'max_stock_level' => 100,
+                'unit_price' => 150000,
+            ],
+            [
+                'name' => 'Khăn tắm nhỏ',
+                'category' => 'Vật dụng phòng tắm',
+                'unit' => 'cái',
+                'current_stock' => 50,
+                'min_stock_level' => 20,
+                'max_stock_level' => 100,
+                'unit_price' => 80000,
+            ],
+            [
+                'name' => 'Chăn ga gối',
+                'category' => 'Đồ dùng giường',
+                'unit' => 'bộ',
+                'current_stock' => 30,
+                'min_stock_level' => 10,
+                'max_stock_level' => 50,
+                'unit_price' => 500000,
+            ],
+            [
+                'name' => 'Dầu gội đầu',
+                'category' => 'Vật dụng phòng tắm',
+                'unit' => 'chai',
+                'current_stock' => 40,
+                'min_stock_level' => 15,
+                'max_stock_level' => 80,
+                'unit_price' => 120000,
+            ],
+            [
+                'name' => 'Sữa tắm',
+                'category' => 'Vật dụng phòng tắm',
+                'unit' => 'chai',
+                'current_stock' => 40,
+                'min_stock_level' => 15,
+                'max_stock_level' => 80,
+                'unit_price' => 120000,
+            ],
+            [
+                'name' => 'Bàn chải đánh răng',
+                'category' => 'Vật dụng phòng tắm',
+                'unit' => 'cái',
+                'current_stock' => 60,
+                'min_stock_level' => 25,
+                'max_stock_level' => 120,
+                'unit_price' => 25000,
+            ],
+            [
+                'name' => 'Kem đánh răng',
+                'category' => 'Vật dụng phòng tắm',
+                'unit' => 'tuýp',
+                'current_stock' => 50,
+                'min_stock_level' => 20,
+                'max_stock_level' => 100,
+                'unit_price' => 45000,
+            ],
+            [
+                'name' => 'Nước uống đóng chai',
+                'category' => 'Đồ uống',
+                'unit' => 'chai',
+                'current_stock' => 200,
+                'min_stock_level' => 100,
+                'max_stock_level' => 500,
+                'unit_price' => 10000,
+            ],
+            [
+                'name' => 'Cà phê hòa tan',
+                'category' => 'Đồ uống',
+                'unit' => 'gói',
+                'current_stock' => 150,
+                'min_stock_level' => 50,
+                'max_stock_level' => 300,
+                'unit_price' => 5000,
+            ],
+            [
+                'name' => 'Trà túi lọc',
+                'category' => 'Đồ uống',
+                'unit' => 'gói',
+                'current_stock' => 150,
+                'min_stock_level' => 50,
+                'max_stock_level' => 300,
+                'unit_price' => 3000,
+            ],
         ];
 
-        // Tạo supplies cho một số phòng ngẫu nhiên
-        $selectedRooms = $rooms->random(min(10, $rooms->count()));
-        
-        foreach ($selectedRooms as $room) {
-            // Mỗi phòng có 5-8 supplies
-            $selectedSupplies = array_rand($supplies, rand(5, 8));
-            
-            foreach ($selectedSupplies as $index) {
-                Supply::create([
-                    'room_id' => $room->id,
-                    'name' => $supplies[$index]['name'],
-                    'category' => $supplies[$index]['category'],
-                    'unit' => $supplies[$index]['unit'],
-                    'current_stock' => rand(10, 50),
-                    'min_stock_level' => 5,
-                    'max_stock_level' => 100,
-                    'unit_price' => rand(10000, 100000),
-                    'status' => 'active',
-                ]);
-            }
+        foreach ($supplies as $supplyData) {
+            Supply::create($supplyData);
         }
 
-        $this->command->info('✅ Created supplies for rooms');
+        $this->command->info('✅ Created ' . count($supplies) . ' supplies');
     }
 }
 

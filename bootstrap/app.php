@@ -17,6 +17,12 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {
-        //
+        // Đảm bảo API routes trả về JSON thay vì redirect
+        $exceptions->shouldRenderJsonWhen(function ($request, Throwable $e) {
+            if ($request->is('api/*')) {
+                return true;
+            }
+            return $request->expectsJson();
+        });
     })
     ->create();

@@ -13,26 +13,30 @@ class PropertySeeder extends Seeder
      */
     public function run(): void
     {
-        // Lấy tất cả người dùng hiện có để gán làm chủ sở hữu
-        $users = User::all();
+        // Lấy owner user (hoặc tạo nếu chưa có)
+        $owner = User::where('role', 'owner')->orWhere('email', 'owner@staybook.com')->first();
 
-        // Kiểm tra xem có người dùng nào không, nếu không thì dừng lại
-        if ($users->isEmpty()) {
-            $this->command->info('No users found, skipping property creation.');
+        if (!$owner) {
+            $this->command->warn('⚠️  No owner user found. Please run UserSeeder first.');
             return;
         }
 
-        // Tạo 10 homestay mẫu
-        foreach (range(1, 10) as $index) {
-            Property::create([
-                'owner_id' => $users->random()->id, // Lấy ngẫu nhiên một user ID
-                'name' => 'Homestay Mẫu ' . $index,
-                'address' => $index . ' Đường ABC, Quận ' . $index . ', TP. HCM',
-                'description' => 'Đây là mô tả chi tiết cho homestay mẫu số ' . $index . '.',
-                'check_in_time' => '14:00',
-                'check_out_time' => '12:00',
-                'status' => 'active',
-            ]);
-        }
+        // Xóa properties cũ nếu có
+        Property::query()->delete();
+
+        // Chỉ tạo 1 property với dữ liệu sạch và thực tế
+        Property::create([
+            'owner_id' => $owner->id,
+            'name' => 'Homestay Sài Gòn View',
+            'address' => '123 Đường Nguyễn Huệ, Quận 1, Thành phố Hồ Chí Minh',
+            'description' => 'Homestay hiện đại nằm tại trung tâm Quận 1, gần các điểm du lịch nổi tiếng. Không gian rộng rãi, tiện nghi đầy đủ, view đẹp. Phù hợp cho gia đình và nhóm bạn.',
+            'check_in_time' => '14:00',
+            'check_out_time' => '12:00',
+            'status' => 'active',
+            'verification_status' => 'verified',
+            'verified_at' => now(),
+        ]);
+
+        $this->command->info('✅ Created 1 property: Homestay Sài Gòn View');
     }
 }

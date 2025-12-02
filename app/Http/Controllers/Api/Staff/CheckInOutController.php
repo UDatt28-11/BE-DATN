@@ -44,10 +44,10 @@ class CheckInOutController extends Controller
                 'details.room.property:id,name,address',
                 'details.checkedInGuests',
             ])
-            ->whereIn('status', ['confirmed', 'pending'])
+            ->whereIn('status', ['confirmed', 'pending', 'partially_checked_in'])
             ->whereHas('details', function ($q) use ($date) {
                 $q->whereDate('check_in_date', '<=', $date)
-                  ->where('status', 'active');
+                  ->whereIn('status', ['active', 'checked_in']);
             });
 
             // Search
@@ -104,8 +104,19 @@ class CheckInOutController extends Controller
                 'details.bookingServices.service:id,name,unit_price',
             ])->findOrFail($id);
 
+            // Log booking status để debug
+            Log::info('CheckInOutController@getCheckInDetails - Booking status', [
+                'booking_id' => $id,
+                'booking_status' => $booking->status,
+                'details_count' => $booking->details->count(),
+            ]);
+
             // Kiểm tra booking có thể check-in không
-            if (!in_array($booking->status, ['confirmed', 'pending'])) {
+            if (!in_array($booking->status, ['confirmed', 'pending', 'partially_checked_in'])) {
+                Log::warning('CheckInOutController@getCheckInDetails - Invalid booking status', [
+                    'booking_id' => $id,
+                    'current_status' => $booking->status,
+                ]);
                 return response()->json([
                     'success' => false,
                     'message' => 'Đơn đặt phòng này không thể check-in. Trạng thái hiện tại: ' . $booking->status,
@@ -143,6 +154,14 @@ class CheckInOutController extends Controller
     public function checkIn(Request $request, string $id): JsonResponse
     {
         try {
+            // Log request để debug
+            Log::info('CheckInOutController@checkIn - Request received', [
+                'booking_id' => $id,
+                'has_guests' => $request->has('guests'),
+                'guests_count' => $request->has('guests') ? count($request->input('guests', [])) : 0,
+                'request_data' => $request->except(['guests.*.identity_image']), // Exclude file data
+            ]);
+
             $request->validate([
                 'guests' => 'required|array|min:1',
                 'guests.*.full_name' => 'required|string|max:255',
@@ -158,13 +177,27 @@ class CheckInOutController extends Controller
 
             $booking = BookingOrder::with(['details.room'])->findOrFail($id);
 
+            // Log booking status
+            Log::info('CheckInOutController@checkIn - Booking status check', [
+                'booking_id' => $id,
+                'booking_status' => $booking->status,
+                'allowed_statuses' => ['confirmed', 'pending', 'partially_checked_in'],
+            ]);
+
             // Kiểm tra booking có thể check-in không
-            if (!in_array($booking->status, ['confirmed', 'pending'])) {
+            if (!in_array($booking->status, ['confirmed', 'pending', 'partially_checked_in'])) {
+                Log::warning('CheckInOutController@checkIn - Invalid booking status', [
+                    'booking_id' => $id,
+                    'current_status' => $booking->status,
+                ]);
                 return response()->json([
                     'success' => false,
-                    'message' => 'Đơn đặt phòng này không thể check-in.',
+                    'message' => 'Đơn đặt phòng này không thể check-in. Trạng thái hiện tại: ' . $booking->status,
                 ], 400);
             }
+
+            // Lưu danh sách booking_detail_id đã có guests check-in
+            $checkedInDetailIds = [];
 
             // Xử lý từng guest
             foreach ($request->guests as $index => $guestData) {
@@ -174,6 +207,15 @@ class CheckInOutController extends Controller
                 if ($bookingDetail->booking_order_id != $booking->id) {
                     throw new \Exception('Booking detail không thuộc về booking order này.');
                 }
+
+                // Kiểm tra booking detail đã check-in chưa (nếu đã check-in thì bỏ qua, không cần check-in lại)
+                // Cho phép check-in lại nếu cần thêm khách
+                // if ($bookingDetail->status === 'checked_in') {
+                //     Log::info('CheckInOutController@checkIn - Booking detail already checked in', [
+                //         'booking_detail_id' => $bookingDetail->id,
+                //     ]);
+                //     continue; // Bỏ qua nếu đã check-in
+                // }
 
                 // Upload identity image nếu có
                 // File được gửi với key: guests[0][identity_image] hoặc guests.0.identity_image
@@ -194,22 +236,35 @@ class CheckInOutController extends Controller
                     'identity_image_url' => $identityImageUrl,
                     'check_in_time' => now(),
                 ]);
+
+                // Lưu booking_detail_id đã có guests check-in
+                if (!in_array($bookingDetail->id, $checkedInDetailIds)) {
+                    $checkedInDetailIds[] = $bookingDetail->id;
+                }
             }
 
-            // Cập nhật trạng thái booking order và booking details
+            // Cập nhật trạng thái booking details - CHỈ các phòng có guests check-in
+            BookingDetail::whereIn('id', $checkedInDetailIds)->update(['status' => 'checked_in']);
+
+            // Cập nhật trạng thái phòng thành "occupied" - CHỈ các phòng đã check-in
+            $checkedInDetails = BookingDetail::whereIn('id', $checkedInDetailIds)->with('room')->get();
+            foreach ($checkedInDetails as $detail) {
+                if ($detail->room) {
+                    $detail->room->update(['status' => 'occupied']);
+                }
+            }
+
+            // Kiểm tra xem tất cả phòng đã check-in chưa
+            $totalDetails = $booking->details()->count();
+            $checkedInCount = $booking->details()->where('status', 'checked_in')->count();
+            
+            // Cập nhật trạng thái booking order
+            $newStatus = ($checkedInCount >= $totalDetails) ? 'checked_in' : 'partially_checked_in';
             $booking->update([
-                'status' => 'checked_in',
+                'status' => $newStatus,
                 'staff_id' => Auth::id(),
                 'notes' => $request->notes ?? $booking->notes,
             ]);
-
-            // Cập nhật trạng thái booking details
-            $booking->details()->update(['status' => 'checked_in']);
-
-            // Cập nhật trạng thái phòng thành "occupied"
-            foreach ($booking->details as $detail) {
-                $detail->room->update(['status' => 'occupied']);
-            }
 
             DB::commit();
 
@@ -265,11 +320,19 @@ class CheckInOutController extends Controller
                 'details.checkedInGuests',
                 'invoices',
             ])
-            ->where('status', 'checked_in')
+            ->whereIn('status', ['checked_in', 'partially_checked_in', 'partially_checked_out'])
             ->whereHas('details', function ($q) use ($date) {
-                $q->whereDate('check_out_date', '<=', $date)
-                  ->where('status', 'checked_in');
+                // Chỉ lấy các phòng đã check-in và có ngày check-out <= hôm nay
+                $q->whereIn('status', ['checked_in'])
+                  ->whereDate('check_out_date', '<=', $date);
             });
+
+            // Log để debug
+            Log::info('CheckInOutController@getCheckOutList - Query conditions', [
+                'date' => $date,
+                'statuses' => ['checked_in', 'partially_checked_in', 'partially_checked_out'],
+                'count_before_paginate' => $query->count(),
+            ]);
 
             // Search
             if ($request->has('search') && !empty($request->search)) {
@@ -326,7 +389,7 @@ class CheckInOutController extends Controller
             ])->findOrFail($id);
 
             // Kiểm tra booking có thể check-out không
-            if ($booking->status !== 'checked_in') {
+            if (!in_array($booking->status, ['checked_in', 'partially_checked_in', 'partially_checked_out'])) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Đơn đặt phòng này không thể check-out. Trạng thái hiện tại: ' . $booking->status,
@@ -365,6 +428,8 @@ class CheckInOutController extends Controller
     {
         try {
             $request->validate([
+                'booking_detail_ids' => 'nullable|array|min:1',
+                'booking_detail_ids.*' => 'required|exists:booking_details,id',
                 'room_status' => 'required|in:available,maintenance',
                 'additional_services' => 'nullable|array',
                 'additional_services.*.service_id' => 'required|exists:services,id',
@@ -382,27 +447,54 @@ class CheckInOutController extends Controller
             $booking = BookingOrder::with(['details.room', 'invoices'])->findOrFail($id);
 
             // Kiểm tra booking có thể check-out không
-            if ($booking->status !== 'checked_in') {
+            if (!in_array($booking->status, ['checked_in', 'partially_checked_in', 'partially_checked_out'])) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Đơn đặt phòng này không thể check-out.',
                 ], 400);
             }
 
+            // Lấy danh sách booking_detail_ids cần check-out
+            // Nếu không có booking_detail_ids, check-out tất cả phòng đã check-in
+            $checkOutDetailIds = $request->booking_detail_ids ?? $booking->details()->where('status', 'checked_in')->pluck('id')->toArray();
+            
+            if (empty($checkOutDetailIds)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Không có phòng nào để check-out.',
+                ], 400);
+            }
+            
+            // Kiểm tra các booking_detail thuộc về booking order này
+            $validDetails = $booking->details()->whereIn('id', $checkOutDetailIds)->get();
+            if ($validDetails->count() !== count($checkOutDetailIds)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Một hoặc nhiều phòng không thuộc về đơn đặt phòng này.',
+                ], 400);
+            }
+
+            // Cập nhật trạng thái booking details - CHỈ các phòng được chọn
+            BookingDetail::whereIn('id', $checkOutDetailIds)->update(['status' => 'checked_out']);
+
+            // Cập nhật trạng thái phòng - CHỈ các phòng được check-out
+            foreach ($validDetails as $detail) {
+                if ($detail->room) {
+                    $detail->room->update(['status' => $request->room_status]);
+                }
+            }
+
+            // Kiểm tra xem tất cả phòng đã check-out chưa
+            $totalDetails = $booking->details()->count();
+            $checkedOutCount = $booking->details()->where('status', 'checked_out')->count();
+            
             // Cập nhật trạng thái booking order
+            $newStatus = ($checkedOutCount >= $totalDetails) ? 'checked_out' : 'partially_checked_out';
             $booking->update([
-                'status' => 'checked_out',
+                'status' => $newStatus,
                 'staff_id' => Auth::id(),
                 'notes' => $request->notes ?? $booking->notes,
             ]);
-
-            // Cập nhật trạng thái booking details
-            $booking->details()->update(['status' => 'checked_out']);
-
-            // Cập nhật trạng thái phòng
-            foreach ($booking->details as $detail) {
-                $detail->room->update(['status' => $request->room_status]);
-            }
 
             // Xử lý dịch vụ phát sinh (nếu có)
             // TODO: Implement logic để thêm dịch vụ vào booking và tính phí

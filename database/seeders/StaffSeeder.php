@@ -20,7 +20,7 @@ class StaffSeeder extends Seeder
         $staff = User::firstOrCreate(
             ['email' => 'staff@staybook.com'],
             [
-                'full_name'    => 'Nhân viên Test',
+                'full_name'    => 'Lê Văn Nhân Viên',
                 'role'         => 'staff',
                 'password'     => Hash::make('password'),
                 'status'       => 'active',

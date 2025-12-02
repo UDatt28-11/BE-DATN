@@ -11,6 +11,7 @@ use App\Services\Property\QueryService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 
 /**
  * @OA\Tag(
@@ -424,7 +425,24 @@ class PropertyController extends Controller
             $propertyId = $property->id;
             $propertyName = $property->name;
 
-        $property->delete();
+            // Xóa tất cả ảnh của property trên S3 trước khi xóa property
+            $images = $property->images;
+            foreach ($images as $image) {
+                try {
+                    // Xóa file trên S3
+                    $this->deleteImageFromS3($image->image_url);
+                } catch (\Exception $e) {
+                    // Log lỗi nhưng không dừng quá trình xóa property
+                    Log::warning('PropertyController@destroy - Failed to delete image from S3', [
+                        'property_id' => $propertyId,
+                        'image_id' => $image->id,
+                        'image_url' => $image->image_url,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+
+            $property->delete();
 
             Log::info('Property deleted', [
                 'property_id' => $propertyId,
@@ -447,6 +465,47 @@ class PropertyController extends Controller
                 'success' => false,
                 'message' => 'Có lỗi xảy ra khi xóa property: ' . $e->getMessage(),
             ], 500);
+        }
+    }
+
+    /**
+     * Xóa file ảnh từ S3
+     *
+     * @param string|null $urlOrPath Stored S3 path or URL
+     * @return void
+     */
+    private function deleteImageFromS3($urlOrPath)
+    {
+        if (!$urlOrPath) {
+            return;
+        }
+
+        try {
+            // If full URL is stored, extract path part after bucket domain
+            $path = $urlOrPath;
+
+            // If looks like a URL, parse it
+            if (filter_var($urlOrPath, FILTER_VALIDATE_URL)) {
+                $parsedUrl = parse_url($urlOrPath);
+                $path = $parsedUrl['path'] ?? '';
+                $path = ltrim($path, '/');
+            }
+
+            if ($path && Storage::disk('s3')->exists($path)) {
+                Storage::disk('s3')->delete($path);
+                Log::info('PropertyController@deleteImageFromS3 - Image deleted from S3', [
+                    'path' => $path,
+                    'original_url' => $urlOrPath,
+                ]);
+            }
+        } catch (\Exception $e) {
+            Log::error('PropertyController@deleteImageFromS3 failed (S3)', [
+                'input' => $urlOrPath,
+                'error' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ]);
+            // Don't throw exception, just log the error to avoid breaking the flow
         }
     }
 

@@ -14,6 +14,7 @@ return new class extends Migration
             $table->string('name');
             $table->string('icon_url')->nullable();
             $table->enum('type', ['basic', 'advanced', 'safety'])->default('basic');
+            $table->enum('category', ['facility', 'service'])->default('facility');
             $table->timestamps();
         });
     }

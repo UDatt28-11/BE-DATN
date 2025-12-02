@@ -24,6 +24,8 @@ class Room extends Model
         'room_type_id',
         'name',
         'description',
+        'floor_number', // Số tầng cụ thể (0 = tầng trệt, 1, 2, 3...)
+        'floor_category', // Phân loại tầng (ground_floor, upper_floor, attic)
         'max_adults',
         'max_children',
         'price_per_night',

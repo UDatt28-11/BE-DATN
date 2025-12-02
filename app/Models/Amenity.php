@@ -12,7 +12,7 @@ use App\Models\Property;
 class Amenity extends Model
 {
     use HasFactory, SoftDeletes;
-    protected $fillable = ['property_id', 'name', 'icon_url', 'type', 'category'];
+    protected $fillable = ['property_id', 'name', 'icon_url', 'type', 'category', 'filter_category'];
 
     public function property(): BelongsTo {
         return $this->belongsTo(Property::class);

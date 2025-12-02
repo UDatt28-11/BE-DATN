@@ -11,41 +11,64 @@ class PromotionSeeder extends Seeder
 {
     public function run(): void
     {
-        $properties = Property::all();
+        $property = Property::first();
         
-        if ($properties->isEmpty()) {
-            $this->command->warn('⚠️  No properties found. Skipping promotions creation.');
+        if (!$property) {
+            $this->command->warn('⚠️  No property found. Skipping promotions creation.');
             return;
         }
 
-        foreach ($properties as $property) {
-            // Tạo 2-3 promotions cho mỗi property
-            $promotionCount = rand(2, 3);
-            
-            for ($i = 1; $i <= $promotionCount; $i++) {
-                $startDate = Carbon::now()->addDays(rand(-30, 30));
-                $endDate = $startDate->copy()->addDays(rand(30, 90));
-                
-                Promotion::create([
-                    'property_id' => $property->id,
-                    'code' => strtoupper(substr($property->name, 0, 3)) . rand(1000, 9999),
-                    'description' => 'Mã giảm giá ' . $i . ' cho ' . $property->name,
-                    'discount_type' => ['percentage', 'fixed_amount'][rand(0, 1)],
-                    'discount_value' => $i === 1 ? rand(10, 30) : rand(50000, 200000),
-                    'max_discount_amount' => rand(100000, 500000),
-                    'min_purchase_amount' => rand(500000, 2000000),
-                    'max_usage_limit' => rand(10, 50),
-                    'max_usage_per_user' => rand(1, 3),
-                    'usage_count' => 0,
-                    'start_date' => $startDate,
-                    'end_date' => $endDate,
-                    'is_active' => $endDate->isFuture(),
-                    'applicable_to' => 'all',
-                ]);
-            }
+        // Xóa promotions cũ
+        Promotion::where('property_id', $property->id)->delete();
+
+        // Tạo 2 promotions sạch và thực tế
+        $promotions = [
+            [
+                'code' => 'WELCOME2024',
+                'description' => 'Mã giảm giá chào mừng khách mới - Giảm 15% cho đơn hàng đầu tiên',
+                'discount_type' => 'percentage',
+                'discount_value' => 15,
+                'max_discount_amount' => 500000,
+                'min_purchase_amount' => 1000000,
+                'max_usage_limit' => 100,
+                'max_usage_per_user' => 1,
+                'start_date' => Carbon::now()->subDays(7),
+                'end_date' => Carbon::now()->addDays(60),
+            ],
+            [
+                'code' => 'LONGSTAY',
+                'description' => 'Giảm giá cho khách ở từ 3 đêm trở lên - Giảm 200.000đ',
+                'discount_type' => 'fixed_amount',
+                'discount_value' => 200000,
+                'max_discount_amount' => 200000,
+                'min_purchase_amount' => 2000000,
+                'max_usage_limit' => 50,
+                'max_usage_per_user' => 2,
+                'start_date' => Carbon::now()->subDays(7),
+                'end_date' => Carbon::now()->addDays(90),
+            ],
+        ];
+
+        foreach ($promotions as $promoData) {
+            Promotion::create([
+                'property_id' => $property->id,
+                'code' => $promoData['code'],
+                'description' => $promoData['description'],
+                'discount_type' => $promoData['discount_type'],
+                'discount_value' => $promoData['discount_value'],
+                'max_discount_amount' => $promoData['max_discount_amount'],
+                'min_purchase_amount' => $promoData['min_purchase_amount'],
+                'max_usage_limit' => $promoData['max_usage_limit'],
+                'max_usage_per_user' => $promoData['max_usage_per_user'],
+                'usage_count' => 0,
+                'start_date' => $promoData['start_date'],
+                'end_date' => $promoData['end_date'],
+                'is_active' => $promoData['end_date']->isFuture(),
+                'applicable_to' => 'all',
+            ]);
         }
 
-        $this->command->info('✅ Created promotions for all properties');
+        $this->command->info('✅ Created ' . count($promotions) . ' promotions for property');
     }
 }
 

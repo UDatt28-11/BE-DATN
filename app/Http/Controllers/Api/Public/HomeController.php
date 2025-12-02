@@ -212,6 +212,7 @@ class HomeController extends Controller
                     'icon_url' => $amenity->icon_url,
                     'type' => $amenity->type,
                     'category' => $amenity->category ?? 'facility', // Default to 'facility' if not set
+                    'filter_category' => $amenity->filter_category ?? null, // NEW: filter_category for frontend filtering
                     'property' => $amenity->relationLoaded('property') && $amenity->property ? [
                         'id' => $amenity->property->id,
                         'name' => $amenity->property->name,
@@ -306,6 +307,7 @@ class HomeController extends Controller
                         return [
                             'id' => $amenity->id,
                             'name' => $amenity->name,
+                            'filter_category' => $amenity->filter_category ?? null, // NEW: filter_category
                         ];
                     }),
                     'images' => $room->images->map(function ($image) {
@@ -867,7 +869,7 @@ class HomeController extends Controller
                 $rooms = $roomsQuery->with([
                     'roomType:id,name',
                     'images',
-                    'amenities:id,name',
+                    'amenities:id,name,filter_category', // NEW: Include filter_category
                 ])->get();
                 
                 // Load reviews for each room separately

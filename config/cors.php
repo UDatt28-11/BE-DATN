@@ -4,14 +4,20 @@ return [
     'paths' => ['api/*', 'sanctum/csrf-cookie'],
     'allowed_methods' => ['*'],
 
-    // SỬA MỤC NÀY:
-    // Đảm bảo cả hai biến thể của React đều có ở đây
+    // Các origin FE được phép gọi API
     'allowed_origins' => [
-        env('FRONTEND_URL', 'http://localhost:5173'), // Dòng này bạn đã có
-        'http://127.0.0.1:5173', // <-- Thêm dòng này để cho chắc chắn
+        // URL frontend chính (có thể là trycloudflare/ngrok tùy env)
+        env('FRONTEND_URL', 'http://localhost:5173'),
+        // Local development
+        'http://localhost:5173',
+        'http://127.0.0.1:5173',
     ],
 
-    'allowed_origins_patterns' => [],
+    // Cho phép các domain động (VD: Cloudflare tunnel)
+    'allowed_origins_patterns' => [
+        '^https://.*\.trycloudflare\.com$',
+    ],
+
     'allowed_headers' => ['*'],
     'exposed_headers' => [],
     'max_age' => 0,

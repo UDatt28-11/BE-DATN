@@ -26,6 +26,17 @@ class UserAuthController extends Controller
             ]);
         }
 
+        // Kiểm tra user bị khóa - KHÔNG cho phép đăng nhập nếu bị locked
+        if ($user->status === 'locked') {
+            throw ValidationException::withMessages([
+                'email' => [
+                    'Tài khoản của bạn đã bị khóa.',
+                    'Lý do: ' . ($user->ly_do_block ?? 'Không xác định'),
+                    $user->block_den_ngay ? 'Khóa đến: ' . $user->block_den_ngay : '',
+                ]
+            ]);
+        }
+
         // Xóa token cũ của thiết bị hiện tại
         $user->tokens()->where('id', $request->user()?->currentAccessToken()?->id)->delete();
 

@@ -17,7 +17,8 @@
         "league/flysystem-aws-s3-v3": "3.0",
         "spatie/laravel-activitylog": "^4.10",
         "spatie/laravel-permission": "^6.23",
-        "yaza/laravel-google-drive-storage": "^4.1"
+        "yaza/laravel-google-drive-storage": "^4.1",
+        "payos/payos": "^1.0"
     },
     "require-dev": {
         "fakerphp/faker": "^1.23",
