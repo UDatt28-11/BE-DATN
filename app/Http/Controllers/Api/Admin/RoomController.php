@@ -139,6 +139,8 @@ class RoomController extends Controller
                 'max_children' => 'sometimes|integer|min:0|max:50',
                 'amenities' => 'sometimes|array',
                 'amenities.*' => 'sometimes|integer|exists:amenities,id',
+                'check_in' => 'sometimes|date',
+                'check_out' => 'sometimes|date|after:check_in',
                 'sort_by' => 'sometimes|string|in:id,name,price_per_night,rating,reviews_count,created_at,updated_at',
                 'sort_order' => 'sometimes|string|in:asc,desc',
                 'page' => 'sometimes|integer|min:1',
@@ -183,6 +185,24 @@ class RoomController extends Controller
                     }
                 }
             ]);
+
+            // Filter by date range: loại trừ các phòng đã có booking trùng khoảng ngày
+            if ($request->filled('check_in') && $request->filled('check_out')) {
+                $checkIn = $request->get('check_in');
+                $checkOut = $request->get('check_out');
+
+                $query->whereDoesntHave('bookingDetails', function ($detailQuery) use ($checkIn, $checkOut) {
+                    // Chỉ xét các booking chưa bị hủy
+                    $detailQuery->whereHas('bookingOrder', function ($bo) {
+                        $bo->whereNotIn('status', ['cancelled']);
+                    });
+
+                    // Khoảng ngày trùng nhau nếu:
+                    // existing_check_in < requested_check_out AND existing_check_out > requested_check_in
+                    $detailQuery->whereDate('check_in_date', '<', $checkOut)
+                        ->whereDate('check_out_date', '>', $checkIn);
+                });
+            }
 
             // Filter by property_id
             if ($request->has('property_id')) {

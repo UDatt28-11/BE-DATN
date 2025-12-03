@@ -665,15 +665,79 @@ class InvoiceController extends Controller
                 ], 401);
             }
 
-            $invoice = Invoice::with(['bookingOrder.guest', 'invoiceItems'])
+            // Luôn load bookingOrder + invoiceItems để có đủ dữ liệu
+            $invoice = Invoice::with(['bookingOrder', 'bookingOrder.guest', 'invoiceItems'])
                 ->whereHas('bookingOrder', function ($q) use ($user) {
                     $q->where('guest_id', $user->id);
                 })
                 ->findOrFail($id);
 
+            // ĐẢM BẢO: luôn có 1 dòng "Tiền cọc đã thanh toán" nếu booking đã trả cọc
+            $booking = $invoice->bookingOrder;
+            if ($booking) {
+                // Ưu tiên lấy từ booking.paid_amount; nếu chưa có thì lấy tổng từ payments của invoice
+                $paidAmountFromBooking = (float) ($booking->paid_amount ?? 0);
+                $paidAmountFromPayments = (float) $invoice->payments()
+                    ->whereIn('status', ['success', 'paid'])
+                    ->sum('amount');
+
+                $effectivePaidAmount = $paidAmountFromBooking > 0
+                    ? $paidAmountFromBooking
+                    : $paidAmountFromPayments;
+
+                $paidAmount = (int) round($effectivePaidAmount);
+
+                if ($paidAmount > 0) {
+
+                    // Kiểm tra xem đã có invoice item kiểu deposit chưa
+                    $existingDepositItem = $invoice->invoiceItems()
+                        ->where('item_type', 'deposit')
+                        ->first();
+
+                    if (!$existingDepositItem) {
+                        // Nếu database enum chưa có 'deposit' thì tránh gây lỗi
+                        try {
+                            $depositItem = \App\Models\InvoiceItem::create([
+                                'invoice_id'   => $invoice->id,
+                                'description'  => 'Tiền cọc đã thanh toán',
+                                'quantity'     => 1,
+                                'unit_price'   => -$paidAmount,
+                                'total_line'   => -$paidAmount,
+                                'item_type'    => 'deposit',
+                            ]);
+
+                            // Gắn thêm vào collection hiện tại để trả về cho frontend
+                            $invoice->setRelation(
+                                'invoiceItems',
+                                $invoice->invoiceItems->push($depositItem)
+                            );
+                        } catch (\Throwable $e) {
+                            Log::error('InvoiceController@getUserInvoice: failed to create deposit invoice item', [
+                                'invoice_id' => $invoice->id,
+                                'booking_id' => $booking->id,
+                                'paid_amount' => $paidAmount,
+                                'error' => $e->getMessage(),
+                            ]);
+                        }
+                    }
+
+                    // Cập nhật lại total_amount = tổng các total_line (phòng + dịch vụ + cọc âm, ...)
+                    try {
+                        $newTotal = $invoice->invoiceItems()->sum('total_line');
+                        $invoice->total_amount = max(0, $newTotal);
+                        $invoice->save();
+                    } catch (\Throwable $e) {
+                        Log::error('InvoiceController@getUserInvoice: failed to recalc invoice total_amount', [
+                            'invoice_id' => $invoice->id,
+                            'error' => $e->getMessage(),
+                        ]);
+                    }
+                }
+            }
+
             return response()->json([
                 'success' => true,
-                'data' => $invoice,
+                'data' => $invoice->fresh(['bookingOrder.guest', 'invoiceItems']),
             ]);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json([

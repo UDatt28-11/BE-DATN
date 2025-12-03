@@ -53,6 +53,14 @@ use App\Http\Controllers\Api\User\VoucherController as UserVoucherController;
 use App\Http\Controllers\Api\Staff\BookingController as StaffBookingController;
 use App\Http\Controllers\Api\PayOSController;
 
+// === MODELS & FACADES FOR PAYMENT REDIRECT ===
+use App\Models\BookingOrder;
+use App\Models\Payment;
+use App\Models\Invoice;
+use App\Models\InvoiceItem;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+
 // ==================================================================
 // 1. GOOGLE LOGIN (PUBLIC)
 // ==================================================================
@@ -101,6 +109,145 @@ Route::prefix('staff')->group(function () {
 // PAYOS WEBHOOK (PUBLIC ROUTE - Không cần auth)
 // ========================================
 Route::post('payos/webhook', [PayOSController::class, 'webhook'])->name('payos.webhook');
+
+// PAYOS REDIRECT (PUBLIC ROUTE - Redirect về localhost)
+// ========================================
+Route::get('payment/redirect', function (Request $request) {
+    // Lấy tất cả query params từ PayOS
+    $queryParams = $request->query();
+    
+    // Xác định loại redirect (success hoặc cancel)
+    // Nếu có param 'type' từ returnUrl của chúng ta, dùng nó
+    // Nếu không, kiểm tra cancel hoặc status
+    $type = $request->get('type');
+    if (!$type) {
+        $type = ($request->get('cancel') === 'true' || $request->get('status') === 'CANCELLED') ? 'cancel' : 'success';
+    }
+    
+    // Nếu là success và có booking_id, kiểm tra và cập nhật booking status
+    if ($type === 'success' && $request->has('booking_id')) {
+        try {
+            $bookingId = $request->get('booking_id');
+            $booking = BookingOrder::find($bookingId);
+            
+            if ($booking) {
+                // Tìm payment gần nhất của booking này
+                $invoice = $booking->invoices()->first();
+                if ($invoice) {
+                    $payment = $invoice->payments()
+                        ->whereIn('status', ['success', 'paid'])
+                        ->latest()
+                        ->first();
+                    
+                    // Tìm payment gần nhất (có thể là pending nếu webhook chưa được gọi)
+                    $latestPayment = $invoice->payments()
+                        ->latest()
+                        ->first();
+                    
+                    // Nếu có payment và user quay lại từ PayOS success, cập nhật payment status
+                    if ($latestPayment && $latestPayment->status === 'pending') {
+                        $latestPayment->update([
+                            'status' => 'success',
+                            'paid_at' => now(),
+                        ]);
+                        Log::info('Payment redirect: Payment status updated to success', [
+                            'payment_id' => $latestPayment->id,
+                            'booking_id' => $booking->id,
+                        ]);
+                    }
+                    
+                    // Tính lại paid_amount từ tổng các payments thành công
+                    $totalPaidAmount = $invoice->payments()
+                        ->whereIn('status', ['success', 'paid'])
+                        ->sum('amount');
+                    
+                    // Nếu có payment thành công, luôn cập nhật booking và đảm bảo deposit item
+                    if ($totalPaidAmount > 0) {
+                        DB::beginTransaction();
+                        try {
+                            // Cập nhật booking paid_amount và payment_status
+                            $newPaidAmount = min($totalPaidAmount, $booking->total_amount);
+                            $bookingPaymentStatus = 'partial';
+                            
+                            if ($newPaidAmount >= $booking->total_amount) {
+                                $bookingPaymentStatus = 'paid';
+                            }
+                            
+                            // Chỉ cập nhật status nếu chưa confirmed
+                            $updateData = [
+                                'paid_amount' => $newPaidAmount,
+                                'payment_status' => $bookingPaymentStatus,
+                            ];
+                            
+                            if ($booking->status !== 'confirmed') {
+                                $updateData['status'] = 'confirmed';
+                            }
+                            
+                            $booking->update($updateData);
+                            
+                            // Đảm bảo invoice có deposit item (luôn kiểm tra và tạo nếu chưa có)
+                            $hasDepositItem = InvoiceItem::where('invoice_id', $invoice->id)
+                                ->where('item_type', 'deposit')
+                                ->exists();
+                            
+                            if (!$hasDepositItem && $newPaidAmount > 0) {
+                                InvoiceItem::create([
+                                    'invoice_id' => $invoice->id,
+                                    'description' => 'Tiền cọc đã thanh toán (PayOS)',
+                                    'quantity' => 1,
+                                    'unit_price' => -$newPaidAmount,
+                                    'total_line' => -$newPaidAmount,
+                                    'item_type' => 'deposit',
+                                ]);
+                                
+                                // Tính lại invoice total
+                                $allItems = InvoiceItem::where('invoice_id', $invoice->id)->get();
+                                $newTotalAmount = max(0, $allItems->sum('total_line'));
+                                $invoice->update(['total_amount' => $newTotalAmount]);
+                                
+                                Log::info('Payment redirect: Deposit item created', [
+                                    'booking_id' => $booking->id,
+                                    'invoice_id' => $invoice->id,
+                                    'deposit_amount' => -$newPaidAmount,
+                                ]);
+                            }
+                            
+                            DB::commit();
+                            
+                            Log::info('Payment redirect: Booking updated', [
+                                'booking_id' => $booking->id,
+                                'paid_amount' => $newPaidAmount,
+                                'has_deposit_item' => $hasDepositItem,
+                            ]);
+                        } catch (\Exception $e) {
+                            DB::rollBack();
+                            Log::error('Payment redirect: Failed to update booking', [
+                                'booking_id' => $bookingId,
+                                'error' => $e->getMessage(),
+                            ]);
+                        }
+                    }
+                }
+            }
+        } catch (\Exception $e) {
+            Log::error('Payment redirect: Error checking booking status', [
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+    
+    // Xóa param 'type' khỏi query params (không cần gửi về frontend)
+    unset($queryParams['type']);
+    
+    // Build URL localhost với tất cả params còn lại
+    $localhostUrl = 'http://localhost:5173/payment/' . $type;
+    if (!empty($queryParams)) {
+        $localhostUrl .= '?' . http_build_query($queryParams);
+    }
+    
+    // Redirect về localhost
+    return redirect($localhostUrl);
+})->name('payment.redirect');
 
 // ========================================
 // Route test đơn giản nhất - không có prefix
@@ -233,6 +380,8 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
     Route::post('check-in-requests/{id}/reject', [BookingOrderController::class, 'rejectCheckInRequest']);
     // Admin check-in trực tiếp
     Route::post('booking-orders/{id}/check-in-direct', [BookingOrderController::class, 'checkInDirect']);
+    // Quản lý lưu trú - Danh sách khách đã check-in
+    Route::get('checked-in-guests', [BookingOrderController::class, 'getCheckedInGuests']);
 
     // ========================================
     // 📧 EMAIL MANAGEMENT (Quản lý Email)
@@ -753,6 +902,8 @@ Route::prefix('rooms')->group(function () {
 Route::prefix('public')->group(function () {
     Route::get('/statistics', [HomeController::class, 'statistics']);
     Route::get('/room-types', [HomeController::class, 'roomTypes']);
+    Route::get('/room-types/{id}', [HomeController::class, 'roomTypeDetail'])->whereNumber('id');
+    Route::get('/room-types/{id}/reviews', [HomeController::class, 'roomTypeReviews'])->whereNumber('id');
     Route::get('/amenities', [HomeController::class, 'amenities']);
     Route::get('/featured-rooms', [HomeController::class, 'featuredRooms']);
     Route::get('/popular-rooms', [HomeController::class, 'popularRooms']);

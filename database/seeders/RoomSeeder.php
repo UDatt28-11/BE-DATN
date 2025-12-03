@@ -64,6 +64,10 @@ class RoomSeeder extends Seeder
                 'count' => 2,
             ];
             
+            // Đảm bảo tất cả phòng cùng loại có thông tin giống nhau
+            // Description chung cho tất cả phòng cùng loại (không thêm số phòng)
+            $commonDescription = $roomType->description;
+            
             // Phân bổ phòng vào các tầng khác nhau
             // Tầng 0 (tầng trệt): 30% phòng
             // Tầng 1-3 (tầng cao): 60% phòng
@@ -80,12 +84,12 @@ class RoomSeeder extends Seeder
                     'property_id' => $property->id,
                     'room_type_id' => $roomType->id,
                     'name' => $roomType->name . ' ' . $roomIndex,
-                    'description' => $roomType->description . ' Phòng số ' . $roomIndex . '.',
+                    'description' => $commonDescription, // Cùng description cho tất cả phòng cùng loại
                     'floor_number' => 0,
                     'floor_category' => 'ground_floor',
-                    'max_adults' => $config['max_adults'],
-                    'max_children' => $config['max_children'],
-                    'price_per_night' => $config['price'],
+                    'max_adults' => $config['max_adults'], // Cùng max_adults
+                    'max_children' => $config['max_children'], // Cùng max_children
+                    'price_per_night' => $config['price'], // Cùng giá
                     'status' => 'available',
                     'verification_status' => 'verified',
                     'verified_at' => now(),
@@ -99,12 +103,12 @@ class RoomSeeder extends Seeder
                     'property_id' => $property->id,
                     'room_type_id' => $roomType->id,
                     'name' => $roomType->name . ' ' . $roomIndex,
-                    'description' => $roomType->description . ' Phòng số ' . $roomIndex . '.',
+                    'description' => $commonDescription, // Cùng description cho tất cả phòng cùng loại
                     'floor_number' => $currentFloor,
                     'floor_category' => 'upper_floor',
-                    'max_adults' => $config['max_adults'],
-                    'max_children' => $config['max_children'],
-                    'price_per_night' => $config['price'],
+                    'max_adults' => $config['max_adults'], // Cùng max_adults
+                    'max_children' => $config['max_children'], // Cùng max_children
+                    'price_per_night' => $config['price'], // Cùng giá
                     'status' => 'available',
                     'verification_status' => 'verified',
                     'verified_at' => now(),
@@ -120,12 +124,12 @@ class RoomSeeder extends Seeder
                     'property_id' => $property->id,
                     'room_type_id' => $roomType->id,
                     'name' => $roomType->name . ' ' . $roomIndex,
-                    'description' => $roomType->description . ' Phòng số ' . $roomIndex . '.',
+                    'description' => $commonDescription, // Cùng description cho tất cả phòng cùng loại
                     'floor_number' => 4,
                     'floor_category' => 'attic',
-                    'max_adults' => $config['max_adults'],
-                    'max_children' => $config['max_children'],
-                    'price_per_night' => $config['price'],
+                    'max_adults' => $config['max_adults'], // Cùng max_adults
+                    'max_children' => $config['max_children'], // Cùng max_children
+                    'price_per_night' => $config['price'], // Cùng giá
                     'status' => 'available',
                     'verification_status' => 'verified',
                     'verified_at' => now(),

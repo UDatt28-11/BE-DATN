@@ -95,6 +95,8 @@ class HomeController extends Controller
             // Validate query parameters
             $request->validate([
                 'limit' => 'sometimes|integer|min:1|max:20',
+                'check_in' => 'sometimes|date',
+                'check_out' => 'sometimes|date|after:check_in',
             ], [
                 'limit.max' => 'Số lượng bản ghi không được vượt quá 20.',
             ]);
@@ -118,11 +120,30 @@ class HomeController extends Controller
             $roomTypes = $query->get();
 
             // Đếm số lượng rooms cho mỗi room type
-            $roomTypesWithCount = $roomTypes->map(function ($roomType) {
+            $checkIn = $request->get('check_in');
+            $checkOut = $request->get('check_out');
+            
+            // Chỉ xử lý check_in/check_out nếu cả hai đều có giá trị và không rỗng
+            $hasValidDateRange = !empty($checkIn) && !empty($checkOut) && 
+                                 is_string($checkIn) && is_string($checkOut) &&
+                                 strlen(trim($checkIn)) > 0 && strlen(trim($checkOut)) > 0;
+
+            $roomTypesWithCount = $roomTypes->map(function ($roomType) use ($checkIn, $checkOut, $hasValidDateRange) {
                 $roomsQuery = Room::where('room_type_id', $roomType->id);
                 
                 // Chỉ lấy phòng available (bắt buộc)
                 $roomsQuery->where('status', 'available');
+
+                // Nếu có khoảng ngày hợp lệ, loại trừ các phòng đã có booking trùng khoảng ngày
+                if ($hasValidDateRange) {
+                    $roomsQuery->whereDoesntHave('bookingDetails', function ($detailQuery) use ($checkIn, $checkOut) {
+                        $detailQuery->whereHas('bookingOrder', function ($bo) {
+                            $bo->whereNotIn('status', ['cancelled']);
+                        });
+                        $detailQuery->whereDate('check_in_date', '<', $checkOut)
+                            ->whereDate('check_out_date', '>', $checkIn);
+                    });
+                }
                 
                 // Nếu có cột verification_status, ưu tiên lấy phòng đã verified
                 // Nhưng nếu không có phòng verified nào, vẫn lấy phòng available
@@ -167,6 +188,161 @@ class HomeController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Có lỗi xảy ra khi lấy danh sách loại phòng.',
+            ], 500);
+        }
+    }
+
+    /**
+     * Get room type detail by ID (public API)
+     * Lấy chi tiết một loại phòng với đầy đủ thông tin
+     */
+    public function roomTypeDetail(Request $request, string $id): JsonResponse
+    {
+        try {
+            $request->validate([
+                'check_in' => 'sometimes|date',
+                'check_out' => 'sometimes|date|after:check_in',
+            ]);
+
+            $roomType = RoomType::find($id);
+            
+            if (!$roomType) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Không tìm thấy loại phòng.',
+                ], 404);
+            }
+
+            // Load property nếu có
+            if (Schema::hasColumn('room_types', 'property_id')) {
+                $roomType->load('property:id,name,address');
+            }
+
+            $checkIn = $request->get('check_in');
+            $checkOut = $request->get('check_out');
+            
+            // Chỉ xử lý check_in/check_out nếu cả hai đều có giá trị và không rỗng
+            $hasValidDateRange = !empty($checkIn) && !empty($checkOut) && 
+                                 is_string($checkIn) && is_string($checkOut) &&
+                                 strlen(trim($checkIn)) > 0 && strlen(trim($checkOut)) > 0;
+
+            // Lấy một Room mẫu để lấy thông tin chi tiết (price, amenities, images, rating)
+            $sampleRoomQuery = Room::where('room_type_id', $roomType->id)
+                ->where('status', 'available');
+
+            // Nếu có khoảng ngày hợp lệ, chỉ chọn các phòng không bị trùng booking
+            if ($hasValidDateRange) {
+                $sampleRoomQuery->whereDoesntHave('bookingDetails', function ($detailQuery) use ($checkIn, $checkOut) {
+                    $detailQuery->whereHas('bookingOrder', function ($bo) {
+                        $bo->whereNotIn('status', ['cancelled']);
+                    });
+                    $detailQuery->whereDate('check_in_date', '<', $checkOut)
+                        ->whereDate('check_out_date', '>', $checkIn);
+                });
+            }
+
+            if (Schema::hasColumn('rooms', 'verification_status')) {
+                $sampleRoomQuery->where('verification_status', 'verified');
+            }
+
+            $sampleRoom = $sampleRoomQuery->with([
+                'amenities:id,name,filter_category',
+                'images',
+                'reviews' => function ($q) {
+                    if (Schema::hasColumn('reviews', 'status')) {
+                        $q->where('status', 'approved');
+                    }
+                }
+            ])->first();
+
+            // Đếm số lượng phòng available
+            $roomsQuery = Room::where('room_type_id', $roomType->id)
+                ->where('status', 'available');
+
+            if ($hasValidDateRange) {
+                $roomsQuery->whereDoesntHave('bookingDetails', function ($detailQuery) use ($checkIn, $checkOut) {
+                    $detailQuery->whereHas('bookingOrder', function ($bo) {
+                        $bo->whereNotIn('status', ['cancelled']);
+                    });
+                    $detailQuery->whereDate('check_in_date', '<', $checkOut)
+                        ->whereDate('check_out_date', '>', $checkIn);
+                });
+            }
+            
+            if (Schema::hasColumn('rooms', 'verification_status')) {
+                $verifiedCount = (clone $roomsQuery)->where('verification_status', 'verified')->count();
+                $availableCount = $verifiedCount > 0 ? $verifiedCount : $roomsQuery->count();
+            } else {
+                $availableCount = $roomsQuery->count();
+            }
+
+            // Tính rating và reviews count từ tất cả rooms của room type
+            $allRoomIds = Room::where('room_type_id', $roomType->id)->pluck('id')->toArray();
+            $reviewsQuery = Review::whereIn('room_id', $allRoomIds);
+            if (Schema::hasColumn('reviews', 'status')) {
+                $reviewsQuery->where('status', 'approved');
+            }
+            $averageRating = $reviewsQuery->avg('rating') ?? 0;
+            $reviewsCount = $reviewsQuery->count();
+
+            // Build response
+            $response = [
+                'id' => $roomType->id,
+                'name' => $roomType->name,
+                'description' => $roomType->description,
+                'image_url' => $roomType->image_url,
+                'available_count' => $availableCount,
+                'property' => $roomType->relationLoaded('property') && $roomType->property ? [
+                    'id' => $roomType->property->id,
+                    'name' => $roomType->property->name,
+                    'address' => $roomType->property->address,
+                ] : null,
+                'rating' => round($averageRating, 1),
+                'reviews_count' => $reviewsCount,
+            ];
+
+            // Thêm thông tin từ Room mẫu nếu có
+            if ($sampleRoom) {
+                $response['price_per_night'] = (float) $sampleRoom->price_per_night;
+                $response['max_adults'] = $sampleRoom->max_adults;
+                $response['max_children'] = $sampleRoom->max_children;
+                $response['amenities'] = $sampleRoom->amenities->map(function ($amenity) {
+                    return [
+                        'id' => $amenity->id,
+                        'name' => $amenity->name,
+                        'filter_category' => $amenity->filter_category ?? null,
+                    ];
+                });
+                $response['images'] = $sampleRoom->images->map(function ($image) {
+                    return [
+                        'id' => $image->id,
+                        'image_url' => $image->image_url,
+                        'is_primary' => $image->is_primary ?? false,
+                    ];
+                });
+                // Thêm thông tin về floor nếu có
+                if (Schema::hasColumn('rooms', 'floor_number')) {
+                    $response['floor_number'] = $sampleRoom->floor_number;
+                }
+                if (Schema::hasColumn('rooms', 'floor_category')) {
+                    $response['floor_category'] = $sampleRoom->floor_category;
+                }
+            }
+
+            return response()->json([
+                'success' => true,
+                'data' => $response,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('HomeController@roomTypeDetail failed', [
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi lấy thông tin loại phòng.',
             ], 500);
         }
     }
@@ -1051,6 +1227,106 @@ class HomeController extends Controller
             ]);
         } catch (\Exception $e) {
             Log::error('HomeController@propertyReviews failed', [
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi lấy danh sách đánh giá.',
+            ], 500);
+        }
+    }
+
+    /**
+     * Get room type reviews (public API)
+     * Lấy danh sách đánh giá của loại phòng (tổng hợp từ tất cả rooms thuộc room type)
+     */
+    public function roomTypeReviews(Request $request, string $id): JsonResponse
+    {
+        try {
+            $request->validate([
+                'page' => 'sometimes|integer|min:1',
+                'per_page' => 'sometimes|integer|min:1|max:50',
+                'rating' => 'sometimes|integer|min:1|max:5',
+            ]);
+
+            $perPage = (int) ($request->get('per_page', 10));
+            
+            // Get room type
+            $roomType = RoomType::find($id);
+            if (!$roomType) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Không tìm thấy loại phòng.',
+                ], 404);
+            }
+            
+            // Get all room IDs for this room type
+            $roomIds = Room::where('room_type_id', $id)
+                ->where('status', 'available')
+                ->pluck('id')
+                ->toArray();
+            
+            if (empty($roomIds)) {
+                return response()->json([
+                    'success' => true,
+                    'data' => [],
+                    'meta' => [
+                        'pagination' => [
+                            'current_page' => 1,
+                            'per_page' => $perPage,
+                            'total' => 0,
+                            'last_page' => 1,
+                        ],
+                    ],
+                ]);
+            }
+            
+            // Query reviews: lấy tất cả reviews của các rooms thuộc room type này
+            $query = Review::query()
+                ->whereIn('room_id', $roomIds);
+
+            if (Schema::hasColumn('reviews', 'status')) {
+                $query->where('status', 'approved');
+            }
+
+            if ($request->has('rating')) {
+                $query->where('rating', $request->rating);
+            }
+
+            $reviews = $query->with([
+                'user:id,full_name,avatar',
+                'room:id,name',
+                'property:id,name',
+            ])
+            ->latest('reviewed_at')
+            ->paginate($perPage);
+
+            // Calculate average rating
+            $averageRating = Review::whereIn('room_id', $roomIds)
+                ->when(Schema::hasColumn('reviews', 'status'), function($q) {
+                    $q->where('status', 'approved');
+                })
+                ->avg('rating') ?? 0;
+
+            return response()->json([
+                'success' => true,
+                'data' => $reviews->items(),
+                'meta' => [
+                    'pagination' => [
+                        'current_page' => $reviews->currentPage(),
+                        'per_page' => $reviews->perPage(),
+                        'total' => $reviews->total(),
+                        'last_page' => $reviews->lastPage(),
+                    ],
+                    'average_rating' => round($averageRating, 2),
+                    'total_reviews' => $reviews->total(),
+                ],
+            ]);
+        } catch (\Exception $e) {
+            Log::error('HomeController@roomTypeReviews failed', [
                 'message' => $e->getMessage(),
                 'file' => $e->getFile(),
                 'line' => $e->getLine(),

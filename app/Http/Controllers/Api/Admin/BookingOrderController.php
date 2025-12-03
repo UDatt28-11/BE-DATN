@@ -168,8 +168,9 @@ class BookingOrderController extends Controller
             }
             
             // Đảm bảo status có giá trị mặc định
+            // Yêu cầu mới: đơn do khách tự đặt sẽ mặc định là "confirmed" (không còn trạng thái chờ xác nhận)
             if (empty($validated['status'])) {
-                $validated['status'] = 'pending';
+                $validated['status'] = 'confirmed';
             }
             
             // Tạo BookingOrder
@@ -287,6 +288,8 @@ class BookingOrderController extends Controller
                         $hasDetails = true;
                     } elseif ($include === 'invoice' || $include === 'invoices') {
                         $with[] = 'invoices';
+                        $with[] = 'invoices.payments';
+                        $with[] = 'invoices.invoiceItems';
                     } elseif ($include === 'promotions') {
                         $with[] = 'promotions:id,code,description';
                     }
@@ -317,6 +320,8 @@ class BookingOrderController extends Controller
                     'details.bookingServices.service:id,name',
                     'details.checkedInGuests',
                     'invoices',
+                    'invoices.payments',
+                    'invoices.invoiceItems',
                     'promotions:id,code,description'
                 ];
             }
@@ -1004,19 +1009,20 @@ class BookingOrderController extends Controller
             }
 
             // Đảm bảo status có giá trị mặc định
+            // Yêu cầu mới: đơn do khách tự đặt sẽ mặc định là "confirmed" (không còn trạng thái chờ xác nhận)
             if (empty($validated['status'])) {
-                $validated['status'] = 'pending';
+                $validated['status'] = 'confirmed';
             }
 
             DB::beginTransaction();
 
             try {
-                // Tạo BookingOrder
-                $order = BookingOrder::create($validated);
+            // Tạo BookingOrder
+            $order = BookingOrder::create($validated);
 
-                // Tạo các BookingDetail
-                if (!empty($details)) {
-                    foreach ($details as $detail) {
+            // Tạo các BookingDetail
+            if (!empty($details)) {
+                foreach ($details as $detail) {
                         $detailData = [
                             'booking_order_id' => $order->id,
                             'check_in_date' => $detail['check_in_date'],
@@ -1064,8 +1070,45 @@ class BookingOrderController extends Controller
                         }
 
                         BookingDetail::create($detailData);
+                }
+                }
+
+                // Tạo Invoice ngay khi tạo booking (không chờ đến khi tạo payment link)
+                $invoice = \App\Models\Invoice::create([
+                    'booking_order_id' => $order->id,
+                    'issue_date' => now(),
+                    'due_date' => now()->addDays(7),
+                    'total_amount' => 0, // Sẽ tính lại sau khi tạo items
+                    'status' => 'pending',
+                ]);
+
+                // Tạo invoice items từ booking details (tiền phòng)
+                $totalAmount = 0;
+                $order->load('details.room'); // Eager load để tránh N+1 query
+                
+                foreach ($order->details as $detail) {
+                    if ($detail->room) {
+                        // Calculate nights
+                        $checkIn = \Carbon\Carbon::parse($detail->check_in_date);
+                        $checkOut = \Carbon\Carbon::parse($detail->check_out_date);
+                        $nights = max(1, $checkOut->diffInDays($checkIn));
+
+                        $roomPrice = ($detail->room->price_per_night ?? 0) * $nights;
+
+                        \App\Models\InvoiceItem::create([
+                            'invoice_id' => $invoice->id,
+                            'description' => "Phòng {$detail->room->name} - {$nights} đêm",
+                            'quantity' => 1,
+                            'unit_price' => $detail->room->price_per_night ?? 0,
+                            'total_line' => $roomPrice,
+                            'item_type' => 'room_charge',
+                        ]);
+                        $totalAmount += $roomPrice;
                     }
                 }
+
+                // Cập nhật invoice total_amount
+                $invoice->update(['total_amount' => $totalAmount]);
 
                 DB::commit();
             } catch (\Exception $e) {
@@ -1225,8 +1268,26 @@ class BookingOrderController extends Controller
                 ], 400);
             }
 
-            // Tính toán deposit_amount (mặc định 30% của total_amount)
-            $depositAmount = $validated['deposit_amount'] ?? ($booking->total_amount * 0.3);
+            // Chính sách cọc theo tổng tiền:
+            // - Nếu tổng tiền < 1.000.000đ  => cọc 100% (thanh toán full)
+            // - Ngược lại                   => cọc 50%
+            $totalAmount = (float) ($booking->total_amount ?? 0);
+            $isLowValue = $totalAmount > 0 && $totalAmount < 1000000; // < 1 triệu
+
+            if (isset($validated['deposit_amount']) && $validated['deposit_amount'] !== null) {
+                $depositAmount = (float) $validated['deposit_amount'];
+            } else {
+                if ($isLowValue) {
+                    $depositAmount = $totalAmount;
+                } else {
+                    $depositAmount = $totalAmount * 0.5;
+                }
+            }
+
+            // Với đơn giá trị thấp (<1 triệu), luôn ép về 100% dù client gửi ít hơn
+            if ($isLowValue && $depositAmount < $totalAmount) {
+                $depositAmount = $totalAmount;
+            }
             
             // Đảm bảo deposit_amount không vượt quá total_amount
             if ($depositAmount > $booking->total_amount) {
@@ -1364,19 +1425,18 @@ class BookingOrderController extends Controller
                 ], 403);
             }
 
-            // Chỉ cho phép hủy khi đang pending hoặc confirmed
-            if (!in_array($booking->status, ['pending', 'confirmed'], true)) {
+            // Chỉ chặn hủy nếu đơn đã có check-in / checkout hoàn tất
+            // Cho phép hủy khi CHƯA check-in: pending, confirmed, hoặc đang chờ check-in
+            if (in_array($booking->status, [
+                'checked_in',
+                'partially_checked_in',
+                'checked_out',
+                'partially_checked_out',
+                'completed',
+            ], true)) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Không thể hủy đơn ở trạng thái hiện tại.',
-                ], 400);
-            }
-
-            // Nếu đã có thanh toán (paid_amount > 0) thì không cho user tự hủy
-            if (($booking->paid_amount ?? 0) > 0) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Đơn đã có thanh toán, vui lòng liên hệ hỗ trợ để hủy.',
+                    'message' => 'Không thể hủy đơn đã check-in hoặc đã hoàn tất.',
                 ], 400);
             }
 
@@ -1805,7 +1865,8 @@ class BookingOrderController extends Controller
                     'details.room:id,name',
                     'details.checkedInGuests', // Eager load để kiểm tra
                 ])
-                ->where('status', 'confirmed')
+                // Bao gồm cả đơn đã check-in một phần, miễn là vẫn còn phòng chưa check-in
+                ->whereIn('status', ['confirmed', 'partially_checked_in'])
                 ->whereIn('payment_status', ['partial', 'paid'])
                 // Bỏ filter ngày check-in để hiển thị tất cả booking đã confirmed và sẵn sàng check-in
                 // Admin có thể xử lý check-in cho bất kỳ booking nào đã được xác nhận cọc
@@ -1818,22 +1879,30 @@ class BookingOrderController extends Controller
                 ->values(); // Reset keys sau khi sort
 
                 // Chuyển đổi booking thành format tương tự CheckInRequest để hiển thị
+                // Chỉ thêm booking nếu có ít nhất 1 detail chưa check-in
                 foreach ($readyBookings as $booking) {
+                    $hasUncheckedInDetail = false;
                     foreach ($booking->details as $detail) {
-                        // Chỉ thêm nếu detail chưa có checked-in guests
                         if ($detail->checkedInGuests->isEmpty()) {
+                            $hasUncheckedInDetail = true;
+                            break;
+                        }
+                    }
+                    
+                    // Chỉ thêm booking vào result nếu còn phòng chưa check-in
+                    // Nhưng booking_order sẽ chứa TẤT CẢ details (kể cả đã check-in) để frontend hiển thị đúng
+                    if ($hasUncheckedInDetail) {
                             $result[] = (object) [
-                                'id' => 'booking_' . $booking->id . '_detail_' . $detail->id,
+                            'id' => 'ready_booking_' . $booking->id,
                                 'type' => 'ready_booking', // Đánh dấu đây là booking sẵn sàng check-in
                                 'booking_order_id' => $booking->id,
-                                'booking_detail_id' => $detail->id,
-                                'booking_order' => $booking,
-                                'booking_detail' => $detail,
+                            'booking_detail_id' => null, // Không có detail cụ thể vì đây là booking-level
+                            'booking_order' => $booking, // Chứa TẤT CẢ details với checkedInGuests
+                            'booking_detail' => null,
                                 'full_name' => $booking->customer_name,
                                 'status' => 'ready_for_checkin',
                                 'created_at' => $booking->created_at,
                             ];
-                        }
                     }
                 }
             }
@@ -2358,6 +2427,117 @@ class BookingOrderController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Có lỗi xảy ra khi checkout.',
+                'error' => config('app.debug') ? $e->getMessage() : null,
+            ], 500);
+        }
+    }
+
+    /**
+     * Get list of checked-in guests (Quản lý lưu trú)
+     */
+    public function getCheckedInGuests(Request $request): JsonResponse
+    {
+        try {
+            $request->validate([
+                'page' => 'sometimes|integer|min:1',
+                'per_page' => 'sometimes|integer|min:1|max:100',
+                'search' => 'sometimes|string|max:255',
+                'booking_id' => 'sometimes|exists:booking_orders,id',
+                'room_id' => 'sometimes|exists:rooms,id',
+            ]);
+
+            $perPage = (int) ($request->get('per_page', 15));
+            
+            $query = \App\Models\CheckedInGuest::with([
+                'detail.bookingOrder:id,order_code,customer_name,customer_phone',
+                'detail.room:id,name,room_type_id',
+                'detail.room.roomType:id,name',
+            ])
+            ->whereHas('detail.bookingOrder', function($q) {
+                // Chỉ lấy guests từ booking đã check-in (không bị hủy)
+                $q->whereNotIn('status', ['cancelled']);
+            })
+            ->orderBy('check_in_time', 'desc');
+
+            // Filter by search (tên khách, số CMND/CCCD, mã booking)
+            if ($request->has('search') && $request->search) {
+                $search = $request->search;
+                $query->where(function($q) use ($search) {
+                    $q->where('full_name', 'like', "%{$search}%")
+                      ->orWhere('identity_number', 'like', "%{$search}%")
+                      ->orWhereHas('detail.bookingOrder', function($q) use ($search) {
+                          $q->where('order_code', 'like', "%{$search}%");
+                      });
+                });
+            }
+
+            // Filter by booking_id
+            if ($request->has('booking_id')) {
+                $query->whereHas('detail', function($q) use ($request) {
+                    $q->where('booking_order_id', $request->booking_id);
+                });
+            }
+
+            // Filter by room_id
+            if ($request->has('room_id')) {
+                $query->whereHas('detail', function($q) use ($request) {
+                    $q->where('room_id', $request->room_id);
+                });
+            }
+
+            $guests = $query->paginate($perPage);
+
+            $result = collect($guests->items())->map(function($guest) {
+                $detail = $guest->detail;
+                $booking = $detail->bookingOrder ?? null;
+                $room = $detail->room ?? null;
+
+                return [
+                    'id' => $guest->id,
+                    'full_name' => $guest->full_name,
+                    'date_of_birth' => $guest->date_of_birth?->format('Y-m-d'),
+                    'identity_type' => $guest->identity_type,
+                    'identity_number' => $guest->identity_number,
+                    'identity_image_url' => $guest->identity_image_url,
+                    'check_in_time' => $guest->check_in_time?->toISOString(),
+                    'booking' => $booking ? [
+                        'id' => $booking->id,
+                        'order_code' => $booking->order_code,
+                        'customer_name' => $booking->customer_name,
+                        'customer_phone' => $booking->customer_phone,
+                    ] : null,
+                    'room' => $room ? [
+                        'id' => $room->id,
+                        'name' => $room->name,
+                        'room_type' => $room->roomType->name ?? null,
+                    ] : null,
+                    'check_in_date' => $detail->check_in_date?->format('Y-m-d'),
+                    'check_out_date' => $detail->check_out_date?->format('Y-m-d'),
+                ];
+            });
+
+            return response()->json([
+                'success' => true,
+                'data' => $result,
+                'meta' => [
+                    'pagination' => [
+                        'page' => $guests->currentPage(),
+                        'per_page' => $guests->perPage(),
+                        'total' => $guests->total(),
+                        'last_page' => $guests->lastPage(),
+                    ],
+                ],
+            ]);
+        } catch (\Exception $e) {
+            Log::error('BookingOrderController@getCheckedInGuests failed', [
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi lấy danh sách khách lưu trú.',
                 'error' => config('app.debug') ? $e->getMessage() : null,
             ], 500);
         }

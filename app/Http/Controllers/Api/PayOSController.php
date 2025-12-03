@@ -7,6 +7,7 @@ use App\Services\PayOSService;
 use App\Models\BookingOrder;
 use App\Models\Payment;
 use App\Models\Invoice;
+use App\Models\InvoiceItem;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Log;
@@ -65,13 +66,14 @@ class PayOSController extends Controller
             }
 
             // Tạo payment link
-            $frontendUrl = config('app.frontend_url', env('FRONTEND_URL', 'http://localhost:5173'));
+            // Dùng backend URL làm returnUrl/cancelUrl (sẽ redirect về localhost)
+            $backendUrl = config('app.url', env('APP_URL', 'http://localhost:8000'));
             $paymentData = [
                 'orderCode' => $orderCode,
                 'amount' => (int) $validated['amount'],
                 'description' => $validated['description'] ?? "Thanh toán đặt cọc đơn #{$booking->order_code}",
-                'returnUrl' => $frontendUrl . '/payment/success?booking_id=' . $booking->id,
-                'cancelUrl' => $frontendUrl . '/payment/cancel?booking_id=' . $booking->id,
+                'returnUrl' => $backendUrl . '/api/payment/redirect?booking_id=' . $booking->id . '&type=success',
+                'cancelUrl' => $backendUrl . '/api/payment/redirect?booking_id=' . $booking->id . '&type=cancel',
                 'items' => [
                     [
                         'name' => "Đặt cọc đơn {$booking->order_code}",
@@ -120,13 +122,59 @@ class PayOSController extends Controller
                 $invoice = $booking->invoices()->first();
                 
                 if (!$invoice) {
+                    // Tạo invoice mới
                     $invoice = Invoice::create([
                         'booking_order_id' => $booking->id,
                         'issue_date' => now(),
                         'due_date' => now()->addDays(7),
-                        'total_amount' => $booking->total_amount,
+                        'total_amount' => 0, // Sẽ tính lại sau khi tạo items
                         'status' => 'pending',
                     ]);
+
+                    // Tạo invoice items từ booking details (tiền phòng)
+                    $totalAmount = 0;
+                    $booking->load('details.room'); // Eager load để tránh N+1 query
+                    
+                    foreach ($booking->details as $detail) {
+                        if ($detail->room) {
+                            // Calculate nights
+                            $checkIn = \Carbon\Carbon::parse($detail->check_in_date);
+                            $checkOut = \Carbon\Carbon::parse($detail->check_out_date);
+                            $nights = max(1, $checkOut->diffInDays($checkIn));
+
+                            $roomPrice = ($detail->room->price_per_night ?? 0) * $nights;
+
+                            InvoiceItem::create([
+                                'invoice_id' => $invoice->id,
+                                'description' => "Phòng {$detail->room->name} - {$nights} đêm",
+                                'quantity' => 1,
+                                'unit_price' => $detail->room->price_per_night ?? 0,
+                                'total_line' => $roomPrice,
+                                'item_type' => 'room_charge',
+                            ]);
+                            $totalAmount += $roomPrice;
+                        }
+                    }
+
+                    // Trừ tiền cọc đã thanh toán (nếu có) - trường hợp đã thanh toán trước đó
+                    $paidAmount = $booking->paid_amount ?? 0;
+                    if ($paidAmount > 0) {
+                        InvoiceItem::create([
+                            'invoice_id' => $invoice->id,
+                            'description' => 'Tiền cọc đã thanh toán',
+                            'quantity' => 1,
+                            'unit_price' => -$paidAmount, // Giá trị âm để trừ
+                            'total_line' => -$paidAmount, // Giá trị âm để trừ
+                            'item_type' => 'deposit',
+                        ]);
+                        $totalAmount -= $paidAmount;
+                    }
+
+                    // Đảm bảo total_amount không âm
+                    $finalAmount = max(0, $totalAmount);
+
+                    // Update invoice total_amount
+                    $invoice->update(['total_amount' => $finalAmount]);
                 }
 
                 // Tạo payment record với status pending
@@ -306,23 +354,124 @@ class PayOSController extends Controller
             if ($booking && $isSuccess) {
                 // Cập nhật paid_amount và payment_status của booking
                 $newPaidAmount = ($booking->paid_amount ?? 0) + $payment->amount;
-                $paymentStatus = 'partial';
+                $bookingPaymentStatus = 'partial';
                 
                 if ($newPaidAmount >= $booking->total_amount) {
-                    $paymentStatus = 'paid';
+                    $bookingPaymentStatus = 'paid';
                     $newPaidAmount = $booking->total_amount;
                 }
 
                 $booking->update([
                     'paid_amount' => $newPaidAmount,
-                    'payment_status' => $paymentStatus,
+                    'payment_status' => $bookingPaymentStatus,
                     'status' => 'confirmed',
                 ]);
 
+                // Đảm bảo invoice có invoice items cho tiền phòng (nếu chưa có)
+                $hasRoomChargeItems = InvoiceItem::where('invoice_id', $invoice->id)
+                    ->where('item_type', 'room_charge')
+                    ->exists();
+
+                if (!$hasRoomChargeItems) {
+                    // Tạo invoice items cho tiền phòng từ booking details
+                    $booking->load('details.room');
+                    
+                    foreach ($booking->details as $detail) {
+                        if ($detail->room) {
+                            $checkIn = \Carbon\Carbon::parse($detail->check_in_date);
+                            $checkOut = \Carbon\Carbon::parse($detail->check_out_date);
+                            $nights = max(1, $checkOut->diffInDays($checkIn));
+                            $roomPrice = ($detail->room->price_per_night ?? 0) * $nights;
+
+                            InvoiceItem::create([
+                                'invoice_id' => $invoice->id,
+                                'description' => "Phòng {$detail->room->name} - {$nights} đêm",
+                                'quantity' => 1,
+                                'unit_price' => $detail->room->price_per_night ?? 0,
+                                'total_line' => $roomPrice,
+                                'item_type' => 'room_charge',
+                            ]);
+                        }
+                    }
+                }
+
+                // Kiểm tra xem đã có InvoiceItem cho deposit chưa
+                $existingDepositItem = InvoiceItem::where('invoice_id', $invoice->id)
+                    ->where('item_type', 'deposit')
+                    ->first();
+
+                Log::info('PayOS webhook: Checking deposit item', [
+                    'invoice_id' => $invoice->id,
+                    'has_existing_deposit' => $existingDepositItem ? true : false,
+                    'payment_amount' => $payment->amount,
+                    'new_paid_amount' => $newPaidAmount,
+                ]);
+
+                if (!$existingDepositItem) {
+                    // Tạo InvoiceItem cho deposit (giá trị âm để trừ vào tổng tiền)
+                    try {
+                        $depositItem = InvoiceItem::create([
+                            'invoice_id' => $invoice->id,
+                            'description' => 'Tiền cọc đã thanh toán (PayOS)',
+                            'quantity' => 1,
+                            'unit_price' => -$payment->amount, // Giá trị âm để trừ
+                            'total_line' => -$payment->amount, // Giá trị âm để trừ
+                            'item_type' => 'deposit',
+                        ]);
+                        
+                        Log::info('PayOS webhook: Deposit item created successfully', [
+                            'deposit_item_id' => $depositItem->id,
+                            'invoice_id' => $invoice->id,
+                            'amount' => -$payment->amount,
+                        ]);
+                    } catch (\Exception $e) {
+                        Log::error('PayOS webhook: Failed to create deposit item', [
+                            'invoice_id' => $invoice->id,
+                            'error' => $e->getMessage(),
+                            'trace' => $e->getTraceAsString(),
+                        ]);
+                        throw $e; // Re-throw để rollback transaction
+                    }
+                } else {
+                    // Nếu đã có deposit item, cập nhật nó với tổng số tiền đã trả
+                    $existingDepositItem->update([
+                        'description' => 'Tiền cọc đã thanh toán (PayOS)',
+                        'unit_price' => -$newPaidAmount,
+                        'total_line' => -$newPaidAmount,
+                    ]);
+                    
+                    Log::info('PayOS webhook: Deposit item updated', [
+                        'deposit_item_id' => $existingDepositItem->id,
+                        'invoice_id' => $invoice->id,
+                        'new_amount' => -$newPaidAmount,
+                    ]);
+                }
+
+                // Tính lại invoice total_amount từ tất cả invoice items
+                $allItems = InvoiceItem::where('invoice_id', $invoice->id)->get();
+                $newTotalAmount = max(0, $allItems->sum('total_line'));
+                
+                Log::info('PayOS webhook: Recalculating invoice total', [
+                    'invoice_id' => $invoice->id,
+                    'items_count' => $allItems->count(),
+                    'items_sum' => $allItems->sum('total_line'),
+                    'new_total_amount' => $newTotalAmount,
+                ]);
+                
+                $invoice->update(['total_amount' => $newTotalAmount]);
+
                 // Cập nhật invoice status
-                if ($paymentStatus === 'paid') {
+                if ($bookingPaymentStatus === 'paid') {
                     $invoice->update(['status' => 'paid']);
                 }
+
+                Log::info('PayOS webhook: Invoice updated with deposit', [
+                    'invoice_id' => $invoice->id,
+                    'payment_amount' => $payment->amount,
+                    'new_paid_amount' => $newPaidAmount,
+                    'new_total_amount' => $newTotalAmount,
+                    'invoice_items_count' => $allItems->count(),
+                ]);
             }
 
             DB::commit();

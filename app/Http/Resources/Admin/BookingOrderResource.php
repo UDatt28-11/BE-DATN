@@ -83,6 +83,35 @@ class BookingOrderResource extends JsonResource
                         }
                     }
                     
+                    // Lấy thông tin guests đã check-in
+                    $guests = [];
+                    if ($detail->relationLoaded('checkedInGuests') && $detail->checkedInGuests) {
+                        $guests = $detail->checkedInGuests->map(function($guest) {
+                            return [
+                                'id' => $guest->id,
+                                'full_name' => $guest->full_name,
+                                'date_of_birth' => $guest->date_of_birth?->format('Y-m-d'),
+                                'identity_type' => $guest->identity_type,
+                                'identity_number' => $guest->identity_number,
+                                'identity_image_url' => $guest->identity_image_url,
+                                'check_in_time' => $guest->check_in_time?->toISOString(),
+                            ];
+                        })->values()->all();
+                    } elseif ($detail->relationLoaded('guests') && $detail->guests) {
+                        // Fallback nếu dùng alias 'guests'
+                        $guests = $detail->guests->map(function($guest) {
+                            return [
+                                'id' => $guest->id,
+                                'full_name' => $guest->full_name,
+                                'date_of_birth' => $guest->date_of_birth?->format('Y-m-d'),
+                                'identity_type' => $guest->identity_type,
+                                'identity_number' => $guest->identity_number,
+                                'identity_image_url' => $guest->identity_image_url,
+                                'check_in_time' => $guest->check_in_time?->toISOString(),
+                            ];
+                        })->values()->all();
+                    }
+                    
                     return [
                         'id' => $detail->id,
                         'room' => $room,
@@ -92,6 +121,7 @@ class BookingOrderResource extends JsonResource
                         'num_children' => $detail->num_children,
                         'sub_total' => $detail->sub_total,
                         'status' => $detail->status,
+                        'guests' => $guests, // Thông tin khách đã check-in
                     ];
                 });
             }),
@@ -126,22 +156,37 @@ class BookingOrderResource extends JsonResource
                     return [];
                 }
                 return $this->invoices->map(function($invoice) {
-                    // Tính tổng tiền đã thanh toán từ payments
+                    // Tính tổng tiền đã thanh toán từ payments thành công
                     $paidAmount = 0;
                     if ($invoice->relationLoaded('payments')) {
                         $paidAmount = $invoice->payments
-                            ->where('status', 'success')
+                            ->whereIn('status', ['success', 'paid'])
                             ->sum('amount');
                     }
                     
+                    // Tính tổng room_charge từ invoice items (không bao gồm deposit)
+                    $roomChargeTotal = 0;
+                    if ($invoice->relationLoaded('invoiceItems')) {
+                        $roomChargeTotal = $invoice->invoiceItems
+                            ->where('item_type', 'room_charge')
+                            ->sum('total_line');
+                    } else {
+                        // Nếu chưa load invoiceItems, dùng booking.total_amount làm fallback
+                        $roomChargeTotal = $this->total_amount ?? 0;
+                    }
+                    
+                    // remaining_amount = tổng room_charge - tổng payments thành công
+                    $remainingAmount = (int) round(max(0, $roomChargeTotal - $paidAmount));
+                    $invoiceTotal = $invoice->total_amount ?? 0;
+                    
                     return [
                         'id' => $invoice->id,
-                        'total_amount' => (int) round($invoice->total_amount ?? 0),
+                        'total_amount' => (int) round($invoiceTotal),
                         'status' => $invoice->status ?? 'pending',
                         'issue_date' => $invoice->issue_date?->format('Y-m-d'),
                         'due_date' => $invoice->due_date?->format('Y-m-d'),
                         'paid_amount' => (int) round($paidAmount),
-                        'remaining_amount' => (int) round(max(0, ($invoice->total_amount ?? 0) - $paidAmount)),
+                        'remaining_amount' => $remainingAmount,
                         'payments' => $invoice->whenLoaded('payments', function() use ($invoice) {
                             return $invoice->payments->map(function($payment) {
                                 return [
@@ -162,23 +207,48 @@ class BookingOrderResource extends JsonResource
     /**
      * Tính số tiền còn phải thanh toán
      * Ưu tiên tính từ invoice nếu có, nếu không thì tính từ booking
+     * 
+     * Logic đúng:
+     * - invoice.total_amount = tổng tất cả invoice items (room_charge - deposit)
+     * - Tổng room_charge = tổng các invoice items có item_type = 'room_charge'
+     * - remaining_amount = tổng room_charge - tổng payments thành công
+     * 
+     * Ví dụ:
+     * - Room charge: 1,000,000
+     * - Deposit: -500,000 (đã cọc, giá trị âm trong invoice items)
+     * - Invoice total_amount = 500,000 (1,000,000 - 500,000)
+     * - Payment 1: 500,000 (deposit payment)
+     * - Payment 2: 500,000 (full payment)
+     * - Tổng payments = 1,000,000
+     * - Remaining = 1,000,000 - 1,000,000 = 0 (đúng)
      */
     private function calculateRemainingAmount(): int
     {
         // Nếu có invoice, tính dựa trên invoice
         if ($this->relationLoaded('invoices') && $this->invoices->isNotEmpty()) {
             $invoice = $this->invoices->first();
-            $invoiceTotal = $invoice->total_amount ?? 0;
             
-            // Tính tổng tiền đã thanh toán từ payments
+            // Tính tổng tiền đã thanh toán từ payments thành công
             $paidAmount = 0;
             if ($invoice->relationLoaded('payments')) {
                 $paidAmount = $invoice->payments
-                    ->where('status', 'success')
+                    ->whereIn('status', ['success', 'paid'])
                     ->sum('amount');
             }
             
-            return (int) round(max(0, $invoiceTotal - $paidAmount));
+            // Tính tổng room_charge từ invoice items (không bao gồm deposit)
+            $roomChargeTotal = 0;
+            if ($invoice->relationLoaded('invoiceItems')) {
+                $roomChargeTotal = $invoice->invoiceItems
+                    ->where('item_type', 'room_charge')
+                    ->sum('total_line');
+            } else {
+                // Nếu chưa load invoiceItems, dùng booking.total_amount làm fallback
+                $roomChargeTotal = $this->total_amount ?? 0;
+            }
+            
+            // remaining_amount = tổng room_charge - tổng payments thành công
+            return (int) round(max(0, $roomChargeTotal - $paidAmount));
         }
         
         // Nếu chưa có invoice, tính dựa trên booking
