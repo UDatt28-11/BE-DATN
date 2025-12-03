@@ -15,6 +15,8 @@ class BookingService extends Model
         'service_id',
         'quantity',
         'price_at_booking',
+        'status',
+        'notes',
     ];
 
     protected $casts = [

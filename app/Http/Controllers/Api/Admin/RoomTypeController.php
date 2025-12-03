@@ -101,7 +101,7 @@ class RoomTypeController extends Controller
             ]);
 
             $perPage = (int) ($request->get('per_page', self::DEFAULT_PER_PAGE));
-            $query = RoomType::query()->with('property:id,name');
+            $query = RoomType::query()->with(['property:id,name', 'images']);
 
             // Filter by property_id
             if ($request->has('property_id')) {
@@ -175,7 +175,7 @@ class RoomTypeController extends Controller
             ]);
 
             $perPage = (int) ($request->get('per_page', self::DEFAULT_PER_PAGE));
-            $query = RoomType::onlyTrashed()->with('property:id,name');
+            $query = RoomType::onlyTrashed()->with(['property:id,name', 'images']);
 
             if ($request->has('property_id')) {
                 $query->where('property_id', $request->property_id);
@@ -262,7 +262,7 @@ class RoomTypeController extends Controller
             
             return response()->json([
                 'success' => true,
-                'data' => $roomType->load('property:id,name'),
+                'data' => $roomType->load(['property:id,name', 'images']),
             ]);
         } catch (\Exception $e) {
             Log::error('RoomTypeController@show failed', [
@@ -671,6 +671,7 @@ class RoomTypeController extends Controller
         try {
             $roomType->load([
                 'property:id,name',
+                'images',
                 'rooms.amenities:id,name,type,icon_url'
             ]);
 

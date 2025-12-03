@@ -63,23 +63,42 @@ class BookingOrderResource extends JsonResource
                         $room = [
                             'id' => $detail->room->id,
                             'name' => $detail->room->name,
+                            'property_id' => $detail->room->property_id, // Thêm property_id trực tiếp
                             'room_type' => $detail->room->relationLoaded('roomType') && $detail->room->roomType 
                                 ? $detail->room->roomType->name 
                                 : null,
                             'property' => $detail->room->relationLoaded('property') && $detail->room->property 
-                                ? $detail->room->property->name 
-                                : null,
+                                ? [
+                                    'id' => $detail->room->property->id,
+                                    'name' => $detail->room->property->name,
+                                ]
+                                : ($detail->room->property_id ? [
+                                    'id' => $detail->room->property_id,
+                                    'name' => null, // Không có name nếu chưa load relationship
+                                ] : null),
                         ];
                         
-                        // Thêm images nếu đã được load
-                        if ($detail->room->relationLoaded('images')) {
-                            $room['images'] = $detail->room->images->map(function($image) {
-                                return [
-                                    'id' => $image->id,
-                                    'url' => $image->image_url ?? $image->web_view_link ?? null,
-                                    'is_primary' => $image->is_primary ?? false,
-                                ];
-                            })->values()->all();
+                        // Thêm images từ roomType nếu đã được load
+                        // Images bây giờ thuộc về roomType, không phải room
+                        try {
+                            if ($detail->room->relationLoaded('roomType') && 
+                                $detail->room->roomType && 
+                                $detail->room->roomType->relationLoaded('images') &&
+                                $detail->room->roomType->images) {
+                                $room['images'] = $detail->room->roomType->images->map(function($image) {
+                                    return [
+                                        'id' => $image->id,
+                                        'url' => $image->image_url ?? $image->web_view_link ?? null,
+                                        'is_primary' => $image->is_primary ?? false,
+                                    ];
+                                })->values()->all();
+                            }
+                        } catch (\Exception $e) {
+                            // Nếu có lỗi khi load images, bỏ qua và không thêm images
+                            \Illuminate\Support\Facades\Log::warning('Error loading roomType images in BookingOrderResource', [
+                                'detail_id' => $detail->id,
+                                'error' => $e->getMessage(),
+                            ]);
                         }
                     }
                     
@@ -95,6 +114,27 @@ class BookingOrderResource extends JsonResource
                                 'identity_number' => $guest->identity_number,
                                 'identity_image_url' => $guest->identity_image_url,
                                 'check_in_time' => $guest->check_in_time?->toISOString(),
+                            ];
+                        })->values()->all();
+                    }
+                    
+                    // Lấy thông tin booking services
+                    $bookingServices = [];
+                    if ($detail->relationLoaded('bookingServices') && $detail->bookingServices) {
+                        $bookingServices = $detail->bookingServices->map(function($bs) {
+                            return [
+                                'id' => $bs->id,
+                                'service_id' => $bs->service_id,
+                                'quantity' => $bs->quantity,
+                                'price_at_booking' => $bs->price_at_booking,
+                                'status' => $bs->status,
+                                'notes' => $bs->notes,
+                                'service' => $bs->relationLoaded('service') && $bs->service ? [
+                                    'id' => $bs->service->id,
+                                    'name' => $bs->service->name,
+                                    'price' => $bs->service->price,
+                                    'unit' => $bs->service->unit,
+                                ] : null,
                             ];
                         })->values()->all();
                     } elseif ($detail->relationLoaded('guests') && $detail->guests) {
@@ -122,6 +162,7 @@ class BookingOrderResource extends JsonResource
                         'sub_total' => $detail->sub_total,
                         'status' => $detail->status,
                         'guests' => $guests, // Thông tin khách đã check-in
+                        'booking_services' => $bookingServices, // Thông tin dịch vụ đã yêu cầu
                     ];
                 });
             }),

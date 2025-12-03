@@ -184,13 +184,18 @@ class QueryService
             if (in_array('details.room', $include, true)) {
                 // Load nested relations đúng cách
                 $relations[] = 'details.room';
-                // Nếu có details.room.images, load thêm images
-                if (in_array('details.room.images', $include, true)) {
-                    $relations[] = 'details.room.images';
+                $relations[] = 'details.room.roomType'; // Load roomType để có thể access images
+                // Nếu có details.room.images hoặc details.room.roomType.images, load thêm images từ roomType
+                if (in_array('details.room.images', $include, true) || in_array('details.room.roomType.images', $include, true)) {
+                    $relations[] = 'details.room.roomType.images';
                 }
             }
             if (in_array('details.guests', $include, true)) {
                 $relations[] = 'details.guests';
+            }
+            // Alias cho checkedInGuests
+            if (in_array('details.checkedInGuests', $include, true)) {
+                $relations[] = 'details.checkedInGuests';
             }
         }
         

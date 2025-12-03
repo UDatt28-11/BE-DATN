@@ -1647,11 +1647,21 @@ class BookingOrderController extends Controller
             if (in_array('details', $include, true)) {
                 $relations[] = 'details';
                 $relations[] = 'details.room';
-                if (in_array('details.room.images', $include, true)) {
-                    $relations[] = 'details.room.images';
+                $relations[] = 'details.room.property'; // Load property để có thể access property_id
+                $relations[] = 'details.room.roomType'; // Load roomType để có thể access images
+                $relations[] = 'details.room.roomType.property'; // Load property từ roomType nếu cần
+                // Load booking services để hiển thị trong checkout
+                $relations[] = 'details.bookingServices.service';
+                // Nếu có details.room.images hoặc details.room.roomType.images, load thêm images từ roomType
+                if (in_array('details.room.images', $include, true) || in_array('details.room.roomType.images', $include, true)) {
+                    $relations[] = 'details.room.roomType.images';
                 }
                 if (in_array('details.guests', $include, true)) {
                     $relations[] = 'details.guests';
+                }
+                // Alias cho checkedInGuests
+                if (in_array('details.checkedInGuests', $include, true)) {
+                    $relations[] = 'details.checkedInGuests';
                 }
             }
             
@@ -1680,14 +1690,23 @@ class BookingOrderController extends Controller
             ], 404);
         } catch (\Exception $e) {
             Log::error('BookingOrderController@showUser failed', [
+                'booking_id' => $id,
+                'user_id' => $user->id ?? null,
+                'include' => $request->get('include'),
                 'message' => $e->getMessage(),
                 'file' => $e->getFile(),
                 'line' => $e->getLine(),
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return response()->json([
                 'success' => false,
                 'message' => 'Có lỗi xảy ra khi lấy chi tiết đơn đặt phòng.',
+                'error' => config('app.debug') ? [
+                    'message' => $e->getMessage(),
+                    'file' => $e->getFile(),
+                    'line' => $e->getLine(),
+                ] : null,
             ], 500);
         }
     }
@@ -1892,17 +1911,20 @@ class BookingOrderController extends Controller
                     // Chỉ thêm booking vào result nếu còn phòng chưa check-in
                     // Nhưng booking_order sẽ chứa TẤT CẢ details (kể cả đã check-in) để frontend hiển thị đúng
                     if ($hasUncheckedInDetail) {
-                            $result[] = (object) [
+                        // Serialize booking qua BookingOrderResource để đảm bảo checkedInGuests được map thành guests
+                        $bookingArray = (new BookingOrderResource($booking))->toArray($request);
+                        
+                        $result[] = (object) [
                             'id' => 'ready_booking_' . $booking->id,
-                                'type' => 'ready_booking', // Đánh dấu đây là booking sẵn sàng check-in
-                                'booking_order_id' => $booking->id,
+                            'type' => 'ready_booking', // Đánh dấu đây là booking sẵn sàng check-in
+                            'booking_order_id' => $booking->id,
                             'booking_detail_id' => null, // Không có detail cụ thể vì đây là booking-level
-                            'booking_order' => $booking, // Chứa TẤT CẢ details với checkedInGuests
+                            'booking_order' => $bookingArray, // Sử dụng serialized data để đảm bảo guests được map đúng
                             'booking_detail' => null,
-                                'full_name' => $booking->customer_name,
-                                'status' => 'ready_for_checkin',
-                                'created_at' => $booking->created_at,
-                            ];
+                            'full_name' => $booking->customer_name,
+                            'status' => 'ready_for_checkin',
+                            'created_at' => $booking->created_at,
+                        ];
                     }
                 }
             }
@@ -2025,6 +2047,10 @@ class BookingOrderController extends Controller
 
             // Kiểm tra xem tất cả phòng đã check-in chưa
             $booking = $checkInRequest->bookingOrder;
+            // Refresh booking model để có dữ liệu mới nhất
+            $booking->refresh();
+            $booking->load('details');
+            
             $totalDetails = $booking->details()->count();
             $checkedInCount = $booking->details()->where('status', 'checked_in')->count();
             
@@ -2221,6 +2247,10 @@ class BookingOrderController extends Controller
                 }
             }
 
+            // Refresh booking model để có dữ liệu mới nhất
+            $booking->refresh();
+            $booking->load('details');
+
             // Kiểm tra xem tất cả phòng đã check-in chưa
             $totalDetails = $booking->details()->count();
             $checkedInCount = $booking->details()->where('status', 'checked_in')->count();
@@ -2265,6 +2295,136 @@ class BookingOrderController extends Controller
     }
 
     /**
+     * User tạo checkout request
+     * User gửi yêu cầu checkout, admin/staff sẽ xử lý và approve
+     */
+    public function requestCheckOut(Request $request, string $id): JsonResponse
+    {
+        try {
+            $user = $request->user();
+            
+            if (!$user) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Unauthorized',
+                ], 401);
+            }
+
+            // Validate request
+            $request->validate([
+                'booking_detail_ids' => 'required|array|min:1',
+                'booking_detail_ids.*' => 'required|exists:booking_details,id',
+                'notes' => 'nullable|string|max:1000',
+            ]);
+
+            DB::beginTransaction();
+
+            $booking = BookingOrder::with(['details.room'])->findOrFail($id);
+
+            // Kiểm tra booking có thuộc về user hiện tại không
+            if ($booking->guest_id !== $user->id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Bạn không có quyền tạo yêu cầu checkout cho đơn đặt phòng này.',
+                ], 403);
+            }
+
+            // Kiểm tra booking có thể checkout không (phải đã check-in)
+            if (!in_array($booking->status, ['checked_in', 'partially_checked_in', 'partially_checked_out'])) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Đơn đặt phòng này không thể checkout. Trạng thái hiện tại: ' . $booking->status,
+                ], 400);
+            }
+
+            $checkoutRequestModel = \App\Models\CheckoutRequest::class;
+            $createdRequests = [];
+
+            // Tạo checkout request cho từng booking detail
+            foreach ($request->booking_detail_ids as $bookingDetailId) {
+                $bookingDetail = \App\Models\BookingDetail::findOrFail($bookingDetailId);
+
+                // Kiểm tra booking detail thuộc về booking order này
+                if ($bookingDetail->booking_order_id != $booking->id) {
+                    throw new \Exception('Booking detail không thuộc về booking order này.');
+                }
+
+                // Kiểm tra booking detail đã check-in chưa
+                if ($bookingDetail->status !== 'checked_in') {
+                    continue; // Bỏ qua nếu chưa check-in
+                }
+
+                // Kiểm tra xem đã có checkout request pending cho booking detail này chưa
+                $existingRequest = $checkoutRequestModel::where('booking_detail_id', $bookingDetailId)
+                    ->where('status', 'pending')
+                    ->first();
+
+                if ($existingRequest) {
+                    continue; // Bỏ qua nếu đã có request pending
+                }
+
+                // Tạo CheckoutRequest với status = pending
+                $requestRecord = $checkoutRequestModel::create([
+                    'booking_order_id' => $booking->id,
+                    'booking_detail_id' => $bookingDetailId,
+                    'status' => 'pending',
+                    'notes' => $request->notes,
+                ]);
+
+                $createdRequests[] = $requestRecord;
+            }
+
+            if (empty($createdRequests)) {
+                DB::rollBack();
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Không có phòng nào hợp lệ để tạo yêu cầu checkout. Có thể các phòng chưa check-in hoặc đã có yêu cầu checkout đang chờ xử lý.',
+                ], 400);
+            }
+
+            DB::commit();
+
+            // Gửi thông báo cho admin (log)
+            Log::info('New checkout request created', [
+                'booking_id' => $booking->id,
+                'booking_order_code' => $booking->order_code,
+                'request_count' => count($createdRequests),
+                'requested_by' => $user->id,
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Yêu cầu checkout đã được gửi. Vui lòng chờ admin/staff xử lý.',
+                'data' => [
+                    'booking_id' => $booking->id,
+                    'requests' => $createdRequests,
+                ],
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Dữ liệu không hợp lệ',
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('BookingOrderController@requestCheckOut failed', [
+                'booking_id' => $id,
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi tạo yêu cầu checkout.',
+                'error' => config('app.debug') ? $e->getMessage() : null,
+            ], 500);
+        }
+    }
+
+    /**
      * User checkout booking
      * User checkout và tự động tạo invoice để thanh toán
      */
@@ -2282,7 +2442,11 @@ class BookingOrderController extends Controller
 
             DB::beginTransaction();
 
-            $booking = BookingOrder::with(['details.room', 'invoices'])->findOrFail($id);
+            $booking = BookingOrder::with([
+                'details.room',
+                'details.bookingServices.service', // Load approved services
+                'invoices.invoiceItems', // Load invoice items
+            ])->findOrFail($id);
 
             // Kiểm tra booking có thuộc về user hiện tại không
             if ($booking->guest_id !== $user->id) {
@@ -2331,12 +2495,13 @@ class BookingOrderController extends Controller
                 'status' => $newStatus,
             ]);
 
-            // Tạo invoice nếu chưa có
-            $invoice = null;
-            if (!$booking->invoices()->exists()) {
-                $invoiceModel = \App\Models\Invoice::class;
-                $invoiceItemModel = \App\Models\InvoiceItem::class;
-                
+            // Tìm hoặc tạo invoice
+            $invoice = $booking->invoices()->first();
+            $invoiceModel = \App\Models\Invoice::class;
+            $invoiceItemModel = \App\Models\InvoiceItem::class;
+            
+            if (!$invoice) {
+                // Tạo invoice mới
                 $invoice = $invoiceModel::create([
                     'booking_order_id' => $booking->id,
                     'issue_date' => now()->toDateString(),
@@ -2344,9 +2509,14 @@ class BookingOrderController extends Controller
                     'total_amount' => 0, // Will be updated after calculating items
                     'status' => 'pending',
                 ]);
+            }
 
-                // Tạo invoice items từ booking details
-                $totalAmount = 0;
+            // Kiểm tra xem invoice đã có room charges chưa (để tránh duplicate)
+            $hasRoomCharges = $invoice->invoiceItems()->where('item_type', 'room_charge')->exists();
+            $totalAmount = $invoice->total_amount ?? 0;
+
+            // Thêm room charges nếu chưa có
+            if (!$hasRoomCharges) {
                 foreach ($booking->details as $detail) {
                     if ($detail->room) {
                         // Calculate nights
@@ -2367,30 +2537,60 @@ class BookingOrderController extends Controller
                         $totalAmount += $roomPrice;
                     }
                 }
+            }
 
-                // Trừ tiền cọc đã thanh toán (nếu có)
-                $paidAmount = $booking->paid_amount ?? 0;
-                if ($paidAmount > 0) {
-                    // Thêm invoice item để hiển thị tiền cọc đã thanh toán
+            // Thêm các service charges đã được approve (nếu chưa có trong invoice)
+            // Lấy tất cả booking detail IDs của booking này (không chỉ những cái checkout)
+            $allBookingDetailIds = $booking->details->pluck('id')->toArray();
+            $approvedServices = \App\Models\BookingService::whereIn('booking_details_id', $allBookingDetailIds)
+                ->where('status', 'approved')
+                ->with('service')
+                ->get();
+
+            foreach ($approvedServices as $bookingService) {
+                // Kiểm tra xem service này đã có trong invoice chưa
+                $serviceExists = $invoice->invoiceItems()
+                    ->where('item_type', 'service_charge')
+                    ->where('description', 'like', '%' . $bookingService->service->name . '%')
+                    ->exists();
+
+                if (!$serviceExists) {
+                    $serviceTotal = $bookingService->price_at_booking * $bookingService->quantity;
                     $invoiceItemModel::create([
                         'invoice_id' => $invoice->id,
-                        'description' => 'Tiền cọc đã thanh toán',
-                        'quantity' => 1,
-                        'unit_price' => -$paidAmount, // Giá trị âm để trừ
-                        'total_line' => -$paidAmount, // Giá trị âm để trừ
-                        'item_type' => 'deposit',
+                        'description' => "Dịch vụ: {$bookingService->service->name} (SL: {$bookingService->quantity})",
+                        'quantity' => $bookingService->quantity,
+                        'unit_price' => $bookingService->price_at_booking,
+                        'total_line' => $serviceTotal,
+                        'item_type' => 'service_charge',
                     ]);
-                    $totalAmount -= $paidAmount; // Trừ tiền cọc vào tổng tiền
+                    $totalAmount += $serviceTotal;
                 }
-
-                // Đảm bảo total_amount không âm
-                $finalAmount = max(0, $totalAmount);
-
-                // Update invoice total
-                $invoice->update(['total_amount' => $finalAmount]);
-            } else {
-                $invoice = $booking->invoices()->first();
             }
+
+            // Trừ tiền cọc đã thanh toán (nếu có và chưa được thêm vào invoice)
+            $hasDeposit = $invoice->invoiceItems()->where('item_type', 'deposit')->exists();
+            $paidAmount = $booking->paid_amount ?? 0;
+            if ($paidAmount > 0 && !$hasDeposit) {
+                $invoiceItemModel::create([
+                    'invoice_id' => $invoice->id,
+                    'description' => 'Tiền cọc đã thanh toán',
+                    'quantity' => 1,
+                    'unit_price' => -$paidAmount, // Giá trị âm để trừ
+                    'total_line' => -$paidAmount, // Giá trị âm để trừ
+                    'item_type' => 'deposit',
+                ]);
+                $totalAmount -= $paidAmount; // Trừ tiền cọc vào tổng tiền
+            }
+
+            // Đảm bảo total_amount không âm
+            $finalAmount = max(0, $totalAmount);
+
+            // Update invoice total
+            $invoice->update(['total_amount' => $finalAmount]);
+            
+            // Refresh invoice để có invoiceItems mới nhất
+            $invoice->refresh();
 
             DB::commit();
 
@@ -2544,12 +2744,757 @@ class BookingOrderController extends Controller
     }
 
     /**
-     * Store identity image
+     * Store identity image to private bucket
      */
     private function storeIdentityImage($file): string
     {
         $filename = 'identity_' . time() . '_' . \Illuminate\Support\Str::random(10) . '.' . $file->getClientOriginalExtension();
+        
+        // Upload to private bucket (s3_private disk) if configured
+        if (config('filesystems.disks.s3_private.bucket')) {
+            $path = $file->storeAs('identity_images', $filename, 's3_private');
+            
+            // For private bucket, return the path
+            // The path can be used later to generate signed URL if needed for viewing
+            return $path;
+        }
+        
+        // Fallback to public disk if s3_private is not configured
         $path = $file->storeAs('identity_images', $filename, 'public');
         return Storage::url($path);
+    }
+
+    /**
+     * User: Yêu cầu dịch vụ cho booking
+     * Tạo BookingService với status = 'pending'
+     */
+    public function requestService(Request $request, string $id): JsonResponse
+    {
+        try {
+            $user = $request->user();
+            
+            if (!$user) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Unauthorized',
+                ], 401);
+            }
+
+            $request->validate([
+                'booking_detail_id' => 'required|exists:booking_details,id',
+                'service_id' => 'required|exists:services,id',
+                'quantity' => 'required|integer|min:1',
+                'notes' => 'nullable|string|max:1000',
+            ]);
+
+            DB::beginTransaction();
+
+            $booking = BookingOrder::with(['details'])->findOrFail($id);
+
+            // Kiểm tra booking có thuộc về user hiện tại không
+            if ($booking->guest_id !== $user->id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Bạn không có quyền yêu cầu dịch vụ cho đơn đặt phòng này.',
+                ], 403);
+            }
+
+            // Kiểm tra booking detail có thuộc về booking này không
+            $bookingDetail = $booking->details->firstWhere('id', $request->booking_detail_id);
+            if (!$bookingDetail) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Booking detail không thuộc về booking này.',
+                ], 400);
+            }
+
+            // Kiểm tra booking có thể yêu cầu dịch vụ không (phải đã check-in)
+            if (!in_array($booking->status, ['checked_in', 'partially_checked_in'])) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Chỉ có thể yêu cầu dịch vụ khi đã check-in.',
+                ], 400);
+            }
+
+            // Lấy thông tin service
+            $service = \App\Models\Service::findOrFail($request->service_id);
+
+            // Tạo BookingService với status = 'pending'
+            $bookingService = \App\Models\BookingService::create([
+                'booking_details_id' => $request->booking_detail_id,
+                'service_id' => $request->service_id,
+                'quantity' => $request->quantity,
+                'price_at_booking' => $service->price,
+                'status' => 'pending',
+                'notes' => $request->notes,
+            ]);
+
+            // Gửi thông báo cho admin (log để admin có thể xem)
+            Log::info('New service request created', [
+                'booking_service_id' => $bookingService->id,
+                'booking_id' => $booking->id,
+                'booking_order_code' => $booking->order_code,
+                'service_id' => $service->id,
+                'service_name' => $service->name,
+                'quantity' => $request->quantity,
+                'total_amount' => $service->price * $request->quantity,
+            ]);
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Yêu cầu dịch vụ đã được gửi. Vui lòng chờ admin xác nhận.',
+                'data' => $bookingService->load('service'),
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Dữ liệu không hợp lệ',
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('BookingOrderController@requestService failed', [
+                'booking_id' => $id,
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi yêu cầu dịch vụ.',
+                'error' => config('app.debug') ? $e->getMessage() : null,
+            ], 500);
+        }
+    }
+
+    /**
+     * Admin: Lấy danh sách service requests (pending)
+     */
+    public function getServiceRequests(Request $request): JsonResponse
+    {
+        try {
+            $request->validate([
+                'status' => 'sometimes|in:pending,approved,rejected',
+                'booking_id' => 'sometimes|exists:booking_orders,id',
+                'page' => 'sometimes|integer|min:1',
+                'per_page' => 'sometimes|integer|min:1|max:100',
+            ]);
+
+            $perPage = (int) ($request->get('per_page', 15));
+            $query = \App\Models\BookingService::with([
+                'service',
+                'detail.room',
+                'detail.bookingOrder.guest',
+            ])
+            ->orderBy('created_at', 'desc');
+
+            // Filter by status
+            if ($request->has('status')) {
+                $query->where('status', $request->status);
+            } else {
+                // Mặc định chỉ lấy pending
+                $query->where('status', 'pending');
+            }
+
+            // Filter by booking_id
+            if ($request->has('booking_id')) {
+                $query->whereHas('detail', function($q) use ($request) {
+                    $q->where('booking_order_id', $request->booking_id);
+                });
+            }
+
+            $serviceRequests = $query->paginate($perPage);
+
+            $result = collect($serviceRequests->items())->map(function($bookingService) {
+                $detail = $bookingService->detail;
+                $booking = $detail->bookingOrder ?? null;
+                $service = $bookingService->service;
+                $room = $detail->room ?? null;
+
+                return [
+                    'id' => $bookingService->id,
+                    'booking_id' => $booking->id ?? null,
+                    'booking_order_code' => $booking->order_code ?? null,
+                    'room_name' => $room->name ?? null,
+                    'service' => $service ? [
+                        'id' => $service->id,
+                        'name' => $service->name,
+                        'price' => $service->price,
+                        'unit' => $service->unit,
+                    ] : null,
+                    'quantity' => $bookingService->quantity,
+                    'price_at_booking' => $bookingService->price_at_booking,
+                    'total_amount' => $bookingService->price_at_booking * $bookingService->quantity,
+                    'status' => $bookingService->status,
+                    'notes' => $bookingService->notes,
+                    'customer_name' => $booking->customer_name ?? $booking->guest->full_name ?? null,
+                    'created_at' => $bookingService->created_at?->toISOString(),
+                ];
+            });
+
+            return response()->json([
+                'success' => true,
+                'data' => $result,
+                'meta' => [
+                    'pagination' => [
+                        'page' => $serviceRequests->currentPage(),
+                        'per_page' => $serviceRequests->perPage(),
+                        'total' => $serviceRequests->total(),
+                        'last_page' => $serviceRequests->lastPage(),
+                    ],
+                ],
+            ]);
+        } catch (\Exception $e) {
+            Log::error('BookingOrderController@getServiceRequests failed', [
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi lấy danh sách yêu cầu dịch vụ.',
+                'error' => config('app.debug') ? $e->getMessage() : null,
+            ], 500);
+        }
+    }
+
+    /**
+     * Admin: Approve service request và thêm vào invoice
+     */
+    public function approveServiceRequest(Request $request, string $id): JsonResponse
+    {
+        try {
+            $admin = $request->user();
+            
+            if (!$admin || !in_array($admin->role, ['admin', 'staff'])) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Unauthorized',
+                ], 401);
+            }
+
+            $request->validate([
+                'admin_notes' => 'nullable|string|max:1000',
+            ]);
+
+            DB::beginTransaction();
+
+            $bookingService = \App\Models\BookingService::with([
+                'service',
+                'detail.bookingOrder.invoices', // Eager load invoices
+                'detail.room',
+            ])->findOrFail($id);
+
+            // Kiểm tra status
+            if ($bookingService->status !== 'pending') {
+                DB::rollBack();
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Yêu cầu dịch vụ này đã được xử lý.',
+                ], 400);
+            }
+
+            $booking = $bookingService->detail->bookingOrder;
+            $service = $bookingService->service;
+
+            if (!$service) {
+                DB::rollBack();
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Không tìm thấy dịch vụ.',
+                ], 404);
+            }
+
+            // Tìm hoặc tạo invoice cho booking
+            $invoice = $booking->invoices()->first();
+            if (!$invoice) {
+                $invoice = \App\Models\Invoice::create([
+                    'booking_order_id' => $booking->id,
+                    'issue_date' => now(),
+                    'due_date' => now()->addDays(7),
+                    'total_amount' => 0,
+                    'status' => 'pending',
+                ]);
+            }
+
+            // Kiểm tra invoice chưa được thanh toán
+            if ($invoice->status === 'paid') {
+                DB::rollBack();
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Hóa đơn này đã được thanh toán. Không thể thêm dịch vụ.',
+                ], 400);
+            }
+
+            // Thêm dịch vụ vào invoice
+            $totalAmount = $bookingService->price_at_booking * $bookingService->quantity;
+            \App\Models\InvoiceItem::create([
+                'invoice_id' => $invoice->id,
+                'description' => "Dịch vụ: {$service->name} (SL: {$bookingService->quantity})",
+                'quantity' => $bookingService->quantity,
+                'unit_price' => $bookingService->price_at_booking,
+                'total_line' => $totalAmount,
+                'item_type' => 'service_charge', // Sử dụng 'service_charge' để nhất quán với code trước
+            ]);
+
+            // Cập nhật invoice total_amount
+            $invoice->increment('total_amount', $totalAmount);
+
+            // Cập nhật booking total_amount
+            $booking->increment('total_amount', $totalAmount);
+
+            // Cập nhật status của BookingService
+            $updatedNotes = $bookingService->notes ?? '';
+            if ($request->has('admin_notes') && !empty($request->admin_notes)) {
+                $updatedNotes .= ($updatedNotes ? PHP_EOL : '') . '[Admin] ' . $request->admin_notes;
+            }
+            $bookingService->update([
+                'status' => 'approved',
+                'notes' => $updatedNotes,
+            ]);
+
+            Log::info('Service request approved', [
+                'booking_service_id' => $bookingService->id,
+                'booking_id' => $booking->id,
+                'invoice_id' => $invoice->id,
+                'admin_id' => $admin->id,
+            ]);
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Đã duyệt yêu cầu dịch vụ và thêm vào hóa đơn.',
+                'data' => $bookingService->fresh(['service', 'detail.bookingOrder', 'detail.room']),
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Dữ liệu không hợp lệ',
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('BookingOrderController@approveServiceRequest failed', [
+                'service_request_id' => $id,
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi duyệt yêu cầu dịch vụ.',
+                'error' => config('app.debug') ? [
+                    'message' => $e->getMessage(),
+                    'file' => $e->getFile(),
+                    'line' => $e->getLine(),
+                ] : null,
+            ], 500);
+        }
+    }
+
+    /**
+     * Admin: Reject service request
+     */
+    public function rejectServiceRequest(Request $request, string $id): JsonResponse
+    {
+        try {
+            $admin = $request->user();
+            
+            if (!$admin || !in_array($admin->role, ['admin', 'staff'])) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Unauthorized',
+                ], 401);
+            }
+
+            $request->validate([
+                'rejection_reason' => 'required|string|max:1000',
+            ]);
+
+            DB::beginTransaction();
+
+            $bookingService = \App\Models\BookingService::findOrFail($id);
+
+            // Kiểm tra status
+            if ($bookingService->status !== 'pending') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Yêu cầu dịch vụ này đã được xử lý.',
+                ], 400);
+            }
+
+            // Cập nhật status
+            $bookingService->update([
+                'status' => 'rejected',
+                'notes' => $bookingService->notes . PHP_EOL . '[Admin] Từ chối: ' . $request->rejection_reason,
+            ]);
+
+            Log::info('Service request rejected', [
+                'booking_service_id' => $bookingService->id,
+                'admin_id' => $admin->id,
+                'reason' => $request->rejection_reason,
+            ]);
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Đã từ chối yêu cầu dịch vụ.',
+                'data' => $bookingService->fresh(['service', 'detail.bookingOrder', 'detail.room']),
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('BookingOrderController@rejectServiceRequest failed', [
+                'service_request_id' => $id,
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi từ chối yêu cầu dịch vụ.',
+                'error' => config('app.debug') ? $e->getMessage() : null,
+            ], 500);
+        }
+    }
+
+    /**
+     * Admin: Lấy danh sách checkout requests
+     */
+    public function getCheckoutRequests(Request $request): JsonResponse
+    {
+        try {
+            $request->validate([
+                'status' => 'sometimes|in:pending,approved,rejected,all',
+                'page' => 'sometimes|integer|min:1',
+                'per_page' => 'sometimes|integer|min:1|max:100',
+                'booking_id' => 'sometimes|exists:booking_orders,id',
+            ]);
+
+            $perPage = (int) ($request->get('per_page', 15));
+
+            $query = \App\Models\CheckoutRequest::with([
+                'bookingOrder.guest',
+                'bookingDetail.room.roomType',
+                'reviewer',
+            ])
+            ->orderBy('created_at', 'desc');
+
+            // Filter by status
+            if ($request->has('status') && $request->status !== 'all') {
+                $query->where('status', $request->status);
+            }
+
+            // Filter by booking_id
+            if ($request->has('booking_id')) {
+                $query->where('booking_order_id', $request->booking_id);
+            }
+
+            $checkoutRequests = $query->paginate($perPage);
+
+            return response()->json([
+                'success' => true,
+                'data' => $checkoutRequests->items(),
+                'meta' => [
+                    'pagination' => [
+                        'current_page' => $checkoutRequests->currentPage(),
+                        'per_page' => $checkoutRequests->perPage(),
+                        'total' => $checkoutRequests->total(),
+                        'last_page' => $checkoutRequests->lastPage(),
+                    ],
+                ],
+            ]);
+        } catch (\Exception $e) {
+            Log::error('BookingOrderController@getCheckoutRequests failed', [
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi lấy danh sách yêu cầu checkout.',
+                'error' => config('app.debug') ? $e->getMessage() : null,
+            ], 500);
+        }
+    }
+
+    /**
+     * Admin: Approve checkout request
+     */
+    public function approveCheckoutRequest(Request $request, string $id): JsonResponse
+    {
+        try {
+            $admin = $request->user();
+            
+            if (!$admin || !in_array($admin->role, ['admin', 'staff'])) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Unauthorized',
+                ], 401);
+            }
+
+            DB::beginTransaction();
+
+            $checkoutRequest = \App\Models\CheckoutRequest::with([
+                'bookingOrder.details.room',
+                'bookingDetail',
+            ])->findOrFail($id);
+
+            // Kiểm tra request đã được xử lý chưa
+            if ($checkoutRequest->status !== 'pending') {
+                DB::rollBack();
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Yêu cầu checkout này đã được xử lý.',
+                ], 400);
+            }
+
+            $booking = $checkoutRequest->bookingOrder;
+            $bookingDetail = $checkoutRequest->bookingDetail;
+
+            // Kiểm tra booking detail đã check-in chưa
+            if ($bookingDetail->status !== 'checked_in') {
+                DB::rollBack();
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Phòng này chưa check-in, không thể checkout.',
+                ], 400);
+            }
+
+            // Cập nhật trạng thái booking detail
+            $bookingDetail->update(['status' => 'checked_out']);
+
+            // Cập nhật trạng thái phòng thành "available"
+            if ($bookingDetail->room) {
+                $bookingDetail->room->update(['status' => 'available']);
+            }
+
+            // Kiểm tra xem tất cả phòng đã checkout chưa
+            $booking->refresh();
+            $booking->load('details');
+            $totalDetails = $booking->details->count();
+            $checkedOutCount = $booking->details->where('status', 'checked_out')->count();
+            
+            // Cập nhật trạng thái booking order
+            $newStatus = ($checkedOutCount >= $totalDetails) ? 'checked_out' : 'partially_checked_out';
+            $booking->update(['status' => $newStatus]);
+
+            // Tạo hoặc cập nhật invoice (tương tự như checkOutUser)
+            $invoice = $booking->invoices()->first();
+            $invoiceModel = \App\Models\Invoice::class;
+            $invoiceItemModel = \App\Models\InvoiceItem::class;
+            
+            if (!$invoice) {
+                $invoice = $invoiceModel::create([
+                    'booking_order_id' => $booking->id,
+                    'issue_date' => now()->toDateString(),
+                    'due_date' => now()->addDays(7)->toDateString(),
+                    'total_amount' => 0,
+                    'status' => 'pending',
+                ]);
+            }
+
+            // Kiểm tra xem invoice đã có room charges cho booking detail này chưa
+            $hasRoomCharge = $invoice->invoiceItems()
+                ->where('item_type', 'room_charge')
+                ->where('description', 'like', '%' . $bookingDetail->room->name . '%')
+                ->exists();
+
+            $totalAmount = $invoice->total_amount ?? 0;
+
+            // Thêm room charge nếu chưa có
+            if (!$hasRoomCharge && $bookingDetail->room) {
+                $checkIn = \Carbon\Carbon::parse($bookingDetail->check_in_date);
+                $checkOut = \Carbon\Carbon::parse($bookingDetail->check_out_date);
+                $nights = max(1, $checkOut->diffInDays($checkIn));
+                $roomPrice = ($bookingDetail->room->price_per_night ?? 0) * $nights;
+
+                $invoiceItemModel::create([
+                    'invoice_id' => $invoice->id,
+                    'description' => "Phòng {$bookingDetail->room->name} - {$nights} đêm",
+                    'quantity' => 1,
+                    'unit_price' => $bookingDetail->room->price_per_night ?? 0,
+                    'total_line' => $roomPrice,
+                    'item_type' => 'room_charge',
+                ]);
+                $totalAmount += $roomPrice;
+            }
+
+            // Thêm các service charges đã được approve
+            $allBookingDetailIds = $booking->details->pluck('id')->toArray();
+            $approvedServices = \App\Models\BookingService::whereIn('booking_details_id', $allBookingDetailIds)
+                ->where('status', 'approved')
+                ->with('service')
+                ->get();
+
+            foreach ($approvedServices as $bookingService) {
+                $serviceExists = $invoice->invoiceItems()
+                    ->where('item_type', 'service_charge')
+                    ->where('description', 'like', '%' . $bookingService->service->name . '%')
+                    ->exists();
+
+                if (!$serviceExists) {
+                    $serviceTotal = $bookingService->price_at_booking * $bookingService->quantity;
+                    $invoiceItemModel::create([
+                        'invoice_id' => $invoice->id,
+                        'description' => "Dịch vụ: {$bookingService->service->name} (SL: {$bookingService->quantity})",
+                        'quantity' => $bookingService->quantity,
+                        'unit_price' => $bookingService->price_at_booking,
+                        'total_line' => $serviceTotal,
+                        'item_type' => 'service_charge',
+                    ]);
+                    $totalAmount += $serviceTotal;
+                }
+            }
+
+            // Trừ tiền cọc đã thanh toán (nếu có và chưa được thêm vào invoice)
+            $hasDeposit = $invoice->invoiceItems()->where('item_type', 'deposit')->exists();
+            $paidAmount = $booking->paid_amount ?? 0;
+            if ($paidAmount > 0 && !$hasDeposit) {
+                $invoiceItemModel::create([
+                    'invoice_id' => $invoice->id,
+                    'description' => 'Tiền cọc đã thanh toán',
+                    'quantity' => 1,
+                    'unit_price' => -$paidAmount,
+                    'total_line' => -$paidAmount,
+                    'item_type' => 'deposit',
+                ]);
+                $totalAmount -= $paidAmount;
+            }
+
+            $finalAmount = max(0, $totalAmount);
+            $invoice->update(['total_amount' => $finalAmount]);
+
+            // Cập nhật checkout request
+            $checkoutRequest->update([
+                'status' => 'approved',
+                'reviewed_by' => $admin->id,
+                'reviewed_at' => now(),
+            ]);
+
+            Log::info('Checkout request approved', [
+                'checkout_request_id' => $checkoutRequest->id,
+                'booking_id' => $booking->id,
+                'booking_detail_id' => $bookingDetail->id,
+                'admin_id' => $admin->id,
+            ]);
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Yêu cầu checkout đã được duyệt. Hóa đơn đã được tạo/cập nhật.',
+                'data' => $checkoutRequest->fresh(['bookingOrder', 'bookingDetail', 'reviewer']),
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Dữ liệu không hợp lệ',
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('BookingOrderController@approveCheckoutRequest failed', [
+                'request_id' => $id,
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi duyệt yêu cầu checkout.',
+                'error' => config('app.debug') ? $e->getMessage() : null,
+            ], 500);
+        }
+    }
+
+    /**
+     * Admin: Reject checkout request
+     */
+    public function rejectCheckoutRequest(Request $request, string $id): JsonResponse
+    {
+        try {
+            $admin = $request->user();
+            
+            if (!$admin || !in_array($admin->role, ['admin', 'staff'])) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Unauthorized',
+                ], 401);
+            }
+
+            $request->validate([
+                'rejection_reason' => 'required|string|max:1000',
+            ]);
+
+            DB::beginTransaction();
+
+            $checkoutRequest = \App\Models\CheckoutRequest::findOrFail($id);
+
+            // Kiểm tra request đã được xử lý chưa
+            if ($checkoutRequest->status !== 'pending') {
+                DB::rollBack();
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Yêu cầu checkout này đã được xử lý.',
+                ], 400);
+            }
+
+            // Cập nhật checkout request
+            $checkoutRequest->update([
+                'status' => 'rejected',
+                'rejection_reason' => $request->rejection_reason,
+                'reviewed_by' => $admin->id,
+                'reviewed_at' => now(),
+            ]);
+
+            Log::info('Checkout request rejected', [
+                'checkout_request_id' => $checkoutRequest->id,
+                'admin_id' => $admin->id,
+                'reason' => $request->rejection_reason,
+            ]);
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Yêu cầu checkout đã bị từ chối.',
+                'data' => $checkoutRequest->fresh(['bookingOrder', 'bookingDetail', 'reviewer']),
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Dữ liệu không hợp lệ',
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('BookingOrderController@rejectCheckoutRequest failed', [
+                'request_id' => $id,
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi từ chối yêu cầu checkout.',
+                'error' => config('app.debug') ? $e->getMessage() : null,
+            ], 500);
+        }
     }
 }

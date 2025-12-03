@@ -177,8 +177,8 @@ class RoomController extends Controller
             $query->with([
                 'property:id,name,address', 
                 'roomType:id,name', 
+                'roomType.images', // Load images from roomType
                 'amenities:id,name,filter_category', // NEW: Include filter_category
-                'images',
                 'reviews' => function ($q) {
                     if (Schema::hasColumn('reviews', 'status')) {
                         $q->where('status', 'approved');
@@ -347,18 +347,20 @@ class RoomController extends Controller
                 // Convert room to array
                 $roomArray = $room->toArray();
                 
-                // Serialize images đúng format
-                if ($room->relationLoaded('images') && $room->images) {
-                    $roomArray['images'] = $room->images->map(function($image) {
-                        return [
-                            'id' => $image->id,
-                            'image_url' => $image->image_url,
-                            'is_primary' => (bool)($image->is_primary ?? false),
-                        ];
-                    })->values()->toArray();
-                } else {
-                    $roomArray['images'] = [];
+                // Load images from roomType instead of room
+                $images = [];
+                if ($room->relationLoaded('roomType') && $room->roomType) {
+                    if ($room->roomType->relationLoaded('images') && $room->roomType->images) {
+                        $images = $room->roomType->images->map(function($image) {
+                            return [
+                                'id' => $image->id,
+                                'image_url' => $image->image_url,
+                                'is_primary' => (bool)($image->is_primary ?? false),
+                            ];
+                        })->values()->toArray();
+                    }
                 }
+                $roomArray['images'] = $images;
                 
                 // Serialize amenities với filter_category
                 if ($room->relationLoaded('amenities') && $room->amenities) {
@@ -466,27 +468,29 @@ class RoomController extends Controller
                 }
             }
             
-            // Load relationships
+            // Load relationships - load images from roomType
             $room->load([
                 'property:id,name,address',
                 'roomType:id,name',
+                'roomType.images',
                 'amenities:id,name',
-                'images',
             ]);
 
-            // Serialize room với images đúng format
+            // Serialize room với images từ roomType
             $roomArray = $room->toArray();
-            if ($room->relationLoaded('images')) {
-                $roomArray['images'] = $room->images->map(function($image) {
-                    return [
-                        'id' => $image->id,
-                        'image_url' => $image->image_url,
-                        'is_primary' => (bool)($image->is_primary ?? false),
-                    ];
-                })->values()->toArray();
-            } else {
-                $roomArray['images'] = [];
+            $images = [];
+            if ($room->relationLoaded('roomType') && $room->roomType) {
+                if ($room->roomType->relationLoaded('images') && $room->roomType->images) {
+                    $images = $room->roomType->images->map(function($image) {
+                        return [
+                            'id' => $image->id,
+                            'image_url' => $image->image_url,
+                            'is_primary' => (bool)($image->is_primary ?? false),
+                        ];
+                    })->values()->toArray();
+                }
             }
+            $roomArray['images'] = $images;
 
             return response()->json([
                 'success' => true,
@@ -686,7 +690,7 @@ class RoomController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Tạo phòng thành công',
-                'data' => $room->load(['property:id,name', 'roomType:id,name', 'amenities:id,name', 'images']),
+                'data' => $room->load(['property:id,name', 'roomType:id,name', 'roomType.images', 'amenities:id,name']),
             ], 201);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json([
@@ -761,10 +765,11 @@ class RoomController extends Controller
                         $with[] = 'property:id,name';
                     } elseif ($include === 'roomType') {
                         $with[] = 'roomType:id,name';
+                        $with[] = 'roomType.images'; // Load images from roomType
                     } elseif ($include === 'amenities') {
                         $with[] = 'amenities:id,name';
                     } elseif ($include === 'images') {
-                        $with[] = 'images';
+                        $with[] = 'roomType.images'; // Load images from roomType instead
                     } elseif ($include === 'verifier') {
                         $with[] = 'verifier:id,full_name';
                     }
@@ -774,8 +779,8 @@ class RoomController extends Controller
                 $with = [
                     'property:id,name',
                     'roomType:id,name',
+                    'roomType.images', // Load images from roomType
                     'amenities:id,name',
-                    'images',
                     'verifier:id,full_name'
                 ];
             }
@@ -881,7 +886,7 @@ class RoomController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Cập nhật phòng thành công',
-                'data' => $room->load(['property:id,name', 'roomType:id,name', 'amenities:id,name', 'images']),
+                'data' => $room->load(['property:id,name', 'roomType:id,name', 'roomType.images', 'amenities:id,name']),
             ]);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json([

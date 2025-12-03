@@ -10,7 +10,6 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use App\Models\Property; // <-- Import
 use App\Models\RoomType; // <-- Import
 use App\Models\Amenity; // <-- Import
-use App\Models\RoomImage; // <-- Import
 
 class Room extends Model
 {
@@ -44,10 +43,6 @@ class Room extends Model
     public function roomType(): BelongsTo
     {
         return $this->belongsTo(RoomType::class);
-    }
-    public function images(): HasMany
-    {
-        return $this->hasMany(RoomImage::class);
     }
     public function amenities(): BelongsToMany
     {

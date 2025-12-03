@@ -254,6 +254,10 @@ class CheckInOutController extends Controller
                 }
             }
 
+            // Refresh booking model để có dữ liệu mới nhất
+            $booking->refresh();
+            $booking->load('details');
+
             // Kiểm tra xem tất cả phòng đã check-in chưa
             $totalDetails = $booking->details()->count();
             $checkedInCount = $booking->details()->where('status', 'checked_in')->count();

@@ -26,7 +26,7 @@ use App\Http\Controllers\Api\Admin\UserController;
 use App\Http\Controllers\Api\Admin\AmenityController;
 use App\Http\Controllers\Api\Admin\RoomController;
 use App\Http\Controllers\Api\Admin\RoomTypeController;
-use App\Http\Controllers\Api\Admin\RoomImageController;
+use App\Http\Controllers\Api\Admin\RoomTypeImageController;
 use App\Http\Controllers\Api\Admin\PropertyImageController;
 use App\Http\Controllers\Api\Admin\BookingOrderController;
 use App\Http\Controllers\Api\Admin\PromotionController;
@@ -339,6 +339,10 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
     Route::delete('room-types/{id}/force', [RoomTypeController::class, 'forceDelete'])->whereNumber('id');
     Route::patch('room-types/{roomType}/status', [RoomTypeController::class, 'updateStatus']);
     Route::get('room-types/{roomType}/amenities', [RoomTypeController::class, 'showWithAmenities']);
+    Route::post('room-types/{roomType}/upload-images', [RoomTypeImageController::class, 'store']);
+    Route::post('room-type-images/bulk-delete', [RoomTypeImageController::class, 'bulkDestroy']);
+    Route::delete('room-type-images/{roomTypeImage}', [RoomTypeImageController::class, 'destroy'])
+        ->whereNumber('roomTypeImage');
     Route::apiResource('room-types', RoomTypeController::class);
 
     // ========================================
@@ -353,12 +357,7 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
     Route::post('rooms', [RoomController::class, 'store']);
     Route::put('rooms/{room}', [RoomController::class, 'update']);
     Route::delete('rooms/{room}', [RoomController::class, 'destroy']);
-    Route::post('rooms/{room}/upload-images', [RoomImageController::class, 'store']);
-    // Bulk delete cần khai báo TRƯỚC route có {roomImage} để tránh Laravel bind 'bulk' thành id
-    // Dùng POST thay vì DELETE vì một số server không hỗ trợ body trong DELETE request
-    Route::post('room-images/bulk-delete', [RoomImageController::class, 'bulkDestroy']);
-    Route::delete('room-images/{roomImage}', [RoomImageController::class, 'destroy'])
-        ->whereNumber('roomImage');
+    // Room images đã chuyển sang room type images
 
     // ========================================
     // 📅 BOOKING ORDERS MANAGEMENT (Quản lý Đặt phòng)
@@ -378,10 +377,19 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
     // Approve/Reject check-in requests
     Route::post('check-in-requests/{id}/approve', [BookingOrderController::class, 'approveCheckInRequest']);
     Route::post('check-in-requests/{id}/reject', [BookingOrderController::class, 'rejectCheckInRequest']);
+    // Checkout requests
+    Route::get('checkout-requests', [BookingOrderController::class, 'getCheckoutRequests']);
+    Route::post('checkout-requests/{id}/approve', [BookingOrderController::class, 'approveCheckoutRequest']);
+    Route::post('checkout-requests/{id}/reject', [BookingOrderController::class, 'rejectCheckoutRequest']);
     // Admin check-in trực tiếp
     Route::post('booking-orders/{id}/check-in-direct', [BookingOrderController::class, 'checkInDirect']);
     // Quản lý lưu trú - Danh sách khách đã check-in
     Route::get('checked-in-guests', [BookingOrderController::class, 'getCheckedInGuests']);
+    
+    // Quản lý yêu cầu dịch vụ
+    Route::get('service-requests', [BookingOrderController::class, 'getServiceRequests']);
+    Route::post('service-requests/{id}/approve', [BookingOrderController::class, 'approveServiceRequest']);
+    Route::post('service-requests/{id}/reject', [BookingOrderController::class, 'rejectServiceRequest']);
 
     // ========================================
     // 📧 EMAIL MANAGEMENT (Quản lý Email)
@@ -598,7 +606,9 @@ Route::middleware(['auth:sanctum', 'role:user,staff,admin'])->prefix('user')->gr
     Route::post('bookings/{id}/deposit', [BookingOrderController::class, 'payDeposit'])->where('id', '[0-9]+')->name('user.bookings.payDeposit');
     Route::post('bookings/{id}/cancel', [BookingOrderController::class, 'cancelUserBooking'])->where('id', '[0-9]+')->name('user.bookings.cancel');
     Route::post('bookings/{id}/check-in', [BookingOrderController::class, 'checkInUser'])->where('id', '[0-9]+')->name('user.bookings.checkIn');
+    Route::post('bookings/{id}/request-checkout', [BookingOrderController::class, 'requestCheckOut'])->where('id', '[0-9]+')->name('user.bookings.requestCheckOut');
     Route::post('bookings/{id}/check-out', [BookingOrderController::class, 'checkOutUser'])->where('id', '[0-9]+')->name('user.bookings.checkOut');
+    Route::post('bookings/{id}/request-service', [BookingOrderController::class, 'requestService'])->where('id', '[0-9]+')->name('user.bookings.requestService');
     
     // PayOS payment routes (user và admin đều có thể sử dụng)
     Route::post('payos/create-payment-link', [PayOSController::class, 'createPaymentLink'])->middleware('role:user,admin')->name('payos.createPaymentLink');
@@ -891,8 +901,7 @@ Route::prefix('rooms')->group(function () {
         Route::post('/', [RoomController::class, 'store']);
         Route::put('/{id}', [RoomController::class, 'update']);
         Route::delete('/{id}', [RoomController::class, 'destroy']);
-        Route::post('/{room}/upload-images', [RoomImageController::class, 'store']);
-        Route::delete('/room-images/{roomImage}', [RoomImageController::class, 'destroy']);
+        // Room images đã chuyển sang room type images
     });
 });
 

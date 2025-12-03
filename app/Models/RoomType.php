@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use App\Models\RoomTypeImage;
 
 class RoomType extends Model
 {
@@ -27,6 +28,10 @@ class RoomType extends Model
 
     public function rooms(): HasMany {
         return $this->hasMany(Room::class);
+    }
+
+    public function images(): HasMany {
+        return $this->hasMany(RoomTypeImage::class);
     }
 
     public function promotions(): BelongsToMany

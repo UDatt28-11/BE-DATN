@@ -16,7 +16,7 @@ class QueryService
         $perPage = (int) ($q['per_page'] ?? self::DEFAULT_PER_PAGE);
         
         $query = Room::query()
-            ->with(['property:id,name', 'roomType:id,name', 'amenities:id,name', 'images', 'verifier:id,full_name']);
+            ->with(['property:id,name', 'roomType:id,name', 'roomType.images', 'amenities:id,name', 'verifier:id,full_name']);
 
         // Filter by property_id
         if (!empty($q['property_id'])) {
@@ -58,8 +58,53 @@ class QueryService
         /** @var LengthAwarePaginator $paginator */
         $paginator = $query->paginate($perPage, ['*'], 'page', $page);
 
+        // Serialize rooms to ensure relationships are properly formatted
+        $roomsData = collect($paginator->items())->map(function($room) {
+            $roomArray = $room->toArray();
+            
+            // Ensure roomType is properly serialized with images
+            if ($room->relationLoaded('roomType') && $room->roomType) {
+                $roomTypeData = [
+                    'id' => $room->roomType->id,
+                    'name' => $room->roomType->name,
+                ];
+                
+                // Load images from roomType
+                if ($room->roomType->relationLoaded('images') && $room->roomType->images) {
+                    $roomTypeData['images'] = $room->roomType->images->map(function($image) {
+                        return [
+                            'id' => $image->id,
+                            'image_url' => $image->image_url,
+                            'is_primary' => (bool)($image->is_primary ?? false),
+                        ];
+                    })->values()->toArray();
+                } else {
+                    $roomTypeData['images'] = [];
+                }
+                
+                $roomArray['roomType'] = $roomTypeData;
+                // Map roomType images to room images for backward compatibility
+                $roomArray['images'] = $roomTypeData['images'];
+            } else {
+                $roomArray['roomType'] = null;
+                $roomArray['images'] = [];
+            }
+            
+            // Ensure property is properly serialized
+            if ($room->relationLoaded('property') && $room->property) {
+                $roomArray['property'] = [
+                    'id' => $room->property->id,
+                    'name' => $room->property->name,
+                ];
+            } else {
+                $roomArray['property'] = null;
+            }
+            
+            return $roomArray;
+        })->toArray();
+
         return [
-            'data' => $paginator->items(),
+            'data' => $roomsData,
             'meta' => [
                 'pagination' => [
                     'current_page' => $paginator->currentPage(),

@@ -68,6 +68,7 @@ return [
             'url' => null,
             'endpoint' => env('AWS_ENDPOINT'),
             'use_path_style_endpoint' => env('AWS_USE_PATH_STYLE_ENDPOINT', false),
+            'visibility' => 'private', // Private bucket - files are not publicly accessible
             'throw' => false,
             'report' => false,
         ],

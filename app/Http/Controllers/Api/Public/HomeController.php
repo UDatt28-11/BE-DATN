@@ -246,8 +246,8 @@ class HomeController extends Controller
             }
 
             $sampleRoom = $sampleRoomQuery->with([
+                'roomType.images', // Load images from roomType
                 'amenities:id,name,filter_category',
-                'images',
                 'reviews' => function ($q) {
                     if (Schema::hasColumn('reviews', 'status')) {
                         $q->where('status', 'approved');
@@ -313,13 +313,18 @@ class HomeController extends Controller
                         'filter_category' => $amenity->filter_category ?? null,
                     ];
                 });
-                $response['images'] = $sampleRoom->images->map(function ($image) {
-                    return [
-                        'id' => $image->id,
-                        'image_url' => $image->image_url,
-                        'is_primary' => $image->is_primary ?? false,
-                    ];
-                });
+                // Get images from roomType instead of room
+                $images = [];
+                if ($sampleRoom->roomType && $sampleRoom->roomType->relationLoaded('images') && $sampleRoom->roomType->images) {
+                    $images = $sampleRoom->roomType->images->map(function ($image) {
+                        return [
+                            'id' => $image->id,
+                            'image_url' => $image->image_url,
+                            'is_primary' => $image->is_primary ?? false,
+                        ];
+                    });
+                }
+                $response['images'] = $images;
                 // Thêm thông tin về floor nếu có
                 if (Schema::hasColumn('rooms', 'floor_number')) {
                     $response['floor_number'] = $sampleRoom->floor_number;
@@ -486,13 +491,15 @@ class HomeController extends Controller
                             'filter_category' => $amenity->filter_category ?? null, // NEW: filter_category
                         ];
                     }),
-                    'images' => $room->images->map(function ($image) {
-                        return [
-                            'id' => $image->id,
-                            'image_url' => $image->image_url,
-                            'is_primary' => $image->is_primary ?? false,
-                        ];
-                    }),
+                    'images' => ($room->roomType && $room->roomType->relationLoaded('images') && $room->roomType->images) 
+                        ? $room->roomType->images->map(function ($image) {
+                            return [
+                                'id' => $image->id,
+                                'image_url' => $image->image_url,
+                                'is_primary' => $image->is_primary ?? false,
+                            ];
+                        }) 
+                        : collect([]),
                     'rating' => round($avgRating, 1),
                     'reviews_count' => $reviewsCount,
                 ];
@@ -564,8 +571,11 @@ class HomeController extends Controller
                 $reviewsCount = $reviews->count();
                 
                 // Lấy primary image hoặc image đầu tiên
-                $primaryImage = $room->images->where('is_primary', true)->first() 
-                    ?? $room->images->first();
+                $primaryImage = null;
+                if ($room->roomType && $room->roomType->relationLoaded('images') && $room->roomType->images) {
+                    $primaryImage = $room->roomType->images->where('is_primary', true)->first() 
+                        ?? $room->roomType->images->first();
+                }
                 
                 return [
                     'id' => $room->id,
@@ -676,9 +686,9 @@ class HomeController extends Controller
                 // Fallback to room image if no property image
                 if (!$primaryImage) {
                     $firstRoom = $availableRooms->first();
-                    if ($firstRoom && $firstRoom->images) {
-                        $primaryImage = $firstRoom->images->where('is_primary', true)->first() 
-                            ?? $firstRoom->images->first();
+                    if ($firstRoom && $firstRoom->roomType && $firstRoom->roomType->relationLoaded('images') && $firstRoom->roomType->images) {
+                        $primaryImage = $firstRoom->roomType->images->where('is_primary', true)->first() 
+                            ?? $firstRoom->roomType->images->first();
                     }
                 }
                 
@@ -816,9 +826,9 @@ class HomeController extends Controller
                 // Fallback to room image if no property image
                 if (!$primaryImage) {
                     $firstRoom = $availableRooms->first();
-                    if ($firstRoom && $firstRoom->images) {
-                        $primaryImage = $firstRoom->images->where('is_primary', true)->first() 
-                            ?? $firstRoom->images->first();
+                    if ($firstRoom && $firstRoom->roomType && $firstRoom->roomType->relationLoaded('images') && $firstRoom->roomType->images) {
+                        $primaryImage = $firstRoom->roomType->images->where('is_primary', true)->first() 
+                            ?? $firstRoom->roomType->images->first();
                     }
                 }
                 
@@ -1044,7 +1054,7 @@ class HomeController extends Controller
                 }
                 $rooms = $roomsQuery->with([
                     'roomType:id,name',
-                    'images',
+                    'roomType.images', // Load images from roomType
                     'amenities:id,name,filter_category', // NEW: Include filter_category
                 ])->get();
                 
@@ -1109,12 +1119,12 @@ class HomeController extends Controller
                 $images = $images->merge($property->images);
             }
             
-            // Nếu property images ít hơn 5, bổ sung từ room images
+            // Nếu property images ít hơn 5, bổ sung từ room type images
             if ($images->count() < 5 && $property->rooms && $property->rooms->count() > 0) {
                 foreach ($property->rooms as $room) {
-                    if ($room && $room->images && $room->images->count() > 0) {
-                        $roomImages = $room->images->take(5 - $images->count());
-                        $images = $images->merge($roomImages);
+                    if ($room && $room->roomType && $room->roomType->relationLoaded('images') && $room->roomType->images && $room->roomType->images->count() > 0) {
+                        $roomTypeImages = $room->roomType->images->take(5 - $images->count());
+                        $images = $images->merge($roomTypeImages);
                         if ($images->count() >= 5) {
                             break;
                         }
