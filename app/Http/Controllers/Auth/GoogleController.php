@@ -17,8 +17,16 @@ use Illuminate\Http\Request;
 class GoogleController extends Controller
 {
     /**
+     * Frontend callback URL
+     */
+    protected function getFrontendCallbackUrl(): string
+    {
+        return env('FRONTEND_URL', 'http://localhost:5173') . '/auth/google/callback';
+    }
+
+    /**
      * @OA\Get(
-     *     path="/api/{role}/google/redirect",
+     *     path="/api/google/redirect/{role}",
      *     summary="Lấy URL đăng nhập Google (tự động redirect sang Google)",
      *     description="Trả về URL mà frontend dùng để redirect người dùng sang trang đăng nhập Google. Role có thể là user, staff hoặc admin.",
      *     tags={"Google Login"},
@@ -49,8 +57,15 @@ class GoogleController extends Controller
             return response()->json(['message' => 'Role không hợp lệ'], 400);
         }
 
+        // Tạo state chứa role để lưu trữ qua OAuth flow
+        $state = base64_encode(json_encode(['role' => $role]));
+
         $redirectUrl = Socialite::driver('google')
             ->stateless()
+            ->with([
+                'state' => $state,
+                'prompt' => 'select_account', // Luôn hiển thị màn hình chọn tài khoản
+            ])
             ->redirect()
             ->getTargetUrl();
 
@@ -62,9 +77,9 @@ class GoogleController extends Controller
 
     /**
      * @OA\Get(
-     *     path="/api/{role}/google/callback",
+     *     path="/api/google/callback/{role}",
      *     summary="Xử lý callback từ Google sau khi đăng nhập",
-     *     description="Sau khi người dùng đăng nhập Google, Google sẽ redirect về URL này. Hệ thống sẽ tự động tạo tài khoản nếu chưa có, và trả về token đăng nhập.",
+     *     description="Sau khi người dùng đăng nhập Google, Google sẽ redirect về URL này. Hệ thống sẽ tự động tạo tài khoản nếu chưa có, và redirect về frontend với token.",
      *     tags={"Google Login"},
      *     @OA\Parameter(
      *         name="role",
@@ -74,20 +89,8 @@ class GoogleController extends Controller
      *         @OA\Schema(type="string", enum={"user", "staff", "admin"})
      *     ),
      *     @OA\Response(
-     *         response=200,
-     *         description="Đăng nhập thành công",
-     *         @OA\JsonContent(
-     *             @OA\Property(property="status", type="boolean", example=true),
-     *             @OA\Property(property="message", type="string", example="Đăng nhập Google thành công!"),
-     *             @OA\Property(property="user", type="object",
-     *                 @OA\Property(property="id", type="integer", example=1),
-     *                 @OA\Property(property="name", type="string", example="Nguyễn Văn A"),
-     *                 @OA\Property(property="email", type="string", example="vana@gmail.com"),
-     *                 @OA\Property(property="role", type="string", example="user"),
-     *                 @OA\Property(property="avatar", type="string", example="https://lh3.googleusercontent.com/a/..."),
-     *             ),
-     *             @OA\Property(property="token", type="string", example="2|Kq0d8gZyR3YhF...")
-     *         )
+     *         response=302,
+     *         description="Redirect về frontend với token"
      *     ),
      *     @OA\Response(
      *         response=400,
@@ -99,39 +102,78 @@ class GoogleController extends Controller
      *     )
      * )
      */
-    public function handleGoogleCallback(Request $request, $role)
+    public function handleGoogleCallback(Request $request, $role = null)
     {
+        $frontendCallbackUrl = $this->getFrontendCallbackUrl();
+
         try {
-            if (!in_array($role, ['user', 'staff', 'admin'])) {
-                return response()->json(['message' => 'Role không hợp lệ'], 400);
+            // Lấy role từ state parameter nếu không có trong URL
+            $state = $request->get('state');
+            if ($state) {
+                try {
+                    $stateData = json_decode(base64_decode($state), true);
+                    if (!$role || !in_array($role, ['user', 'staff', 'admin'])) {
+                        $role = $stateData['role'] ?? 'user';
+                    }
+                } catch (\Exception $e) {
+                    // Ignore state parse error
+                }
+            }
+            
+            // Default role nếu vẫn chưa có
+            if (!$role || !in_array($role, ['user', 'staff', 'admin'])) {
+                $role = 'user';
             }
 
+            // Kiểm tra nếu có lỗi từ Google
+            if ($request->has('error')) {
+                return redirect($frontendCallbackUrl . '?error=' . urlencode($request->get('error')));
+            }
+
+            // Lấy user info từ Google
             $googleUser = Socialite::driver('google')->stateless()->user();
 
+            // Tạo hoặc cập nhật user
             $user = User::updateOrCreate(
                 ['email' => $googleUser->getEmail()],
                 [
-                    'name' => $googleUser->getName(),
+                    'full_name' => $googleUser->getName(),
                     'google_id' => $googleUser->getId(),
-                    'avatar' => $googleUser->getAvatar(),
+                    'avatar_url' => $googleUser->getAvatar(),
                     'password' => bcrypt(Str::random(16)),
                     'role' => $role,
                 ]
             );
 
+            // Tạo token
             $token = $user->createToken('auth_token')->plainTextToken;
 
-            return response()->json([
-                'status' => true,
-                'message' => 'Đăng nhập Google thành công!',
-                'user' => $user,
+            // Encode user data để truyền qua URL
+            $userData = base64_encode(json_encode([
+                'id' => $user->id,
+                'full_name' => $user->full_name,
+                'name' => $user->full_name, // Alias for frontend compatibility
+                'email' => $user->email,
+                'role' => $user->role,
+                'avatar' => $user->avatar_url,
+                'avatar_url' => $user->avatar_url,
+            ]));
+
+            // Redirect về frontend với token và user data
+            return redirect($frontendCallbackUrl . '?' . http_build_query([
                 'token' => $token,
-            ]);
+                'user' => $userData,
+                'status' => 'success',
+                'message' => 'Đăng nhập Google thành công!',
+            ]));
+
         } catch (\Exception $e) {
-            return response()->json([
-                'status' => false,
-                'message' => 'Lỗi Google login: ' . $e->getMessage(),
-            ], 500);
+            \Log::error('Google OAuth Error: ' . $e->getMessage());
+            
+            return redirect($frontendCallbackUrl . '?' . http_build_query([
+                'status' => 'error',
+                'message' => 'Đăng nhập Google thất bại: ' . $e->getMessage(),
+            ]));
         }
     }
 }

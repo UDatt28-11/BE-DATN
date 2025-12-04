@@ -27,3 +27,4 @@ class BookingDetailResource extends JsonResource
 
 
 
+

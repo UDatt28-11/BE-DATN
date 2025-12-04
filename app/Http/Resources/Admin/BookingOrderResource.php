@@ -298,3 +298,4 @@ class BookingOrderResource extends JsonResource
         return (int) round(max(0, $bookingTotal - $bookingPaid));
     }
 }
+

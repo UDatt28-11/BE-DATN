@@ -13,12 +13,13 @@
         "darkaonline/l5-swagger": "^9.0",
         "laravel/framework": "^12.0",
         "laravel/sanctum": "^4.2",
+        "laravel/socialite": "^5.23",
         "laravel/tinker": "^2.10.1",
         "league/flysystem-aws-s3-v3": "3.0",
+        "payos/payos": "^1.0",
         "spatie/laravel-activitylog": "^4.10",
         "spatie/laravel-permission": "^6.23",
-        "yaza/laravel-google-drive-storage": "^4.1",
-        "payos/payos": "^1.0"
+        "yaza/laravel-google-drive-storage": "^4.1"
     },
     "require-dev": {
         "fakerphp/faker": "^1.23",
