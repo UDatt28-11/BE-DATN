@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Review extends Model
 {
@@ -56,6 +57,31 @@ class Review extends Model
     public function room(): BelongsTo
     {
         return $this->belongsTo(Room::class);
+    }
+
+    public function comments(): HasMany
+    {
+        return $this->hasMany(Comment::class)->where('status', 'active')->whereNull('parent_id');
+    }
+
+    public function allComments(): HasMany
+    {
+        return $this->hasMany(Comment::class)->where('status', 'active');
+    }
+
+    public function likes(): HasMany
+    {
+        return $this->hasMany(ReviewLike::class);
+    }
+
+    public function likeCount(): int
+    {
+        return $this->likes()->where('type', 'like')->count();
+    }
+
+    public function dislikeCount(): int
+    {
+        return $this->likes()->where('type', 'dislike')->count();
     }
 
     // Scopes

@@ -81,8 +81,8 @@ class Promotion extends Model
      */
     public function isValid(): bool
     {
-        return $this->is_active 
-            && $this->start_date <= now() 
+        return $this->is_active
+            && $this->start_date <= now()
             && $this->end_date >= now()
             && ($this->max_usage_limit === null || $this->usage_count < $this->max_usage_limit);
     }

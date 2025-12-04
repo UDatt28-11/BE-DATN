@@ -3,70 +3,77 @@
 namespace Database\Seeders;
 
 use Illuminate\Database\Seeder;
+use App\Models\Room;
+use App\Models\Property;
+use App\Models\User;
 use App\Models\Review;
 use App\Models\BookingDetail;
-use App\Models\User;
-use App\Models\Property;
-use App\Models\Room;
 use Carbon\Carbon;
 
 class ReviewSeeder extends Seeder
 {
     public function run(): void
     {
-        $ratings = [5, 5, 4, 4, 3, 5, 5, 4, 5, 4];
-        $titles = [
-            'Tuyệt vời!',
-            'Rất tốt',
-            'Tốt lắm',
-            'Bình thường',
-            'Có thể cải thiện',
-            'Xuất sắc',
-            'Quán tuyệt vời',
-            'Rất hài lòng',
-            'Tất cả đều tuyệt vời',
-            'Phòng sạch sẽ'
-        ];
-        $comments = [
-            'Phòng rất sạch sẽ, nhân viên thân thiện, tất cả đều tuyệt vời!',
-            'Quán tốt lắm, sẽ quay lại',
-            'Phòng đẹp nhưng hơi ồn ào vào buổi tối',
-            'Bình thường, không có gì nổi bật',
-            'Phòng cũ, cần tu sửa',
-            'Giường thoải mái, phòng tắm sạch sẽ',
-            'Tuyệt vời! Sẽ giới thiệu cho bạn bè',
-            'Nhân viên rất chu đáo, phục vụ tốt',
-            'Giá hợp lý, chất lượng tốt',
-            'Vị trí đẹp, view tuyệt vời'
-        ];
+        // Xóa reviews cũ để fresh data
+        Review::query()->delete();
 
-        // Get sample data
-        $bookingDetails = BookingDetail::take(10)->get();
-        $users = User::take(10)->get();
-        $properties = Property::take(2)->get();
-        $rooms = Room::take(5)->get();
-
-        // Create reviews
-        $count = 0;
-        foreach ($bookingDetails as $index => $bookingDetail) {
-            if ($users->count() > $index && $properties->count() > 0 && $rooms->count() > 0) {
-                Review::create([
-                    'booking_details_id' => $bookingDetail->id,
-                    'user_id' => $users[$index]->id,
-                    'property_id' => $properties[$index % $properties->count()]->id,
-                    'room_id' => $rooms[$index % $rooms->count()]->id,
-                    'rating' => $ratings[$index],
-                    'title' => $titles[$index],
-                    'comment' => $comments[$index],
-                    'photos' => null,
-                    'is_verified_purchase' => true,
-                    'status' => 'approved',
-                    'reviewed_at' => Carbon::now()->subDays(rand(1, 30)),
-                ]);
-                $count++;
-            }
+        $users = User::where('role', 'user')->get();
+        
+        if ($users->isEmpty()) {
+            $this->command->warn('⚠️  No users found. Skipping reviews creation.');
+            return;
         }
 
-        echo "✅ Review seeder completed - Created {$count} reviews\n";
+        $reviews = [
+            ['rating' => 5, 'title' => 'Tuyệt vời!', 'comment' => 'Phòng rất đẹp, sạch sẽ và tiện nghi đầy đủ. Nhân viên phục vụ nhiệt tình.'],
+            ['rating' => 5, 'title' => 'Rất hài lòng', 'comment' => 'Trải nghiệm tuyệt vời, sẽ quay lại lần sau.'],
+            ['rating' => 4, 'title' => 'Tốt', 'comment' => 'Phòng ổn, giá cả hợp lý.'],
+            ['rating' => 4, 'title' => 'Đáng giá', 'comment' => 'Vị trí thuận tiện, không gian thoải mái.'],
+            ['rating' => 3, 'title' => 'Bình thường', 'comment' => 'Phòng ổn nhưng có thể cải thiện thêm.'],
+        ];
+
+        // Lấy booking details để gán vào reviews
+        $bookingDetails = \App\Models\BookingDetail::all();
+        
+        if ($bookingDetails->isEmpty()) {
+            $this->command->warn('⚠️  No booking details found. Skipping reviews creation.');
+            return;
+        }
+        
+        // Tạo reviews cho các booking details đã completed (tối đa 5 reviews)
+        $completedBookingDetails = $bookingDetails->filter(function ($detail) {
+            $booking = $detail->bookingOrder;
+            return $booking && in_array($booking->status, ['checked_out', 'completed']);
+        });
+        
+        if ($completedBookingDetails->isEmpty()) {
+            $this->command->warn('⚠️  No completed booking details found. Skipping reviews creation.');
+            return;
+        }
+        
+        $selectedBookingDetails = $completedBookingDetails->random(min(5, $completedBookingDetails->count()));
+        
+        foreach ($selectedBookingDetails as $bookingDetail) {
+            $reviewData = $reviews[array_rand($reviews)];
+            $user = $users->random();
+            
+            Review::create([
+                'booking_details_id' => $bookingDetail->id,
+                'user_id' => $user->id,
+                'property_id' => $bookingDetail->room->property_id,
+                'room_id' => $bookingDetail->room_id,
+                'rating' => $reviewData['rating'],
+                'title' => $reviewData['title'],
+                'comment' => $reviewData['comment'],
+                'is_verified_purchase' => rand(0, 1) === 1,
+                'is_helpful_count' => rand(0, 10),
+                'is_not_helpful_count' => rand(0, 2),
+                'status' => ['pending', 'approved', 'approved'][rand(0, 2)],
+                'created_at' => Carbon::now()->subDays(rand(1, 90)),
+            ]);
+        }
+
+        $this->command->info('✅ Created reviews for rooms');
     }
 }
+

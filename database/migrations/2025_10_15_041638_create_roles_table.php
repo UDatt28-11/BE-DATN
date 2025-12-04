@@ -8,11 +8,12 @@ return new class extends Migration
 {
     public function up(): void
     {
+        // create_roles_table migration
         Schema::create('roles', function (Blueprint $table) {
             $table->id();
-            $table->string('name')->unique(); // 'super_admin', 'owner', 'staff', 'guest'
-            $table->text('description')->nullable();
-            // Bảng này thường không cần timestamps
+            $table->string('name')->unique();
+            $table->string('description')->nullable();
+            $table->timestamps();
         });
     }
 

@@ -3,105 +3,114 @@
 namespace Database\Seeders;
 
 use Illuminate\Database\Seeder;
-use Illuminate\Support\Facades\DB;
+use App\Models\Supply;
 
 class SupplySeeder extends Seeder
 {
     public function run(): void
     {
+        // Xóa supplies cũ
+        Supply::query()->delete();
+
+        // Tạo danh sách supplies sạch và thực tế (không gắn với room cụ thể)
         $supplies = [
             [
-                'name' => 'Khăn tắm',
-                'description' => 'Khăn tắm cao cấp',
-                'category' => 'Dụng cụ vệ sinh',
-                'unit' => 'Chiếc',
+                'name' => 'Khăn tắm lớn',
+                'category' => 'Vật dụng phòng tắm',
+                'unit' => 'cái',
                 'current_stock' => 50,
-                'min_stock_level' => 10,
+                'min_stock_level' => 20,
                 'max_stock_level' => 100,
-                'unit_price' => 50000.00,
-                'supplier' => 'Công ty Textiles XYZ',
-                'supplier_contact' => '0123456789',
-                'status' => 'active',
-                'created_at' => now(),
-                'updated_at' => now(),
+                'unit_price' => 150000,
             ],
             [
-                'name' => 'Nước rửa bát',
-                'description' => 'Nước rửa bát chuyên dụng',
-                'category' => 'Hóa chất làm sạch',
-                'unit' => 'Chai',
+                'name' => 'Khăn tắm nhỏ',
+                'category' => 'Vật dụng phòng tắm',
+                'unit' => 'cái',
+                'current_stock' => 50,
+                'min_stock_level' => 20,
+                'max_stock_level' => 100,
+                'unit_price' => 80000,
+            ],
+            [
+                'name' => 'Chăn ga gối',
+                'category' => 'Đồ dùng giường',
+                'unit' => 'bộ',
                 'current_stock' => 30,
-                'min_stock_level' => 5,
+                'min_stock_level' => 10,
                 'max_stock_level' => 50,
-                'unit_price' => 25000.00,
-                'supplier' => 'Công ty Hóa chất ABC',
-                'supplier_contact' => '0987654321',
-                'status' => 'active',
-                'created_at' => now(),
-                'updated_at' => now(),
+                'unit_price' => 500000,
             ],
             [
                 'name' => 'Dầu gội đầu',
-                'description' => 'Dầu gội đầu cao cấp',
-                'category' => 'Sản phẩm cá nhân',
-                'unit' => 'Chai',
-                'current_stock' => 25,
-                'min_stock_level' => 5,
-                'max_stock_level' => 40,
-                'unit_price' => 35000.00,
-                'supplier' => 'Công ty Mỹ phẩm 123',
-                'supplier_contact' => '0912345678',
-                'status' => 'active',
-                'created_at' => now(),
-                'updated_at' => now(),
+                'category' => 'Vật dụng phòng tắm',
+                'unit' => 'chai',
+                'current_stock' => 40,
+                'min_stock_level' => 15,
+                'max_stock_level' => 80,
+                'unit_price' => 120000,
             ],
             [
                 'name' => 'Sữa tắm',
-                'description' => 'Sữa tắm dịu nhẹ',
-                'category' => 'Sản phẩm cá nhân',
-                'unit' => 'Chai',
-                'current_stock' => 20,
-                'min_stock_level' => 5,
-                'max_stock_level' => 35,
-                'unit_price' => 30000.00,
-                'supplier' => 'Công ty Mỹ phẩm 123',
-                'supplier_contact' => '0912345678',
-                'status' => 'active',
-                'created_at' => now(),
-                'updated_at' => now(),
-            ],
-            [
-                'name' => 'Giấy vệ sinh',
-                'description' => 'Giấy vệ sinh chất lượng cao',
-                'category' => 'Dụng cụ vệ sinh',
-                'unit' => 'Cuộn',
-                'current_stock' => 100,
-                'min_stock_level' => 20,
-                'max_stock_level' => 150,
-                'unit_price' => 12000.00,
-                'supplier' => 'Công ty Giấy DEF',
-                'supplier_contact' => '0834567890',
-                'status' => 'active',
-                'created_at' => now(),
-                'updated_at' => now(),
+                'category' => 'Vật dụng phòng tắm',
+                'unit' => 'chai',
+                'current_stock' => 40,
+                'min_stock_level' => 15,
+                'max_stock_level' => 80,
+                'unit_price' => 120000,
             ],
             [
                 'name' => 'Bàn chải đánh răng',
-                'description' => 'Bàn chải đánh răng cao cấp',
-                'category' => 'Sản phẩm cá nhân',
-                'unit' => 'Chiếc',
-                'current_stock' => 40,
-                'min_stock_level' => 10,
-                'max_stock_level' => 60,
-                'unit_price' => 15000.00,
-                'supplier' => 'Công ty Dụng cụ GHI',
-                'supplier_contact' => '0945678901',
-                'status' => 'active',
-                'created_at' => now(),
-                'updated_at' => now(),
+                'category' => 'Vật dụng phòng tắm',
+                'unit' => 'cái',
+                'current_stock' => 60,
+                'min_stock_level' => 25,
+                'max_stock_level' => 120,
+                'unit_price' => 25000,
+            ],
+            [
+                'name' => 'Kem đánh răng',
+                'category' => 'Vật dụng phòng tắm',
+                'unit' => 'tuýp',
+                'current_stock' => 50,
+                'min_stock_level' => 20,
+                'max_stock_level' => 100,
+                'unit_price' => 45000,
+            ],
+            [
+                'name' => 'Nước uống đóng chai',
+                'category' => 'Đồ uống',
+                'unit' => 'chai',
+                'current_stock' => 200,
+                'min_stock_level' => 100,
+                'max_stock_level' => 500,
+                'unit_price' => 10000,
+            ],
+            [
+                'name' => 'Cà phê hòa tan',
+                'category' => 'Đồ uống',
+                'unit' => 'gói',
+                'current_stock' => 150,
+                'min_stock_level' => 50,
+                'max_stock_level' => 300,
+                'unit_price' => 5000,
+            ],
+            [
+                'name' => 'Trà túi lọc',
+                'category' => 'Đồ uống',
+                'unit' => 'gói',
+                'current_stock' => 150,
+                'min_stock_level' => 50,
+                'max_stock_level' => 300,
+                'unit_price' => 3000,
             ],
         ];
 
-        DB::table('supplies')->insert($supplies);
+        foreach ($supplies as $supplyData) {
+            Supply::create($supplyData);
+        }
+
+        $this->command->info('✅ Created ' . count($supplies) . ' supplies');
     }
 }
+

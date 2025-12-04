@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use App\Models\BookingService;
 
 class BookingDetail extends Model
 {
@@ -41,8 +42,26 @@ class BookingDetail extends Model
         return $this->hasMany(BookingService::class, 'booking_details_id');
     }
 
+    public function checkedInGuests(): HasMany
+    {
+        return $this->hasMany(CheckedInGuest::class, 'booking_details_id');
+    }
+
+    /**
+     * Alias cho checkedInGuests để tương thích với include 'details.guests' ở BookingOrderController@showUser
+     */
     public function guests(): HasMany
     {
         return $this->hasMany(CheckedInGuest::class, 'booking_details_id');
+    }
+
+    public function review(): HasMany
+    {
+        return $this->hasMany(Review::class, 'booking_details_id');
+    }
+
+    public function checkInRequests(): HasMany
+    {
+        return $this->hasMany(CheckInRequest::class, 'booking_detail_id');
     }
 }

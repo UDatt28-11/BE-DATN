@@ -3,6 +3,7 @@
 namespace Database\Seeders;
 
 use Illuminate\Database\Seeder;
+use App\Models\Property;
 use App\Models\Promotion;
 use Carbon\Carbon;
 
@@ -10,174 +11,64 @@ class PromotionSeeder extends Seeder
 {
     public function run(): void
     {
+        $property = Property::first();
+        
+        if (!$property) {
+            $this->command->warn('⚠️  No property found. Skipping promotions creation.');
+            return;
+        }
+
+        // Xóa promotions cũ
+        Promotion::where('property_id', $property->id)->delete();
+
+        // Tạo 2 promotions sạch và thực tế
         $promotions = [
             [
-                'property_id' => 1,
-                'code' => 'SUMMER2024',
-                'description' => 'Giảm giá mùa hè 20%',
-                'discount_type' => 'percentage',
-                'discount_value' => 20,
-                'max_discount_amount' => 500,
-                'min_purchase_amount' => 1000,
-                'max_usage_limit' => 100,
-                'max_usage_per_user' => 1,
-                'start_date' => Carbon::now()->subDays(30),
-                'end_date' => Carbon::now()->addDays(60),
-                'is_active' => true,
-                'applicable_to' => 'all',
-            ],
-            [
-                'property_id' => 1,
-                'code' => 'VIP100',
-                'description' => 'Giảm giá 100k cho thành viên VIP',
-                'discount_type' => 'fixed_amount',
-                'discount_value' => 100,
-                'min_purchase_amount' => 500,
-                'max_usage_limit' => 50,
-                'max_usage_per_user' => 2,
-                'start_date' => Carbon::now()->subDays(60),
-                'end_date' => Carbon::now()->addDays(30),
-                'is_active' => true,
-                'applicable_to' => 'specific_rooms',
-                'rooms' => [1, 2],
-            ],
-            [
-                'property_id' => 1,
-                'code' => 'NEWYEAR15',
-                'description' => 'Chào năm mới 15%',
+                'code' => 'WELCOME2024',
+                'description' => 'Mã giảm giá chào mừng khách mới - Giảm 15% cho đơn hàng đầu tiên',
                 'discount_type' => 'percentage',
                 'discount_value' => 15,
-                'max_discount_amount' => 300,
-                'max_usage_limit' => 200,
-                'start_date' => Carbon::now()->subDays(5),
-                'end_date' => Carbon::now()->addDays(30),
-                'is_active' => true,
-                'applicable_to' => 'specific_room_types',
-                'room_types' => [1, 2],
-            ],
-            [
-                'property_id' => 2,
-                'code' => 'WEEKDAYRELAX12',
-                'description' => 'Ưu đãi ngày thường 12% cho Mountain Lodge Đà Lạt',
-                'discount_type' => 'percentage',
-                'discount_value' => 12,
-                'max_discount_amount' => 300,
-                'min_purchase_amount' => 800,
-                'max_usage_limit' => 150,
+                'max_discount_amount' => 500000,
+                'min_purchase_amount' => 1000000,
+                'max_usage_limit' => 100,
                 'max_usage_per_user' => 1,
-                'start_date' => Carbon::now()->subDays(10),
-                'end_date' => Carbon::now()->addDays(90),
-                'is_active' => true,
-                'applicable_to' => 'all',
+                'start_date' => Carbon::now()->subDays(7),
+                'end_date' => Carbon::now()->addDays(60),
             ],
             [
-                'property_id' => 2,
-                'code' => 'DALATSUITE25',
-                'description' => 'Giảm 25% cho phòng Suite cao cấp',
-                'discount_type' => 'percentage',
-                'discount_value' => 25,
-                'max_discount_amount' => 600,
-                'min_purchase_amount' => 1500,
-                'max_usage_limit' => 80,
-                'max_usage_per_user' => 1,
-                'start_date' => Carbon::now()->subDays(20),
-                'end_date' => Carbon::now()->addDays(45),
-                'is_active' => true,
-                'applicable_to' => 'specific_room_types',
-                'room_types' => [4],
-            ],
-            [
-                'property_id' => 3,
-                'code' => 'OCEANFLASH30',
-                'description' => 'Flash sale 30% phòng view biển',
-                'discount_type' => 'percentage',
-                'discount_value' => 30,
-                'max_discount_amount' => 700,
-                'max_usage_limit' => 120,
-                'max_usage_per_user' => 1,
-                'start_date' => Carbon::now()->subDays(2),
-                'end_date' => Carbon::now()->addDays(15),
-                'is_active' => true,
-                'applicable_to' => 'specific_rooms',
-                'rooms' => [7, 8],
-            ],
-            [
-                'property_id' => 3,
-                'code' => 'GARDENSTAY80',
-                'description' => 'Giảm 80k khi đặt phòng Garden View từ 2 đêm',
+                'code' => 'LONGSTAY',
+                'description' => 'Giảm giá cho khách ở từ 3 đêm trở lên - Giảm 200.000đ',
                 'discount_type' => 'fixed_amount',
-                'discount_value' => 80,
-                'min_purchase_amount' => 600,
-                'max_usage_limit' => 200,
-                'max_usage_per_user' => 3,
-                'start_date' => Carbon::now()->subDays(12),
-                'end_date' => Carbon::now()->addDays(70),
-                'is_active' => true,
-                'applicable_to' => 'specific_room_types',
-                'room_types' => [6],
-            ],
-            [
-                'property_id' => 1,
-                'code' => 'EARLYBIRD25',
-                'description' => 'Đặt sớm 25% cho Homestay Sapa View',
-                'discount_type' => 'percentage',
-                'discount_value' => 25,
-                'max_discount_amount' => 400,
-                'min_purchase_amount' => 800,
-                'max_usage_limit' => 60,
-                'max_usage_per_user' => 1,
-                'start_date' => Carbon::now()->subDays(15),
-                'end_date' => Carbon::now()->addDays(45),
-                'is_active' => true,
-                'applicable_to' => 'all',
-            ],
-            [
-                'property_id' => 2,
-                'code' => 'LASTMINUTE10',
-                'description' => 'Đặt cận ngày giảm ngay 10%',
-                'discount_type' => 'percentage',
-                'discount_value' => 10,
-                'max_discount_amount' => 200,
-                'max_usage_limit' => 90,
-                'max_usage_per_user' => 1,
-                'start_date' => Carbon::now(),
-                'end_date' => Carbon::now()->addDays(14),
-                'is_active' => true,
-                'applicable_to' => 'all',
-            ],
-            [
-                'property_id' => 3,
-                'code' => 'LONGBSTAY150',
-                'description' => 'Ở từ 3 đêm giảm 150k',
-                'discount_type' => 'fixed_amount',
-                'discount_value' => 150,
-                'min_purchase_amount' => 2000,
-                'max_usage_limit' => 70,
+                'discount_value' => 200000,
+                'max_discount_amount' => 200000,
+                'min_purchase_amount' => 2000000,
+                'max_usage_limit' => 50,
                 'max_usage_per_user' => 2,
-                'start_date' => Carbon::now()->subDays(20),
-                'end_date' => Carbon::now()->addDays(120),
-                'is_active' => true,
-                'applicable_to' => 'all',
+                'start_date' => Carbon::now()->subDays(7),
+                'end_date' => Carbon::now()->addDays(90),
             ],
         ];
 
-        foreach ($promotions as $promotionData) {
-            $rooms = $promotionData['rooms'] ?? [];
-            $roomTypes = $promotionData['room_types'] ?? [];
-
-            unset($promotionData['rooms'], $promotionData['room_types']);
-
-            $promotion = Promotion::create($promotionData);
-
-            if (!empty($rooms)) {
-                $promotion->rooms()->attach($rooms);
-            }
-
-            if (!empty($roomTypes)) {
-                $promotion->roomTypes()->attach($roomTypes);
-            }
+        foreach ($promotions as $promoData) {
+            Promotion::create([
+                'property_id' => $property->id,
+                'code' => $promoData['code'],
+                'description' => $promoData['description'],
+                'discount_type' => $promoData['discount_type'],
+                'discount_value' => $promoData['discount_value'],
+                'max_discount_amount' => $promoData['max_discount_amount'],
+                'min_purchase_amount' => $promoData['min_purchase_amount'],
+                'max_usage_limit' => $promoData['max_usage_limit'],
+                'max_usage_per_user' => $promoData['max_usage_per_user'],
+                'usage_count' => 0,
+                'start_date' => $promoData['start_date'],
+                'end_date' => $promoData['end_date'],
+                'is_active' => $promoData['end_date']->isFuture(),
+                'applicable_to' => 'all',
+            ]);
         }
 
-        echo "✅ Promotion seeder completed\n";
+        $this->command->info('✅ Created ' . count($promotions) . ' promotions for property');
     }
 }
+

@@ -1,4 +1,5 @@
 <?php
+// app/Models/BookingOrder.php
 
 namespace App\Models;
 
@@ -10,42 +11,69 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 class BookingOrder extends Model
 {
+    protected $table = 'booking_orders';
+
     protected $fillable = [
         'guest_id',
-        'property_id',
+        'staff_id',
         'order_code',
+        'total_amount',
+        'deposit_amount',
+        'paid_amount',
+        'payment_status',
+        'status',
         'customer_name',
         'customer_phone',
         'customer_email',
-        'total_amount',
         'payment_method',
         'notes',
-        'status',
     ];
 
     protected $casts = [
         'total_amount' => 'decimal:2',
+        'deposit_amount' => 'decimal:2',
+        'paid_amount' => 'decimal:2',
+        'created_at'   => 'datetime',
+        'updated_at'   => 'datetime',
     ];
 
-    // Relationships
+    // === RELATIONSHIPS ===
+
     public function guest(): BelongsTo
     {
         return $this->belongsTo(User::class, 'guest_id');
     }
 
-    public function invoice(): HasMany
+    public function staff(): BelongsTo
     {
-        return $this->hasMany(Invoice::class);
+        return $this->belongsTo(User::class, 'staff_id');
     }
 
-    public function bookingDetails(): HasMany
+    public function invoices(): HasMany
     {
-        return $this->hasMany(BookingDetail::class);
+        return $this->hasMany(Invoice::class, 'booking_order_id');
     }
 
-    public function checkedInGuests(): HasMany
+    public function details(): HasMany
     {
-        return $this->hasMany(CheckedInGuest::class);
+        return $this->hasMany(BookingDetail::class, 'booking_order_id');
+    }
+
+    public function checkedInGuests(): HasManyThrough
+    {
+        return $this->hasManyThrough(
+            CheckedInGuest::class,
+            BookingDetail::class,
+            'booking_order_id',   // FK trên booking_details
+            'booking_details_id', // FK trên checked_in_guests
+            'id',                 // PK của booking_orders
+            'id'                  // PK của booking_details
+        );
+    }
+
+    public function checkInRequests(): HasMany
+    {
+        return $this->hasMany(CheckInRequest::class, 'booking_order_id');
     }
 
     public function bookingServices(): HasManyThrough
@@ -53,22 +81,76 @@ class BookingOrder extends Model
         return $this->hasManyThrough(
             BookingService::class,
             BookingDetail::class,
-            'booking_order_id',  // Foreign key on booking_details table
-            'booking_details_id', // Foreign key on booking_services table
-            'id',                 // Local key on booking_orders table
-            'id'                  // Local key on booking_details table
+            'booking_order_id',
+            'booking_details_id',
+            'id',
+            'id'
         );
     }
 
     public function promotions(): BelongsToMany
     {
-        return $this->belongsToMany(Promotion::class, 'promotion_usage', 'booking_order_id', 'promotion_id')
-            ->withTimestamps()
-            ->withPivot('applied_discount_amount');
+        return $this->belongsToMany(
+            Promotion::class,
+            'promotion_usage',
+            'booking_order_id',
+            'promotion_id'
+        )
+        ->withPivot('applied_discount_amount')
+        ->withTimestamps();
+        // ->using(PromotionUsage::class); // Optional: nếu có pivot model
     }
 
-    public function property(): BelongsTo
+    public function vouchers(): BelongsToMany
     {
-        return $this->belongsTo(Property::class);
+        return $this->belongsToMany(Voucher::class, 'user_vouchers', 'booking_order_id', 'voucher_id')
+            ->withPivot('user_id', 'claimed_at', 'used_at')
+            ->withTimestamps();
+    }
+
+    public function userVouchers(): HasMany
+    {
+        return $this->hasMany(UserVoucher::class, 'booking_order_id');
+    }
+
+    public function payments(): HasManyThrough
+    {
+        return $this->hasManyThrough(
+            Payment::class,
+            Invoice::class,
+            'booking_order_id', // FK trên invoices
+            'invoice_id',       // FK trên payments
+            'id',               // PK của booking_orders
+            'id'                // PK của invoices
+        );
+    }
+
+    // === ACCESSORS ===
+
+    public function getPropertyAttribute()
+    {
+        return $this->details->first()?->room?->property;
+    }
+
+    // === SCOPES ===
+
+    public function scopePending($query)
+    {
+        return $query->where('status', 'pending');
+    }
+
+    public function scopeConfirmed($query)
+    {
+        return $query->where('status', 'confirmed');
+    }
+
+    public function scopeCompleted($query)
+    {
+        return $query->where('status', 'completed');
+    }
+
+    public function scopeCancelled($query)
+    {
+        return $query->where('status', 'cancelled');
     }
 }

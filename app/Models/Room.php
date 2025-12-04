@@ -2,42 +2,57 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use App\Models\Property; // <-- Import
+use App\Models\RoomType; // <-- Import
+use App\Models\Amenity; // <-- Import
 
 class Room extends Model
 {
+    use HasFactory;
+
+    /**
+     * Các trường được phép gán hàng loạt (dựa trên bookstay.sql)
+     */
     protected $fillable = [
-        'property_id',
+        'property_id', // Quan trọng: Room cũng thuộc về 1 Property
         'room_type_id',
         'name',
         'description',
+        'floor_number', // Số tầng cụ thể (0 = tầng trệt, 1, 2, 3...)
+        'floor_category', // Phân loại tầng (ground_floor, upper_floor, attic)
         'max_adults',
         'max_children',
         'price_per_night',
-        'status',
+        'status', // (available, maintenance, occupied)
+        'verification_status', // (pending, verified, rejected)
+        'verification_notes',
+        'verified_at',
+        'verified_by',
     ];
 
-    protected $casts = [
-        'price_per_night' => 'decimal:2',
-    ];
-
-    // Relationships
+    // ----- CÁC QUAN HỆ -----
     public function property(): BelongsTo
     {
         return $this->belongsTo(Property::class);
     }
-
     public function roomType(): BelongsTo
     {
         return $this->belongsTo(RoomType::class);
     }
-
-    public function supplies(): HasMany
+    public function amenities(): BelongsToMany
     {
-        return $this->hasMany(Supply::class);
+        // Quan hệ nhiều-nhiều qua bảng 'room_amenities'
+        return $this->belongsToMany(Amenity::class, 'room_amenities');
+    }
+
+    public function priceRules(): HasMany
+    {
+        return $this->hasMany(PriceRule::class);
     }
 
     public function bookingDetails(): HasMany
@@ -45,13 +60,38 @@ class Room extends Model
         return $this->hasMany(BookingDetail::class);
     }
 
-    public function promotions(): BelongsToMany
-    {
-        return $this->belongsToMany(Promotion::class, 'promotion_room', 'room_id', 'promotion_id');
-    }
-
     public function reviews(): HasMany
     {
         return $this->hasMany(Review::class);
+    }
+
+    public function supplies(): HasMany
+    {
+        return $this->hasMany(Supply::class);
+    }
+
+    public function verifier(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'verified_by');
+    }
+
+    protected $casts = [
+        'verified_at' => 'datetime',
+    ];
+
+    // Scopes
+    public function scopeVerified($query)
+    {
+        return $query->where('verification_status', 'verified');
+    }
+
+    public function scopePendingVerification($query)
+    {
+        return $query->where('verification_status', 'pending');
+    }
+
+    public function scopeRejected($query)
+    {
+        return $query->where('verification_status', 'rejected');
     }
 }

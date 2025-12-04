@@ -10,15 +10,19 @@ return new class extends Migration
     {
         Schema::create('booking_orders', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('guest_id')->constrained('users')->onDelete('cascade');
+            $table->foreignId('guest_id')->nullable()->constrained('users')->onDelete('cascade');
+            $table->foreignId('staff_id')->nullable()->constrained('users')->onDelete('set null');
             $table->string('order_code')->unique();
-            $table->string('customer_name');
-            $table->string('customer_phone', 20);
-            $table->string('customer_email')->nullable();
             $table->decimal('total_amount', 12, 2);
-            $table->enum('payment_method', ['credit_card', 'bank_transfer', 'cash', 'e_wallet'])->default('cash');
+            $table->decimal('deposit_amount', 12, 2)->nullable()->comment('Số tiền đặt cọc');
+            $table->decimal('paid_amount', 12, 2)->default(0)->comment('Tổng số tiền đã thanh toán');
+            $table->enum('payment_status', ['unpaid', 'partial', 'paid'])->default('unpaid')->comment('Trạng thái thanh toán');
+            $table->enum('status', ['pending', 'confirmed', 'checked_in', 'partially_checked_in', 'checked_out', 'partially_checked_out', 'cancelled', 'completed'])->default('pending');
+            $table->string('customer_name')->nullable();
+            $table->string('customer_phone')->nullable();
+            $table->string('customer_email')->nullable();
+            $table->string('payment_method')->nullable();
             $table->text('notes')->nullable();
-            $table->enum('status', ['pending', 'confirmed', 'cancelled', 'completed'])->default('pending');
             $table->timestamps();
         });
     }

@@ -54,7 +54,7 @@ class SupplyLog extends Model
     // Accessors
     public function getActionTypeLabelAttribute()
     {
-        return match($this->action_type) {
+        return match ($this->action_type) {
             'in' => 'Nhập kho',
             'out' => 'Xuất kho',
             'adjustment' => 'Điều chỉnh',

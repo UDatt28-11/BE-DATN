@@ -18,6 +18,10 @@ return new class extends Migration
             $table->unsignedTinyInteger('max_children')->default(0);
             $table->decimal('price_per_night', 10, 2);
             $table->enum('status', ['available', 'maintenance', 'occupied'])->default('available');
+            $table->enum('verification_status', ['pending', 'verified', 'rejected'])->default('pending');
+            $table->text('verification_notes')->nullable();
+            $table->timestamp('verified_at')->nullable();
+            $table->foreignId('verified_by')->nullable()->constrained('users')->onDelete('set null');
             $table->timestamps();
         });
     }

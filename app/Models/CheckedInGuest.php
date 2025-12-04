@@ -1,4 +1,5 @@
 <?php
+// app/Models/CheckedInGuest.php
 
 namespace App\Models;
 
@@ -7,6 +8,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class CheckedInGuest extends Model
 {
+    protected $table = 'checked_in_guests';
+
     protected $fillable = [
         'booking_details_id',
         'full_name',
@@ -22,15 +25,8 @@ class CheckedInGuest extends Model
         'check_in_time' => 'datetime',
     ];
 
-    // Relationships
-    public function bookingDetail(): BelongsTo
+    public function detail(): BelongsTo
     {
         return $this->belongsTo(BookingDetail::class, 'booking_details_id');
-    }
-
-    // Giữ lại để tương thích nếu có code cũ dùng
-    public function bookingOrder(): BelongsTo
-    {
-        return $this->belongsTo(BookingOrder::class, 'booking_order_id');
     }
 }

@@ -4,50 +4,39 @@ namespace Database\Seeders;
 
 use Illuminate\Database\Seeder;
 use App\Models\User;
-use Illuminate\Support\Facades\DB;
+use App\Models\Property;
 
 class PropertySeeder extends Seeder
 {
+    /**
+     * Run the database seeds.
+     */
     public function run(): void
     {
-        $owner = User::where('email', 'owner@homestay.com')->first();
+        // Lấy owner user (hoặc tạo nếu chưa có)
+        $owner = User::where('role', 'owner')->orWhere('email', 'owner@staybook.com')->first();
 
-        $properties = [
-            [
-                'owner_id' => $owner->id,
-                'name' => 'Homestay Sapa View',
-                'address' => '123 Đường Fansipan, Sapa, Lào Cai',
-                'description' => 'Homestay với view đẹp ra núi Fansipan, không gian ấm cúng và hiện đại',
-                'check_in_time' => '14:00:00',
-                'check_out_time' => '12:00:00',
-                'status' => 'active',
-                'created_at' => now(),
-                'updated_at' => now(),
-            ],
-            [
-                'owner_id' => $owner->id,
-                'name' => 'Mountain Lodge Đà Lạt',
-                'address' => '456 Đường Tùng Lâm, Đà Lạt, Lâm Đồng',
-                'description' => 'Lodge cao cấp với view hồ Tuyền Lâm, phù hợp cho gia đình và nhóm bạn',
-                'check_in_time' => '15:00:00',
-                'check_out_time' => '11:00:00',
-                'status' => 'active',
-                'created_at' => now(),
-                'updated_at' => now(),
-            ],
-            [
-                'owner_id' => $owner->id,
-                'name' => 'Beach House Phú Quốc',
-                'address' => '789 Bãi Trường, Phú Quốc, Kiên Giang',
-                'description' => 'Nhà nghỉ gần biển với không gian mở, lý tưởng cho du lịch gia đình',
-                'check_in_time' => '14:00:00',
-                'check_out_time' => '12:00:00',
-                'status' => 'active',
-                'created_at' => now(),
-                'updated_at' => now(),
-            ]
-        ];
+        if (!$owner) {
+            $this->command->warn('⚠️  No owner user found. Please run UserSeeder first.');
+            return;
+        }
 
-        DB::table('properties')->insert($properties);
+        // Xóa properties cũ nếu có
+        Property::query()->delete();
+
+        // Chỉ tạo 1 property với dữ liệu sạch và thực tế
+        Property::create([
+            'owner_id' => $owner->id,
+            'name' => 'Homestay Sài Gòn View',
+            'address' => '123 Đường Nguyễn Huệ, Quận 1, Thành phố Hồ Chí Minh',
+            'description' => 'Homestay hiện đại nằm tại trung tâm Quận 1, gần các điểm du lịch nổi tiếng. Không gian rộng rãi, tiện nghi đầy đủ, view đẹp. Phù hợp cho gia đình và nhóm bạn.',
+            'check_in_time' => '14:00',
+            'check_out_time' => '12:00',
+            'status' => 'active',
+            'verification_status' => 'verified',
+            'verified_at' => now(),
+        ]);
+
+        $this->command->info('✅ Created 1 property: Homestay Sài Gòn View');
     }
 }
