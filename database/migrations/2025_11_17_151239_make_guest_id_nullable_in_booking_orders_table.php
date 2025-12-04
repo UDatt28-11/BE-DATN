@@ -3,6 +3,7 @@
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\DB;
 
 return new class extends Migration
 {
@@ -11,6 +12,15 @@ return new class extends Migration
      */
     public function up(): void
     {
+        // Kiểm tra xem guest_id đã nullable chưa (nếu đã được tích hợp vào migration tạo bảng)
+        if (Schema::hasColumn('booking_orders', 'guest_id')) {
+            $column = DB::select("SHOW COLUMNS FROM booking_orders WHERE Field = 'guest_id'");
+            if (!empty($column) && $column[0]->Null === 'YES') {
+                // Đã nullable rồi, không cần làm gì
+                return;
+            }
+        }
+
         Schema::table('booking_orders', function (Blueprint $table) {
             // Drop foreign key constraint first
             $table->dropForeign(['guest_id']);

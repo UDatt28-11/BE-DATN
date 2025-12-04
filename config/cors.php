@@ -13,9 +13,12 @@ return [
         'http://127.0.0.1:5173',
     ],
 
-    // Cho phép các domain động (VD: Cloudflare tunnel)
+    // Cho phép các domain động (VD: Cloudflare tunnel, ngrok)
     'allowed_origins_patterns' => [
         '^https://.*\.trycloudflare\.com$',
+        '^https://.*\.ngrok-free\.app$',
+        '^https://.*\.ngrok-free\.dev$',
+        '^https://.*\.ngrok\.io$',
     ],
 
     'allowed_headers' => ['*'],

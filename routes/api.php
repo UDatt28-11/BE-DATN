@@ -124,6 +124,28 @@ Route::get('payment/redirect', function (Request $request) {
         $type = ($request->get('cancel') === 'true' || $request->get('status') === 'CANCELLED') ? 'cancel' : 'success';
     }
     
+    // Nếu là cancel và có booking_id, tự động hủy booking nếu chưa thanh toán
+    if ($type === 'cancel' && $request->has('booking_id')) {
+        try {
+            $bookingId = $request->get('booking_id');
+            $booking = \App\Models\BookingOrder::find($bookingId);
+            
+            if ($booking && $booking->payment_status === 'unpaid' && $booking->status === 'pending') {
+                // Tự động hủy booking khi hủy thanh toán và chưa thanh toán gì
+                $booking->update(['status' => 'cancelled']);
+                
+                \Illuminate\Support\Facades\Log::info('Payment cancel: Auto-cancelled booking', [
+                    'booking_id' => $bookingId,
+                    'reason' => 'Payment cancelled and no payment made',
+                ]);
+            }
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error('Payment cancel: Error auto-cancelling booking', [
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+    
     // Nếu là success và có booking_id, kiểm tra và cập nhật booking status
     if ($type === 'success' && $request->has('booking_id')) {
         try {

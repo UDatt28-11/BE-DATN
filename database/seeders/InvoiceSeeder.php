@@ -13,6 +13,10 @@ class InvoiceSeeder extends Seeder
 {
     public function run(): void
     {
+        // Xóa invoices cũ để fresh data
+        InvoiceItem::query()->delete();
+        Invoice::query()->delete();
+
         $bookingOrders = BookingOrder::with('details.room')->get();
         
         if ($bookingOrders->isEmpty()) {
@@ -31,10 +35,6 @@ class InvoiceSeeder extends Seeder
         }
         
         foreach ($selectedBookings as $booking) {
-            // Kiểm tra xem đã có invoice chưa
-            if (Invoice::where('booking_order_id', $booking->id)->exists()) {
-                continue;
-            }
 
             $issueDate = Carbon::now()->subDays(rand(1, 30));
             $dueDate = $issueDate->copy()->addDays(rand(7, 14));

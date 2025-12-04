@@ -14,6 +14,9 @@ class ReviewSeeder extends Seeder
 {
     public function run(): void
     {
+        // Xóa reviews cũ để fresh data
+        Review::query()->delete();
+
         $users = User::where('role', 'user')->get();
         
         if ($users->isEmpty()) {

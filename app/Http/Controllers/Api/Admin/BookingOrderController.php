@@ -168,9 +168,10 @@ class BookingOrderController extends Controller
             }
             
             // Đảm bảo status có giá trị mặc định
-            // Yêu cầu mới: đơn do khách tự đặt sẽ mặc định là "confirmed" (không còn trạng thái chờ xác nhận)
+            // Tạo booking với status 'pending' khi chưa thanh toán
+            // Chỉ chuyển sang 'confirmed' khi thanh toán cọc thành công
             if (empty($validated['status'])) {
-                $validated['status'] = 'confirmed';
+                $validated['status'] = 'pending';
             }
             
             // Tạo BookingOrder
@@ -1009,9 +1010,10 @@ class BookingOrderController extends Controller
             }
 
             // Đảm bảo status có giá trị mặc định
-            // Yêu cầu mới: đơn do khách tự đặt sẽ mặc định là "confirmed" (không còn trạng thái chờ xác nhận)
+            // Tạo booking với status 'pending' khi chưa thanh toán
+            // Chỉ chuyển sang 'confirmed' khi thanh toán cọc thành công
             if (empty($validated['status'])) {
-                $validated['status'] = 'confirmed';
+                $validated['status'] = 'pending';
             }
 
             DB::beginTransaction();
@@ -1117,7 +1119,8 @@ class BookingOrderController extends Controller
             }
 
             // Load lại relationships để trả về đầy đủ
-            $order->load(['guest', 'details', 'details.room', 'details.room.images']);
+            // Note: Room không có images, images thuộc về RoomType
+            $order->load(['guest', 'details', 'details.room', 'details.room.roomType', 'details.room.roomType.images']);
 
             Log::info('BookingOrder created by user', [
                 'booking_order_id' => $order->id,
@@ -1185,7 +1188,8 @@ class BookingOrderController extends Controller
                 'status' => 'confirmed', // Tự động confirm khi đã chọn phương thức thanh toán
             ]);
 
-            $booking->load(['guest', 'details', 'details.room', 'details.room.images']);
+            // Note: Room không có images, images thuộc về RoomType
+            $booking->load(['guest', 'details', 'details.room', 'details.room.roomType', 'details.room.roomType.images']);
 
             Log::info('BookingOrder payment updated by user', [
                 'booking_order_id' => $booking->id,
@@ -1347,7 +1351,8 @@ class BookingOrderController extends Controller
 
             DB::commit();
 
-            $booking->load(['guest', 'details', 'details.room', 'details.room.images']);
+            // Note: Room không có images, images thuộc về RoomType
+            $booking->load(['guest', 'details', 'details.room', 'details.room.roomType', 'details.room.roomType.images']);
 
             Log::info('BookingOrder deposit paid by user', [
                 'booking_order_id' => $booking->id,
@@ -1582,7 +1587,8 @@ class BookingOrderController extends Controller
 
             DB::commit();
 
-            $booking->load(['guest', 'details', 'details.room', 'details.room.images']);
+            // Note: Room không có images, images thuộc về RoomType
+            $booking->load(['guest', 'details', 'details.room', 'details.room.roomType', 'details.room.roomType.images']);
 
             Log::info('BookingOrder deposit confirmed by admin', [
                 'booking_order_id' => $booking->id,

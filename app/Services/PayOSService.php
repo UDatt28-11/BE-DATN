@@ -185,12 +185,27 @@ class PayOSService
             }
             
             // PayOS không chấp nhận localhost trong returnUrl và cancelUrl
-            if (str_contains($returnUrl, 'localhost') || str_contains($returnUrl, '127.0.0.1')) {
-                throw new Exception('returnUrl không được dùng localhost. Vui lòng dùng public URL (ngrok/local tunnel) hoặc domain thật.');
+            // Cho phép bypass validation trong development mode nếu có PAYOS_ALLOW_LOCALHOST=true
+            // Lưu ý: PayOS API vẫn sẽ reject localhost, chỉ bypass validation trong code
+            $allowLocalhost = filter_var(env('PAYOS_ALLOW_LOCALHOST', false), FILTER_VALIDATE_BOOLEAN);
+            $isReturnUrlLocalhost = str_contains($returnUrl, 'localhost') || str_contains($returnUrl, '127.0.0.1');
+            $isCancelUrlLocalhost = str_contains($cancelUrl, 'localhost') || str_contains($cancelUrl, '127.0.0.1');
+            
+            if ($isReturnUrlLocalhost && !$allowLocalhost) {
+                throw new Exception('returnUrl không được dùng localhost. Vui lòng dùng public URL (ngrok/cloudflared tunnel) hoặc domain thật. Hoặc set PAYOS_ALLOW_LOCALHOST=true trong .env để bypass validation (chỉ dùng cho development, PayOS API vẫn sẽ reject).');
             }
             
-            if (str_contains($cancelUrl, 'localhost') || str_contains($cancelUrl, '127.0.0.1')) {
-                throw new Exception('cancelUrl không được dùng localhost. Vui lòng dùng public URL (ngrok/local tunnel) hoặc domain thật.');
+            if ($isCancelUrlLocalhost && !$allowLocalhost) {
+                throw new Exception('cancelUrl không được dùng localhost. Vui lòng dùng public URL (ngrok/cloudflared tunnel) hoặc domain thật. Hoặc set PAYOS_ALLOW_LOCALHOST=true trong .env để bypass validation (chỉ dùng cho development, PayOS API vẫn sẽ reject).');
+            }
+            
+            // Cảnh báo nếu dùng localhost với bypass
+            if (($isReturnUrlLocalhost || $isCancelUrlLocalhost) && $allowLocalhost) {
+                Log::warning('PayOS: Using localhost with PAYOS_ALLOW_LOCALHOST=true - PayOS API will still reject this', [
+                    'returnUrl' => $returnUrl,
+                    'cancelUrl' => $cancelUrl,
+                    'note' => 'This bypasses code validation only. PayOS API will still reject localhost URLs.',
+                ]);
             }
             
             // Validate URL format
