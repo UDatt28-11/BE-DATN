@@ -30,3 +30,4 @@ class CheckedInGuest extends Model
         return $this->belongsTo(BookingDetail::class, 'booking_details_id');
     }
 }
+

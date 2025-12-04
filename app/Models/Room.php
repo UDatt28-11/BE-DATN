@@ -95,3 +95,4 @@ class Room extends Model
         return $query->where('verification_status', 'rejected');
     }
 }
+

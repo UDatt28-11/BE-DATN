@@ -65,9 +65,13 @@ use Illuminate\Support\Facades\Log;
 // 1. GOOGLE LOGIN (PUBLIC)
 // ==================================================================
 Route::prefix('google')->group(function () {
+    // Lấy URL redirect đến Google OAuth
     Route::get('redirect/{role}', [GoogleController::class, 'redirectToGoogle'])
         ->where('role', 'admin|staff|user');
-    Route::get('callback/{role}', [GoogleController::class, 'handleGoogleCallback'])
+    
+    // Callback từ Google - có thể có hoặc không có role trong URL
+    // Role được lấy từ state parameter nếu không có trong URL
+    Route::get('callback/{role?}', [GoogleController::class, 'handleGoogleCallback'])
         ->where('role', 'admin|staff|user');
 });
 
@@ -1016,6 +1020,7 @@ Route::prefix('rooms')->group(function () {
 // ==================================================================
 // 23. PUBLIC HOMEPAGE (không cần đăng nhập)
 // ==================================================================
+// Public routes (caching can be enabled later with cache.api middleware)
 Route::prefix('public')->group(function () {
     Route::get('/statistics', [HomeController::class, 'statistics']);
     Route::get('/room-types', [HomeController::class, 'roomTypes']);
@@ -1030,7 +1035,7 @@ Route::prefix('public')->group(function () {
 // API tổng hợp homepage data
 Route::get('/homepage/data', [HomeController::class, 'homepageData']);
 
-// API tìm kiếm properties (public) - với search, filter, sort
+// API tìm kiếm properties (public)
 Route::get('/properties/search', [HomeController::class, 'searchProperties']);
 
 // API chi tiết properties (public)

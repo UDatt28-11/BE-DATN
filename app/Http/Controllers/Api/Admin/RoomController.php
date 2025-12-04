@@ -14,6 +14,8 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 
 /**
  * @OA\Tag(
@@ -27,6 +29,16 @@ class RoomController extends Controller
      * Số lượng bản ghi mỗi trang mặc định
      */
     private const DEFAULT_PER_PAGE = 15;
+
+    /**
+     * Cache schema checks to avoid repeated queries
+     */
+    private function hasColumn(string $table, string $column): bool
+    {
+        return Cache::remember("schema_{$table}_{$column}", 3600, function () use ($table, $column) {
+            return Schema::hasColumn($table, $column);
+        });
+    }
 
     /**
      * Display a listing of rooms
@@ -161,30 +173,41 @@ class RoomController extends Controller
             // Chỉ lấy phòng available (bắt buộc)
             $query->where('status', 'available');
             
+            // Cache verification status check
+            $hasVerification = $this->hasColumn('rooms', 'verification_status');
+            $hasReviewStatus = $this->hasColumn('reviews', 'status');
+            
             // Nếu có cột verification_status, ưu tiên lấy phòng đã verified
-            // Nhưng nếu không có phòng verified nào, vẫn lấy phòng available
-            // Logic này giống với room types để đảm bảo luôn có dữ liệu hiển thị
-            if (Schema::hasColumn('rooms', 'verification_status')) {
-                // Đếm số phòng verified trước
-                $verifiedCount = (clone $query)->where('verification_status', 'verified')->count();
-                // Nếu có phòng verified, chỉ lấy verified. Nếu không, lấy tất cả available
+            if ($hasVerification) {
+                // Cache verified count for 1 minute
+                $verifiedCount = Cache::remember('rooms_verified_count', 60, function () use ($query) {
+                    return (clone $query)->where('verification_status', 'verified')->count();
+                });
                 if ($verifiedCount > 0) {
                     $query->where('verification_status', 'verified');
                 }
-                // Nếu không có phòng verified, không thêm điều kiện này (lấy tất cả available)
             }
             
+            // Optimized eager loading with select
             $query->with([
                 'property:id,name,address', 
                 'roomType:id,name', 
-                'roomType.images', // Load images from roomType
-                'amenities:id,name,filter_category', // NEW: Include filter_category
-                'reviews' => function ($q) {
-                    if (Schema::hasColumn('reviews', 'status')) {
-                        $q->where('status', 'approved');
-                    }
-                }
+                'roomType.images:id,room_type_id,image_url,is_primary',
+                'amenities:id,name,filter_category',
             ]);
+            
+            // Use withAvg instead of loading all reviews (much faster)
+            $query->withAvg(['reviews as rating' => function ($q) use ($hasReviewStatus) {
+                if ($hasReviewStatus) {
+                    $q->where('status', 'approved');
+                }
+            }], 'rating');
+            
+            $query->withCount(['reviews as reviews_count' => function ($q) use ($hasReviewStatus) {
+                if ($hasReviewStatus) {
+                    $q->where('status', 'approved');
+                }
+            }]);
 
             // Filter by date range: loại trừ các phòng đã có booking trùng khoảng ngày
             if ($request->filled('check_in') && $request->filled('check_out')) {
@@ -257,93 +280,43 @@ class RoomController extends Controller
                 });
             }
 
-            // Get all rooms first to calculate rating
-            $rooms = $query->get()->map(function ($room) {
-                $reviews = $room->reviews ?? collect([]);
-                $avgRating = $reviews->avg('rating') ?? 0;
-                $reviewsCount = $reviews->count();
-                
-                return [
-                    'room' => $room,
-                    'rating' => round($avgRating, 1),
-                    'reviews_count' => $reviewsCount,
-                ];
-            });
-
-            // Filter by rating
-            if ($request->has('min_rating')) {
-                $rooms = $rooms->filter(function ($item) use ($request) {
-                    return $item['rating'] >= $request->min_rating;
-                });
-            }
-            if ($request->has('max_rating')) {
-                $rooms = $rooms->filter(function ($item) use ($request) {
-                    return $item['rating'] <= $request->max_rating;
-                });
-            }
-
-            // Sorting
+            // Sorting (using database query)
             $sortBy = $request->get('sort_by', 'created_at');
             $sortOrder = $request->get('sort_order', 'desc');
             
-            $rooms = $rooms->sortBy(function ($item) use ($sortBy, $sortOrder) {
-                $room = $item['room'];
-                $value = match($sortBy) {
-                    'id' => $room->id,
-                    'name' => $room->name,
-                    'price_per_night' => $room->price_per_night,
-                    'rating' => $item['rating'],
-                    'reviews_count' => $item['reviews_count'],
-                    'created_at' => $room->created_at ? strtotime($room->created_at) : 0,
-                    'updated_at' => $room->updated_at ? strtotime($room->updated_at) : 0,
-                    default => $room->id,
-                };
-                return $sortOrder === 'asc' ? $value : -$value;
-            });
+            // Map sort fields - use rooms table prefix for actual columns
+            $sortColumn = match($sortBy) {
+                'rating' => 'rating',
+                'reviews_count' => 'reviews_count',
+                'price_per_night' => 'rooms.price_per_night',
+                'name' => 'rooms.name',
+                'created_at' => 'rooms.created_at',
+                'updated_at' => 'rooms.updated_at',
+                default => 'rooms.created_at',
+            };
+            
+            $query->orderBy($sortColumn, $sortOrder);
 
-            // Add rating and reviews_count to room objects
-            $rooms = $rooms->map(function ($item) {
-                $room = $item['room'];
-                // Đảm bảo room object có đầy đủ thuộc tính
-                $room->rating = $item['rating'];
-                $room->reviews_count = $item['reviews_count'];
-                
-                // Log để debug
-                Log::debug('RoomController@indexPublic - Room mapped', [
-                    'id' => $room->id,
-                    'name' => $room->name,
-                    'rating' => $room->rating,
-                    'images_count' => $room->relationLoaded('images') ? $room->images->count() : 0,
-                ]);
-                return $room;
-            });
-
-            // Paginate manually
-            $total = $rooms->count();
+            // Paginate directly from database (much faster!)
             $currentPage = (int) ($request->get('page', 1));
-            $offset = ($currentPage - 1) * $perPage;
-            $items = $rooms->slice($offset, $perPage)->values();
-
-            // Log items trước khi trả về
-            Log::info('RoomController@indexPublic - Returning rooms', [
-                'total' => $total,
-                'current_page' => $currentPage,
-                'per_page' => $perPage,
-                'items_count' => $items->count(),
-                'room_ids' => $items->pluck('id')->toArray(),
-            ]);
-
-            // Return paginated results
-            $rooms = new \Illuminate\Pagination\LengthAwarePaginator(
-                $items,
-                $total,
-                $perPage,
-                $currentPage,
-                ['path' => $request->url(), 'query' => $request->query()]
-            );
+            $rooms = $query->paginate($perPage, ['*'], 'page', $currentPage);
+            
+            // Process rooms for response and filter by rating in memory (small dataset after pagination)
+            $minRating = $request->get('min_rating');
+            $maxRating = $request->get('max_rating');
+            
+            $items = collect($rooms->items())->map(function ($room) {
+                // Round rating
+                $room->rating = round($room->rating ?? 0, 1);
+                return $room;
+            })->filter(function ($room) use ($minRating, $maxRating) {
+                if ($minRating !== null && $room->rating < $minRating) return false;
+                if ($maxRating !== null && $room->rating > $maxRating) return false;
+                return true;
+            })->values();
 
             // Convert rooms to array để đảm bảo images được serialize đúng
-            $roomsArray = collect($rooms->items())->map(function($room) {
+            $roomsArray = $items->map(function($room) {
                 // Convert room to array
                 $roomArray = $room->toArray();
                 

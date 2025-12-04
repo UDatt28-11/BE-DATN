@@ -13,6 +13,8 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Collection;
 
 /**
@@ -87,90 +89,118 @@ class HomeController extends Controller
     }
 
     /**
-     * Get popular room types for homepage
+     * Cache schema checks to avoid repeated queries
+     */
+    private function hasColumn(string $table, string $column): bool
+    {
+        return Cache::remember("schema_{$table}_{$column}", 3600, function () use ($table, $column) {
+            return Schema::hasColumn($table, $column);
+        });
+    }
+
+    /**
+     * Get popular room types for homepage - OPTIMIZED
      */
     public function roomTypes(Request $request): JsonResponse
     {
         try {
             // Validate query parameters
             $request->validate([
-                'limit' => 'sometimes|integer|min:1|max:20',
+                'limit' => 'sometimes|integer|min:1|max:100',
                 'check_in' => 'sometimes|date',
                 'check_out' => 'sometimes|date|after:check_in',
-            ], [
-                'limit.max' => 'Số lượng bản ghi không được vượt quá 20.',
             ]);
 
             $limit = (int) ($request->get('limit', 6));
-            $query = RoomType::query();
-            
-            // Thêm điều kiện status nếu cột tồn tại
-            if (Schema::hasColumn('room_types', 'status')) {
-                $query->where('status', 'active');
-            }
-            
-            // Load relationship nếu property_id tồn tại
-            if (Schema::hasColumn('room_types', 'property_id')) {
-                $query->with('property:id,name');
-            }
-            
-            $query->orderBy('created_at', 'desc')
-                ->limit($limit);
-
-            $roomTypes = $query->get();
-
-            // Đếm số lượng rooms cho mỗi room type
             $checkIn = $request->get('check_in');
             $checkOut = $request->get('check_out');
             
-            // Chỉ xử lý check_in/check_out nếu cả hai đều có giá trị và không rỗng
-            $hasValidDateRange = !empty($checkIn) && !empty($checkOut) && 
-                                 is_string($checkIn) && is_string($checkOut) &&
-                                 strlen(trim($checkIn)) > 0 && strlen(trim($checkOut)) > 0;
-
-            $roomTypesWithCount = $roomTypes->map(function ($roomType) use ($checkIn, $checkOut, $hasValidDateRange) {
-                $roomsQuery = Room::where('room_type_id', $roomType->id);
+            // Generate cache key
+            $cacheKey = "room_types_list_{$limit}_{$checkIn}_{$checkOut}";
+            
+            // Try to get from cache (2 minutes for listings with dates, 5 minutes without)
+            $cacheDuration = ($checkIn && $checkOut) ? 120 : 300;
+            
+            $result = Cache::remember($cacheKey, $cacheDuration, function () use ($limit, $checkIn, $checkOut) {
+                // Check if status column exists (cached)
+                $hasStatus = $this->hasColumn('room_types', 'status');
+                $hasPropertyId = $this->hasColumn('room_types', 'property_id');
+                $hasVerification = $this->hasColumn('rooms', 'verification_status');
                 
-                // Chỉ lấy phòng available (bắt buộc)
-                $roomsQuery->where('status', 'available');
-
-                // Nếu có khoảng ngày hợp lệ, loại trừ các phòng đã có booking trùng khoảng ngày
+                // Build optimized query with withCount
+                $query = RoomType::query()
+                    ->select(['id', 'name', 'description', 'image_url', 'property_id', 'created_at']);
+                
+                if ($hasStatus) {
+                    $query->where('status', 'active');
+                }
+                
+                // Use withCount instead of N+1 queries
+                $query->withCount(['rooms as rooms_count' => function ($q) use ($hasVerification) {
+                    $q->where('status', 'available');
+                    if ($hasVerification) {
+                        $q->where('verification_status', 'verified');
+                    }
+                }]);
+                
+                // Load property relationship efficiently
+                if ($hasPropertyId) {
+                    $query->with('property:id,name');
+                }
+                
+                $query->orderBy('created_at', 'desc')->limit($limit);
+                
+                $roomTypes = $query->get();
+                
+                // If date range provided, calculate available rooms
+                $hasValidDateRange = !empty($checkIn) && !empty($checkOut);
+                
                 if ($hasValidDateRange) {
-                    $roomsQuery->whereDoesntHave('bookingDetails', function ($detailQuery) use ($checkIn, $checkOut) {
-                        $detailQuery->whereHas('bookingOrder', function ($bo) {
-                            $bo->whereNotIn('status', ['cancelled']);
-                        });
-                        $detailQuery->whereDate('check_in_date', '<', $checkOut)
-                            ->whereDate('check_out_date', '>', $checkIn);
+                    // Get all room type IDs
+                    $roomTypeIds = $roomTypes->pluck('id')->toArray();
+                    
+                    // Single query to get booked room counts per room type
+                    $bookedCounts = DB::table('rooms')
+                        ->join('booking_details', 'rooms.id', '=', 'booking_details.room_id')
+                        ->join('booking_orders', 'booking_details.booking_order_id', '=', 'booking_orders.id')
+                        ->whereIn('rooms.room_type_id', $roomTypeIds)
+                        ->where('rooms.status', 'available')
+                        ->whereNotIn('booking_orders.status', ['cancelled'])
+                        ->whereDate('booking_details.check_in_date', '<', $checkOut)
+                        ->whereDate('booking_details.check_out_date', '>', $checkIn)
+                        ->select('rooms.room_type_id', DB::raw('COUNT(DISTINCT rooms.id) as booked_count'))
+                        ->groupBy('rooms.room_type_id')
+                        ->pluck('booked_count', 'room_type_id')
+                        ->toArray();
+                    
+                    // Subtract booked rooms from total
+                    $roomTypes = $roomTypes->map(function ($roomType) use ($bookedCounts) {
+                        $booked = $bookedCounts[$roomType->id] ?? 0;
+                        $roomType->rooms_count = max(0, $roomType->rooms_count - $booked);
+                        return $roomType;
                     });
                 }
                 
-                // Nếu có cột verification_status, ưu tiên lấy phòng đã verified
-                // Nhưng nếu không có phòng verified nào, vẫn lấy phòng available
-                if (Schema::hasColumn('rooms', 'verification_status')) {
-                    $verifiedCount = (clone $roomsQuery)->where('verification_status', 'verified')->count();
-                    // Nếu có phòng verified, dùng số đó. Nếu không, dùng tổng số phòng available
-                    $roomsCount = $verifiedCount > 0 ? $verifiedCount : $roomsQuery->count();
-                } else {
-                    $roomsCount = $roomsQuery->count();
-                }
-                
-                return [
-                    'id' => $roomType->id,
-                    'name' => $roomType->name,
-                    'description' => $roomType->description,
-                    'image_url' => $roomType->image_url,
-                    'rooms_count' => $roomsCount,
-                    'property' => $roomType->relationLoaded('property') && $roomType->property ? [
-                        'id' => $roomType->property->id,
-                        'name' => $roomType->property->name,
-                    ] : null,
-                ];
+                // Format response
+                return $roomTypes->map(function ($roomType) {
+                    return [
+                        'id' => $roomType->id,
+                        'name' => $roomType->name,
+                        'description' => $roomType->description,
+                        'image_url' => $roomType->image_url,
+                        'rooms_count' => $roomType->rooms_count ?? 0,
+                        'property' => $roomType->relationLoaded('property') && $roomType->property ? [
+                            'id' => $roomType->property->id,
+                            'name' => $roomType->property->name,
+                        ] : null,
+                    ];
+                })->values()->toArray();
             });
 
             return response()->json([
                 'success' => true,
-                'data' => $roomTypesWithCount,
+                'data' => $result,
+                'cached' => Cache::has($cacheKey),
             ]);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json([
@@ -353,7 +383,7 @@ class HomeController extends Controller
     }
 
     /**
-     * Get public amenities list for filter
+     * Get public amenities list for filter - OPTIMIZED
      */
     public function amenities(Request $request): JsonResponse
     {
@@ -364,46 +394,53 @@ class HomeController extends Controller
             ]);
 
             $limit = (int) ($request->get('limit', 100));
-            $query = Amenity::query();
+            $propertyId = $request->get('property_id');
             
-            // Filter by property_id if provided
-            if ($request->has('property_id')) {
-                $query->where('property_id', $request->property_id);
-            }
+            // Cache key
+            $cacheKey = "amenities_list_{$limit}_{$propertyId}";
             
-            // Chỉ lấy amenities active nếu có cột status
-            if (Schema::hasColumn('amenities', 'status')) {
-                $query->where('status', 'active');
-            }
-            
-            // Load property relationship if property_id column exists
-            if (Schema::hasColumn('amenities', 'property_id')) {
-                $query->with('property:id,name');
-            }
-            
-            $amenities = $query->orderBy('name', 'asc')
-                ->limit($limit)
-                ->get();
-
-            // Map amenities with property info
-            $amenitiesWithProperty = $amenities->map(function ($amenity) {
-                return [
-                    'id' => $amenity->id,
-                    'name' => $amenity->name,
-                    'icon_url' => $amenity->icon_url,
-                    'type' => $amenity->type,
-                    'category' => $amenity->category ?? 'facility', // Default to 'facility' if not set
-                    'filter_category' => $amenity->filter_category ?? null, // NEW: filter_category for frontend filtering
-                    'property' => $amenity->relationLoaded('property') && $amenity->property ? [
-                        'id' => $amenity->property->id,
-                        'name' => $amenity->property->name,
-                    ] : null,
-                ];
+            // Cache for 10 minutes (amenities rarely change)
+            $result = Cache::remember($cacheKey, 600, function () use ($limit, $propertyId) {
+                $hasStatus = $this->hasColumn('amenities', 'status');
+                $hasPropertyId = $this->hasColumn('amenities', 'property_id');
+                
+                $query = Amenity::query()
+                    ->select(['id', 'name', 'icon_url', 'type', 'category', 'filter_category', 'property_id']);
+                
+                if ($propertyId) {
+                    $query->where('property_id', $propertyId);
+                }
+                
+                if ($hasStatus) {
+                    $query->where('status', 'active');
+                }
+                
+                if ($hasPropertyId) {
+                    $query->with('property:id,name');
+                }
+                
+                return $query->orderBy('name', 'asc')
+                    ->limit($limit)
+                    ->get()
+                    ->map(function ($amenity) {
+                        return [
+                            'id' => $amenity->id,
+                            'name' => $amenity->name,
+                            'icon_url' => $amenity->icon_url,
+                            'type' => $amenity->type,
+                            'category' => $amenity->category ?? 'facility',
+                            'filter_category' => $amenity->filter_category ?? null,
+                            'property' => $amenity->relationLoaded('property') && $amenity->property ? [
+                                'id' => $amenity->property->id,
+                                'name' => $amenity->property->name,
+                            ] : null,
+                        ];
+                    })->values()->toArray();
             });
 
             return response()->json([
                 'success' => true,
-                'data' => $amenitiesWithProperty,
+                'data' => $result,
             ]);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json([
