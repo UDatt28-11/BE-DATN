@@ -27,14 +27,26 @@ class BookingOrder extends Model
         'customer_email',
         'payment_method',
         'notes',
+        'date_change_count',
+        'refund_amount',
+        'cancellation_reason',
+        'cancelled_at',
+        'voucher_id',
+        'discount_amount',
+        'original_total_amount',
     ];
 
     protected $casts = [
         'total_amount' => 'decimal:2',
         'deposit_amount' => 'decimal:2',
         'paid_amount' => 'decimal:2',
+        'refund_amount' => 'decimal:2',
+        'discount_amount' => 'decimal:2',
+        'original_total_amount' => 'decimal:2',
+        'date_change_count' => 'integer',
         'created_at'   => 'datetime',
         'updated_at'   => 'datetime',
+        'cancelled_at' => 'datetime',
     ];
 
     // === RELATIONSHIPS ===
@@ -42,6 +54,14 @@ class BookingOrder extends Model
     public function guest(): BelongsTo
     {
         return $this->belongsTo(User::class, 'guest_id');
+    }
+
+    /**
+     * Voucher đã sử dụng cho đơn hàng
+     */
+    public function voucher(): BelongsTo
+    {
+        return $this->belongsTo(Voucher::class);
     }
 
     public function staff(): BelongsTo
@@ -74,6 +94,11 @@ class BookingOrder extends Model
     public function checkInRequests(): HasMany
     {
         return $this->hasMany(CheckInRequest::class, 'booking_order_id');
+    }
+
+    public function checkoutRequests(): HasMany
+    {
+        return $this->hasMany(CheckoutRequest::class, 'booking_order_id');
     }
 
     public function bookingServices(): HasManyThrough

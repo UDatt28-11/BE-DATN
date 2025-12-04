@@ -43,6 +43,22 @@ class BookingOrderResource extends JsonResource
             'payment_method' => $this->payment_method ?? null,
             'notes' => $this->notes ?? null,
             'status' => $this->status,
+            // Thông tin voucher/giảm giá
+            'voucher_id' => $this->voucher_id ?? null,
+            'discount_amount' => $this->discount_amount ? (int) round($this->discount_amount) : 0,
+            'original_total_amount' => $this->original_total_amount ? (int) round($this->original_total_amount) : null,
+            'voucher' => $this->whenLoaded('voucher', fn() => $this->voucher ? [
+                'id' => $this->voucher->id,
+                'code' => $this->voucher->code,
+                'name' => $this->voucher->name ?? null,
+                'discount_type' => $this->voucher->discount_type,
+                'discount_value' => (float) $this->voucher->discount_value,
+            ] : null),
+            // Thông tin hủy phòng
+            'date_change_count' => $this->date_change_count ?? 0,
+            'refund_amount' => $this->refund_amount ? (int) round($this->refund_amount) : null,
+            'cancellation_reason' => $this->cancellation_reason ?? null,
+            'cancelled_at' => $this->cancelled_at?->toISOString() ?? null,
             // Thêm checkin/checkout dates từ query results
             'checkin_date' => $firstCheckin ? (is_string($firstCheckin) ? $firstCheckin : (\Carbon\Carbon::parse($firstCheckin)->format('Y-m-d'))) : null,
             'checkout_date' => $lastCheckout ? (is_string($lastCheckout) ? $lastCheckout : (\Carbon\Carbon::parse($lastCheckout)->format('Y-m-d'))) : null,
@@ -118,6 +134,21 @@ class BookingOrderResource extends JsonResource
                         })->values()->all();
                     }
                     
+                    // Lấy thông tin reviews
+                    $review = null;
+                    if ($detail->relationLoaded('review') && $detail->review && $detail->review->isNotEmpty()) {
+                        // Lấy review đầu tiên (mỗi booking detail chỉ có 1 review)
+                        $reviewData = $detail->review->first();
+                        $review = [
+                            'id' => $reviewData->id,
+                            'rating' => $reviewData->rating,
+                            'title' => $reviewData->title,
+                            'comment' => $reviewData->comment,
+                            'status' => $reviewData->status,
+                            'created_at' => $reviewData->created_at?->toISOString(),
+                        ];
+                    }
+                    
                     // Lấy thông tin booking services
                     $bookingServices = [];
                     if ($detail->relationLoaded('bookingServices') && $detail->bookingServices) {
@@ -163,6 +194,7 @@ class BookingOrderResource extends JsonResource
                         'status' => $detail->status,
                         'guests' => $guests, // Thông tin khách đã check-in
                         'booking_services' => $bookingServices, // Thông tin dịch vụ đã yêu cầu
+                        'review' => $review, // Thông tin đánh giá (nếu có)
                     ];
                 });
             }),
@@ -187,6 +219,25 @@ class BookingOrderResource extends JsonResource
                         'reviewed_by' => $request->reviewed_by,
                         'reviewed_at' => $request->reviewed_at?->toISOString(),
                         'notes' => $request->notes,
+                        'created_at' => $request->created_at?->toISOString(),
+                        'updated_at' => $request->updated_at?->toISOString(),
+                    ];
+                });
+            }),
+            'checkout_requests' => $this->whenLoaded('checkoutRequests', function() {
+                if (!$this->checkoutRequests || $this->checkoutRequests->isEmpty()) {
+                    return [];
+                }
+                return $this->checkoutRequests->map(function($request) {
+                    return [
+                        'id' => $request->id,
+                        'booking_order_id' => $request->booking_order_id,
+                        'booking_detail_id' => $request->booking_detail_id,
+                        'status' => $request->status,
+                        'notes' => $request->notes,
+                        'rejection_reason' => $request->rejection_reason,
+                        'reviewed_by' => $request->reviewed_by,
+                        'reviewed_at' => $request->reviewed_at?->toISOString(),
                         'created_at' => $request->created_at?->toISOString(),
                         'updated_at' => $request->updated_at?->toISOString(),
                     ];

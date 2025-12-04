@@ -204,6 +204,10 @@ class QueryService
             $relations[] = 'checkInRequests';
         }
         
+        if (in_array('checkoutRequests', $include, true)) {
+            $relations[] = 'checkoutRequests';
+        }
+        
         // Load relations trước khi paginate
         if (!empty($relations)) {
             $query->with($relations);

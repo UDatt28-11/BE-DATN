@@ -224,12 +224,13 @@ class ReviewController extends Controller
                 'comment' => $validated['comment'] ?? null,
                 'photos' => $validated['photos'] ?? null,
                 'is_verified_purchase' => true,
-                'status' => 'pending',
+                'status' => 'approved', // Tự động approved, không cần chờ duyệt
+                'reviewed_at' => now(), // Ghi nhận thời gian
             ]);
 
             return response()->json([
                 'success' => true,
-                'message' => 'Đánh giá của bạn đã được gửi và đang chờ duyệt',
+                'message' => 'Đánh giá của bạn đã được gửi thành công!',
                 'data' => $review
             ], 201);
         } catch (\Illuminate\Validation\ValidationException $e) {

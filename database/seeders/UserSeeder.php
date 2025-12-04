@@ -29,29 +29,29 @@ class UserSeeder extends Seeder
 
         // 1. Tạo Super Admin
         $admin = User::create([
-            'full_name'    => 'Nguyễn Văn A',
+                'full_name'    => 'Nguyễn Văn A',
             'email'        => 'admin@staybook.com',
-            'role'         => 'admin',
-            'password'     => Hash::make('password'),
-            'status'       => 'active',
+                'role'         => 'admin',
+                'password'     => Hash::make('password'),
+                'status'       => 'active',
             'phone_number' => '0823456789',
         ]);
         $admin->roles()->attach($adminRole->id);
 
         // 2. Tạo Owner
         $owner = User::create([
-            'full_name'    => 'Trần Văn Chủ',
+                'full_name'    => 'Trần Văn Chủ',
             'email'        => 'owner@staybook.com',
-            'role'         => 'owner',
-            'password'     => Hash::make('password'),
-            'status'       => 'active',
-            'phone_number' => '0987654321',
+                'role'         => 'owner',
+                'password'     => Hash::make('password'),
+                'status'       => 'active',
+                'phone_number' => '0987654321',
         ]);
         $owner->roles()->attach($ownerRole->id);
 
         // 3. Tạo User
         $user = User::create([
-            'full_name'    => 'Nguyễn Văn Khách',
+                'full_name'    => 'Nguyễn Văn Khách',
             'email'        => 'user@staybook.com',
             'role'         => 'user',
             'password'     => Hash::make('password'),

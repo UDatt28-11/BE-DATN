@@ -146,6 +146,59 @@ Route::get('payment/redirect', function (Request $request) {
         }
     }
     
+    // Nếu là success và có invoice_id (thanh toán invoice sau checkout)
+    if ($type === 'success' && $request->has('invoice_id')) {
+        try {
+            $invoiceId = $request->get('invoice_id');
+            $invoice = \App\Models\Invoice::with('bookingOrder')->find($invoiceId);
+            
+            if ($invoice) {
+                // Tìm payment gần nhất của invoice này
+                $latestPayment = $invoice->payments()
+                    ->latest()
+                    ->first();
+                
+                // Nếu có payment và user quay lại từ PayOS success, cập nhật payment status
+                if ($latestPayment && $latestPayment->status === 'pending') {
+                    $latestPayment->update([
+                        'status' => 'success',
+                        'paid_at' => now(),
+                    ]);
+                    Log::info('Payment redirect: Invoice payment status updated to success', [
+                        'payment_id' => $latestPayment->id,
+                        'invoice_id' => $invoice->id,
+                    ]);
+                }
+                
+                // Tính lại paid_amount từ tổng các payments thành công
+                $totalPaidAmount = $invoice->payments()
+                    ->whereIn('status', ['success', 'paid'])
+                    ->sum('amount');
+                
+                // Cập nhật invoice status nếu đã thanh toán đầy đủ
+                if ($totalPaidAmount >= $invoice->total_amount) {
+                    $invoice->update(['status' => 'paid']);
+                    
+                    // Cập nhật booking status thành completed nếu đã checkout
+                    if ($invoice->bookingOrder && in_array($invoice->bookingOrder->status, ['checked_out', 'partially_checked_out'])) {
+                        $invoice->bookingOrder->update(['status' => 'completed']);
+                    }
+                    
+                    Log::info('Payment redirect: Invoice paid after checkout', [
+                        'invoice_id' => $invoice->id,
+                        'booking_id' => $invoice->bookingOrder ? $invoice->bookingOrder->id : null,
+                        'total_paid' => $totalPaidAmount,
+                        'invoice_total' => $invoice->total_amount,
+                    ]);
+                }
+            }
+        } catch (\Exception $e) {
+            Log::error('Payment redirect: Error processing invoice payment', [
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+    
     // Nếu là success và có booking_id, kiểm tra và cập nhật booking status
     if ($type === 'success' && $request->has('booking_id')) {
         try {
@@ -261,14 +314,30 @@ Route::get('payment/redirect', function (Request $request) {
     // Xóa param 'type' khỏi query params (không cần gửi về frontend)
     unset($queryParams['type']);
     
-    // Build URL localhost với tất cả params còn lại
-    $localhostUrl = 'http://localhost:5173/payment/' . $type;
-    if (!empty($queryParams)) {
-        $localhostUrl .= '?' . http_build_query($queryParams);
+    // Redirect về frontend với tất cả query params từ PayOS
+    $frontendUrl = config('app.frontend_url', env('FRONTEND_URL', 'http://localhost:5173'));
+    
+    // Xây dựng URL với tất cả query params từ PayOS
+    $redirectUrl = $frontendUrl . '/payment/' . $type;
+    
+    // Thêm các query params từ PayOS
+    foreach ($queryParams as $key => $value) {
+        if ($key !== 'type') { // Bỏ qua param 'type' vì đã dùng trong path
+            $redirectUrl .= (strpos($redirectUrl, '?') === false ? '?' : '&') . $key . '=' . urlencode($value);
+        }
     }
     
-    // Redirect về localhost
-    return redirect($localhostUrl);
+    // Nếu có booking_id, thêm vào URL
+    if ($request->has('booking_id')) {
+        $redirectUrl .= (strpos($redirectUrl, '?') === false ? '?' : '&') . 'booking_id=' . $request->get('booking_id');
+    }
+    
+    // Nếu có invoice_id, thêm vào URL
+    if ($request->has('invoice_id')) {
+        $redirectUrl .= (strpos($redirectUrl, '?') === false ? '?' : '&') . 'invoice_id=' . $request->get('invoice_id');
+    }
+    
+    return redirect($redirectUrl);
 })->name('payment.redirect');
 
 // ========================================
@@ -412,6 +481,12 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
     Route::get('service-requests', [BookingOrderController::class, 'getServiceRequests']);
     Route::post('service-requests/{id}/approve', [BookingOrderController::class, 'approveServiceRequest']);
     Route::post('service-requests/{id}/reject', [BookingOrderController::class, 'rejectServiceRequest']);
+
+    // Quản lý yêu cầu tiện ích
+    Route::get('amenity-requests', [BookingOrderController::class, 'getAmenityRequests']);
+    Route::post('amenity-requests/{id}/approve', [BookingOrderController::class, 'approveAmenityRequest']);
+    Route::post('amenity-requests/{id}/reject', [BookingOrderController::class, 'rejectAmenityRequest']);
+    Route::post('amenity-requests/{id}/complete', [BookingOrderController::class, 'completeAmenityRequest']);
 
     // ========================================
     // 📧 EMAIL MANAGEMENT (Quản lý Email)
@@ -616,8 +691,15 @@ Route::middleware(['auth:sanctum', 'role:user,staff,admin'])->prefix('user')->gr
     // Logout (chỉ user)
     Route::post('logout', LogoutController::class)->middleware('role:user');
     
-    // Kho mã giảm giá của user (vouchers) - chỉ user
-    Route::get('vouchers', [UserVoucherController::class, 'index'])->middleware('role:user');
+    // Kho mã giảm giá của user (vouchers)
+    Route::prefix('vouchers')->group(function () {
+        Route::get('/', [UserVoucherController::class, 'index'])->name('user.vouchers.index');
+        Route::get('/available', [UserVoucherController::class, 'available'])->name('user.vouchers.available');
+        Route::get('/counts', [UserVoucherController::class, 'counts'])->name('user.vouchers.counts');
+        Route::post('/claim', [UserVoucherController::class, 'claim'])->name('user.vouchers.claim');
+        Route::post('/apply', [UserVoucherController::class, 'apply'])->name('user.vouchers.apply');
+        Route::get('/{id}', [UserVoucherController::class, 'show'])->where('id', '[0-9]+')->name('user.vouchers.show');
+    });
     
     // Bookings - Tất cả role đều có thể xem và tạo bookings của chính mình
     Route::get('bookings', [BookingOrderController::class, 'indexUser'])->name('user.bookings.index');
@@ -626,14 +708,18 @@ Route::middleware(['auth:sanctum', 'role:user,staff,admin'])->prefix('user')->gr
     Route::get('bookings/{id}', [BookingOrderController::class, 'showUser'])->where('id', '[0-9]+')->name('user.bookings.show');
     Route::patch('bookings/{id}/payment', [BookingOrderController::class, 'updatePayment'])->where('id', '[0-9]+')->name('user.bookings.updatePayment');
     Route::post('bookings/{id}/deposit', [BookingOrderController::class, 'payDeposit'])->where('id', '[0-9]+')->name('user.bookings.payDeposit');
+    Route::get('bookings/{id}/cancellation-policy', [BookingOrderController::class, 'getCancellationPolicy'])->where('id', '[0-9]+')->name('user.bookings.cancellationPolicy');
     Route::post('bookings/{id}/cancel', [BookingOrderController::class, 'cancelUserBooking'])->where('id', '[0-9]+')->name('user.bookings.cancel');
+    Route::post('bookings/{id}/change-dates', [BookingOrderController::class, 'changeDates'])->where('id', '[0-9]+')->name('user.bookings.changeDates');
     Route::post('bookings/{id}/check-in', [BookingOrderController::class, 'checkInUser'])->where('id', '[0-9]+')->name('user.bookings.checkIn');
     Route::post('bookings/{id}/request-checkout', [BookingOrderController::class, 'requestCheckOut'])->where('id', '[0-9]+')->name('user.bookings.requestCheckOut');
     Route::post('bookings/{id}/check-out', [BookingOrderController::class, 'checkOutUser'])->where('id', '[0-9]+')->name('user.bookings.checkOut');
     Route::post('bookings/{id}/request-service', [BookingOrderController::class, 'requestService'])->where('id', '[0-9]+')->name('user.bookings.requestService');
+    Route::post('bookings/{id}/request-amenity', [BookingOrderController::class, 'requestAmenity'])->where('id', '[0-9]+')->name('user.bookings.requestAmenity');
     
     // PayOS payment routes (user và admin đều có thể sử dụng)
     Route::post('payos/create-payment-link', [PayOSController::class, 'createPaymentLink'])->middleware('role:user,admin')->name('payos.createPaymentLink');
+    Route::post('payos/create-invoice-payment-link', [PayOSController::class, 'createInvoicePaymentLink'])->middleware('role:user,admin')->name('payos.createInvoicePaymentLink');
     Route::get('payos/check-status/{orderCode}', [PayOSController::class, 'checkPaymentStatus'])->middleware('role:user,admin')->where('orderCode', '[0-9]+')->name('payos.checkStatus');
     
     // Invoices - User có thể xem và thanh toán invoice của chính mình

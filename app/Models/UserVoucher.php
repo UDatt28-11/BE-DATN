@@ -15,11 +15,13 @@ class UserVoucher extends Model
         'booking_order_id',
         'claimed_at',
         'used_at',
+        'applied_discount_amount',
     ];
 
     protected $casts = [
         'claimed_at' => 'datetime',
         'used_at' => 'datetime',
+        'applied_discount_amount' => 'decimal:2',
     ];
 
     // Relationships

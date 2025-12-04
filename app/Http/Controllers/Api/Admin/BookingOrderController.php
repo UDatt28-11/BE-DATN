@@ -974,6 +974,9 @@ class BookingOrderController extends Controller
                 'total_amount' => 'required|numeric|min:0',
                 'payment_method' => 'nullable|string|max:50|in:cash,bank,momo,card',
                 'notes' => 'nullable|string',
+                'voucher_id' => 'nullable|integer|exists:vouchers,id',
+                'discount_amount' => 'nullable|numeric|min:0',
+                'original_total_amount' => 'nullable|numeric|min:0',
                 'details' => 'required|array|min:1',
                 'details.*.room_id' => 'nullable|exists:rooms,id',
                 'details.*.room_type_id' => 'nullable|exists:room_types,id',
@@ -1111,6 +1114,60 @@ class BookingOrderController extends Controller
 
                 // Cập nhật invoice total_amount
                 $invoice->update(['total_amount' => $totalAmount]);
+
+                // Xử lý voucher nếu có
+                if (isset($validated['voucher_id']) && $validated['voucher_id']) {
+                    $voucher = \App\Models\Voucher::find($validated['voucher_id']);
+                    if ($voucher) {
+                        // Tìm user_voucher chưa sử dụng
+                        $userVoucher = \App\Models\UserVoucher::where('voucher_id', $voucher->id)
+                            ->where('user_id', $user->id)
+                            ->whereNull('used_at')
+                            ->first();
+
+                        if ($userVoucher) {
+                            $discountAmount = $validated['discount_amount'] ?? 0;
+                            
+                            // Đánh dấu voucher đã sử dụng
+                            $userVoucher->update([
+                                'used_at' => now(),
+                                'booking_order_id' => $order->id,
+                                'applied_discount_amount' => $discountAmount,
+                            ]);
+
+                            // Tăng usage_count của voucher
+                            $voucher->increment('usage_count');
+
+                            // Thêm invoice item cho voucher discount (số tiền âm)
+                            if ($discountAmount > 0) {
+                                \App\Models\InvoiceItem::create([
+                                    'invoice_id' => $invoice->id,
+                                    'description' => "Giảm giá voucher ({$voucher->code})",
+                                    'quantity' => 1,
+                                    'unit_price' => -$discountAmount,
+                                    'total_line' => -$discountAmount,
+                                    'item_type' => 'voucher_discount',
+                                ]);
+
+                                // Cập nhật lại invoice total_amount sau khi giảm giá
+                                $newInvoiceTotal = max(0, $totalAmount - $discountAmount);
+                                $invoice->update([
+                                    'total_amount' => $newInvoiceTotal,
+                                    'discount_amount' => $discountAmount,
+                                ]);
+                            }
+
+                            Log::info('Voucher applied to booking', [
+                                'user_id' => $user->id,
+                                'voucher_id' => $voucher->id,
+                                'voucher_code' => $voucher->code,
+                                'booking_order_id' => $order->id,
+                                'discount_amount' => $discountAmount,
+                                'invoice_id' => $invoice->id,
+                            ]);
+                        }
+                    }
+                }
 
                 DB::commit();
             } catch (\Exception $e) {
@@ -1406,7 +1463,126 @@ class BookingOrderController extends Controller
     }
 
     /**
+     * Tính toán chính sách hủy phòng
+     * - Hủy trước 7 ngày: hoàn 100% tiền cọc
+     * - Hủy trong vòng 3-6 ngày: hoàn 50% tiền cọc
+     * - Hủy trong vòng 0-2 ngày hoặc không đến: mất 100% tiền cọc
+     */
+    private function calculateCancellationPolicy(BookingOrder $booking): array
+    {
+        // Lấy ngày check-in sớm nhất từ booking details
+        $firstCheckInDate = $booking->details()->min('check_in_date');
+        
+        if (!$firstCheckInDate) {
+            return [
+                'days_until_checkin' => 0,
+                'refund_percentage' => 0,
+                'refund_amount' => 0,
+                'deposit_amount' => $booking->paid_amount ?? $booking->deposit_amount ?? 0,
+                'policy_text' => 'Không tìm thấy thông tin ngày check-in',
+            ];
+        }
+
+        $checkInDate = \Carbon\Carbon::parse($firstCheckInDate);
+        $today = \Carbon\Carbon::now()->startOfDay();
+        $daysUntilCheckIn = $today->diffInDays($checkInDate, false); // false để có số âm nếu đã qua
+
+        $depositAmount = $booking->paid_amount ?? $booking->deposit_amount ?? 0;
+        $refundPercentage = 0;
+        $policyText = '';
+
+        if ($daysUntilCheckIn >= 7) {
+            // Hủy trước 7 ngày: hoàn 100%
+            $refundPercentage = 100;
+            $policyText = 'Hủy trước 7 ngày - Hoàn lại 100% tiền cọc';
+        } elseif ($daysUntilCheckIn >= 3) {
+            // Hủy trong vòng 3-6 ngày: hoàn 50%
+            $refundPercentage = 50;
+            $policyText = 'Hủy trong vòng 3-6 ngày - Hoàn lại 50% tiền cọc';
+        } else {
+            // Hủy trong vòng 0-2 ngày hoặc đã qua: mất 100%
+            $refundPercentage = 0;
+            $policyText = 'Hủy trong vòng 0-2 ngày - Không hoàn lại tiền cọc';
+        }
+
+        $refundAmount = ($depositAmount * $refundPercentage) / 100;
+
+        return [
+            'days_until_checkin' => max(0, $daysUntilCheckIn),
+            'refund_percentage' => $refundPercentage,
+            'refund_amount' => round($refundAmount, 0),
+            'deposit_amount' => round($depositAmount, 0),
+            'forfeited_amount' => round($depositAmount - $refundAmount, 0),
+            'policy_text' => $policyText,
+            'check_in_date' => $checkInDate->format('Y-m-d'),
+        ];
+    }
+
+    /**
+     * API để xem trước chính sách hủy trước khi hủy
+     */
+    public function getCancellationPolicy(Request $request, string $id): JsonResponse
+    {
+        try {
+            $user = $request->user();
+
+            if (!$user) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Unauthorized',
+                ], 401);
+            }
+
+            $booking = BookingOrder::with('details')->findOrFail($id);
+
+            // Kiểm tra quyền
+            if ($booking->guest_id !== $user->id && ($user->role ?? null) !== 'admin') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Bạn không có quyền xem thông tin đơn đặt phòng này.',
+                ], 403);
+            }
+
+            // Kiểm tra trạng thái có thể hủy
+            $canCancel = in_array($booking->status, ['pending', 'confirmed'], true);
+            
+            $policy = $this->calculateCancellationPolicy($booking);
+            $policy['can_cancel'] = $canCancel;
+            $policy['booking_status'] = $booking->status;
+            
+            if (!$canCancel) {
+                $policy['cancel_reason'] = 'Không thể hủy đơn đã check-in hoặc đã hoàn tất.';
+            }
+
+            return response()->json([
+                'success' => true,
+                'data' => $policy,
+            ]);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Không tìm thấy đơn đặt phòng.',
+            ], 404);
+        } catch (\Exception $e) {
+            Log::error('BookingOrderController@getCancellationPolicy failed', [
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra.',
+            ], 500);
+        }
+    }
+
+    /**
      * User hủy đơn đặt phòng của chính mình
+     * Áp dụng chính sách hủy:
+     * - Hủy trước 7 ngày: hoàn 100% tiền cọc
+     * - Hủy trong vòng 3-6 ngày: hoàn 50% tiền cọc  
+     * - Hủy trong vòng 0-2 ngày hoặc không đến: mất 100% tiền cọc
      */
     public function cancelUserBooking(Request $request, string $id): JsonResponse
     {
@@ -1420,7 +1596,11 @@ class BookingOrderController extends Controller
                 ], 401);
             }
 
-            $booking = BookingOrder::findOrFail($id);
+            $validated = $request->validate([
+                'reason' => 'nullable|string|max:1000',
+            ]);
+
+            $booking = BookingOrder::with('details')->findOrFail($id);
 
             // Chỉ cho phép hủy đơn của chính mình (hoặc admin)
             if ($booking->guest_id !== $user->id && ($user->role ?? null) !== 'admin') {
@@ -1431,7 +1611,6 @@ class BookingOrderController extends Controller
             }
 
             // Chỉ chặn hủy nếu đơn đã có check-in / checkout hoàn tất
-            // Cho phép hủy khi CHƯA check-in: pending, confirmed, hoặc đang chờ check-in
             if (in_array($booking->status, [
                 'checked_in',
                 'partially_checked_in',
@@ -1445,9 +1624,15 @@ class BookingOrderController extends Controller
                 ], 400);
             }
 
+            // Tính toán chính sách hủy
+            $policy = $this->calculateCancellationPolicy($booking);
+
             $from = $booking->status;
             $booking->update([
                 'status' => 'cancelled',
+                'refund_amount' => $policy['refund_amount'],
+                'cancellation_reason' => $validated['reason'] ?? null,
+                'cancelled_at' => now(),
             ]);
 
             Log::info('BookingOrder cancelled by user', [
@@ -1455,15 +1640,32 @@ class BookingOrderController extends Controller
                 'user_id' => $user->id,
                 'from' => $from,
                 'to' => 'cancelled',
+                'refund_policy' => $policy,
             ]);
 
             $booking->refresh();
 
+            // Tạo message với thông tin hoàn tiền
+            $message = 'Hủy đặt phòng thành công.';
+            if ($policy['refund_amount'] > 0) {
+                $message .= ' Số tiền hoàn lại: ' . number_format($policy['refund_amount'], 0, ',', '.') . ' VNĐ';
+                $message .= ' (' . $policy['refund_percentage'] . '% tiền cọc).';
+            } else {
+                $message .= ' Không có tiền hoàn lại do ' . strtolower($policy['policy_text']) . '.';
+            }
+
             return response()->json([
                 'success' => true,
-                'message' => 'Hủy đặt phòng thành công.',
+                'message' => $message,
                 'data' => new BookingOrderResource($booking),
+                'refund_info' => $policy,
             ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Dữ liệu không hợp lệ.',
+                'errors' => $e->errors(),
+            ], 422);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json([
                 'success' => false,
@@ -1479,6 +1681,163 @@ class BookingOrderController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Có lỗi xảy ra khi hủy đơn đặt phòng.',
+            ], 500);
+        }
+    }
+
+    /**
+     * User đổi ngày đặt phòng (1 lần miễn phí)
+     */
+    public function changeDates(Request $request, string $id): JsonResponse
+    {
+        try {
+            $user = $request->user();
+
+            if (!$user) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Unauthorized',
+                ], 401);
+            }
+
+            $validated = $request->validate([
+                'new_check_in_date' => 'required|date|after_or_equal:today',
+                'new_check_out_date' => 'required|date|after:new_check_in_date',
+            ]);
+
+            $booking = BookingOrder::with('details.room')->findOrFail($id);
+
+            // Kiểm tra quyền
+            if ($booking->guest_id !== $user->id && ($user->role ?? null) !== 'admin') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Bạn không có quyền thay đổi đơn đặt phòng này.',
+                ], 403);
+            }
+
+            // Chỉ cho phép đổi ngày khi chưa check-in
+            if (!in_array($booking->status, ['pending', 'confirmed'], true)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Không thể đổi ngày cho đơn đã check-in hoặc đã hoàn tất.',
+                ], 400);
+            }
+
+            // Kiểm tra số lần đổi ngày (1 lần miễn phí)
+            $dateChangeCount = $booking->date_change_count ?? 0;
+            if ($dateChangeCount >= 1) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Bạn đã sử dụng hết số lần đổi ngày miễn phí (1 lần). Vui lòng hủy và đặt lại nếu cần.',
+                ], 400);
+            }
+
+            $newCheckIn = \Carbon\Carbon::parse($validated['new_check_in_date']);
+            $newCheckOut = \Carbon\Carbon::parse($validated['new_check_out_date']);
+            $newNights = $newCheckIn->diffInDays($newCheckOut);
+
+            // Kiểm tra phòng có trống trong khoảng thời gian mới không
+            $roomIds = $booking->details->pluck('room_id')->toArray();
+            $conflictingBookings = \App\Models\BookingDetail::whereIn('room_id', $roomIds)
+                ->where('booking_order_id', '!=', $booking->id)
+                ->whereHas('bookingOrder', function($q) {
+                    $q->whereNotIn('status', ['cancelled', 'completed', 'checked_out']);
+                })
+                ->where(function($query) use ($newCheckIn, $newCheckOut) {
+                    $query->where(function($q) use ($newCheckIn, $newCheckOut) {
+                        $q->where('check_in_date', '<', $newCheckOut)
+                          ->where('check_out_date', '>', $newCheckIn);
+                    });
+                })
+                ->exists();
+
+            if ($conflictingBookings) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Phòng không còn trống trong khoảng thời gian mới. Vui lòng chọn ngày khác.',
+                ], 400);
+            }
+
+            // Cập nhật tất cả booking details
+            $oldTotalAmount = $booking->total_amount;
+            $newTotalAmount = 0;
+
+            foreach ($booking->details as $detail) {
+                $pricePerNight = $detail->room->roomType->price_per_night ?? $detail->price_per_night ?? 0;
+                $newSubtotal = $pricePerNight * $newNights;
+                $newTotalAmount += $newSubtotal;
+
+                $detail->update([
+                    'check_in_date' => $newCheckIn->format('Y-m-d'),
+                    'check_out_date' => $newCheckOut->format('Y-m-d'),
+                    'nights' => $newNights,
+                    'subtotal' => $newSubtotal,
+                ]);
+            }
+
+            // Cập nhật booking order
+            $booking->update([
+                'total_amount' => $newTotalAmount,
+                'date_change_count' => $dateChangeCount + 1,
+            ]);
+
+            Log::info('BookingOrder dates changed by user', [
+                'booking_order_id' => $booking->id,
+                'user_id' => $user->id,
+                'old_total_amount' => $oldTotalAmount,
+                'new_total_amount' => $newTotalAmount,
+                'new_check_in' => $newCheckIn->format('Y-m-d'),
+                'new_check_out' => $newCheckOut->format('Y-m-d'),
+            ]);
+
+            $booking->refresh();
+            $booking->load('details.room.roomType');
+
+            $message = 'Đổi ngày thành công!';
+            if ($newTotalAmount != $oldTotalAmount) {
+                $diff = $newTotalAmount - $oldTotalAmount;
+                if ($diff > 0) {
+                    $message .= ' Tổng tiền tăng ' . number_format($diff, 0, ',', '.') . ' VNĐ.';
+                } else {
+                    $message .= ' Tổng tiền giảm ' . number_format(abs($diff), 0, ',', '.') . ' VNĐ.';
+                }
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => $message,
+                'data' => new BookingOrderResource($booking),
+                'change_info' => [
+                    'old_total_amount' => (int) round($oldTotalAmount),
+                    'new_total_amount' => (int) round($newTotalAmount),
+                    'difference' => (int) round($newTotalAmount - $oldTotalAmount),
+                    'new_check_in_date' => $newCheckIn->format('Y-m-d'),
+                    'new_check_out_date' => $newCheckOut->format('Y-m-d'),
+                    'nights' => $newNights,
+                    'date_changes_remaining' => 0,
+                ],
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Dữ liệu không hợp lệ.',
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Không tìm thấy đơn đặt phòng.',
+            ], 404);
+        } catch (\Exception $e) {
+            Log::error('BookingOrderController@changeDates failed', [
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi đổi ngày.',
             ], 500);
         }
     }
@@ -1669,10 +2028,18 @@ class BookingOrderController extends Controller
                 if (in_array('details.checkedInGuests', $include, true)) {
                     $relations[] = 'details.checkedInGuests';
                 }
+                // Load reviews để kiểm tra xem đã review chưa
+                if (in_array('details.review', $include, true)) {
+                    $relations[] = 'details.review';
+                }
             }
             
             if (in_array('checkInRequests', $include, true)) {
                 $relations[] = 'checkInRequests';
+            }
+            
+            if (in_array('checkoutRequests', $include, true)) {
+                $relations[] = 'checkoutRequests';
             }
             
             $booking = BookingOrder::with($relations)->findOrFail($id);
@@ -2061,7 +2428,18 @@ class BookingOrderController extends Controller
             $checkedInCount = $booking->details()->where('status', 'checked_in')->count();
             
             // Cập nhật trạng thái booking order
+            // CHỈ set thành checked_in hoặc partially_checked_in, KHÔNG BAO GIỜ set thành checked_out
             $newStatus = ($checkedInCount >= $totalDetails) ? 'checked_in' : 'partially_checked_in';
+            
+            // Log để debug
+            Log::info('BookingOrderController@approveCheckInRequest - Updating booking status', [
+                'booking_id' => $booking->id,
+                'old_status' => $booking->status,
+                'new_status' => $newStatus,
+                'total_details' => $totalDetails,
+                'checked_in_count' => $checkedInCount,
+            ]);
+            
             $booking->update(['status' => $newStatus]);
 
             DB::commit();
@@ -2262,7 +2640,18 @@ class BookingOrderController extends Controller
             $checkedInCount = $booking->details()->where('status', 'checked_in')->count();
             
             // Cập nhật trạng thái booking order
+            // CHỈ set thành checked_in hoặc partially_checked_in, KHÔNG BAO GIỜ set thành checked_out
             $newStatus = ($checkedInCount >= $totalDetails) ? 'checked_in' : 'partially_checked_in';
+            
+            // Log để debug
+            Log::info('BookingOrderController@checkInDirect - Updating booking status', [
+                'booking_id' => $booking->id,
+                'old_status' => $booking->status,
+                'new_status' => $newStatus,
+                'total_details' => $totalDetails,
+                'checked_in_count' => $checkedInCount,
+            ]);
+            
             $booking->update([
                 'status' => $newStatus,
                 'staff_id' => $admin->id,
@@ -3499,6 +3888,472 @@ class BookingOrderController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Có lỗi xảy ra khi từ chối yêu cầu checkout.',
+                'error' => config('app.debug') ? $e->getMessage() : null,
+            ], 500);
+        }
+    }
+
+    // =========================================================================
+    // AMENITY REQUESTS - Yêu cầu tiện ích
+    // =========================================================================
+
+    /**
+     * User: Yêu cầu tiện ích cho booking
+     * Tạo AmenityRequest với status = 'pending'
+     */
+    public function requestAmenity(Request $request, string $id): JsonResponse
+    {
+        try {
+            $user = $request->user();
+            
+            if (!$user) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Unauthorized',
+                ], 401);
+            }
+
+            $request->validate([
+                'booking_detail_id' => 'required|exists:booking_details,id',
+                'amenity_id' => 'required|exists:amenities,id',
+                'quantity' => 'required|integer|min:1',
+                'notes' => 'nullable|string|max:1000',
+            ]);
+
+            DB::beginTransaction();
+
+            $booking = BookingOrder::with(['details'])->findOrFail($id);
+
+            // Kiểm tra booking có thuộc về user hiện tại không
+            if ($booking->guest_id !== $user->id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Bạn không có quyền yêu cầu tiện ích cho đơn đặt phòng này.',
+                ], 403);
+            }
+
+            // Kiểm tra booking detail có thuộc về booking này không
+            $bookingDetail = $booking->details->firstWhere('id', $request->booking_detail_id);
+            if (!$bookingDetail) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Booking detail không thuộc về booking này.',
+                ], 400);
+            }
+
+            // Kiểm tra booking có thể yêu cầu tiện ích không (phải đã check-in)
+            if (!in_array($booking->status, ['checked_in', 'partially_checked_in'])) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Chỉ có thể yêu cầu tiện ích khi đã check-in.',
+                ], 400);
+            }
+
+            // Lấy thông tin amenity
+            $amenity = \App\Models\Amenity::findOrFail($request->amenity_id);
+
+            // Kiểm tra xem đã có yêu cầu pending cho amenity này chưa
+            $existingRequest = \App\Models\AmenityRequest::where('booking_details_id', $request->booking_detail_id)
+                ->where('amenity_id', $request->amenity_id)
+                ->where('status', 'pending')
+                ->first();
+
+            if ($existingRequest) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Bạn đã có yêu cầu tiện ích này đang chờ xử lý.',
+                ], 400);
+            }
+
+            // Tạo AmenityRequest với status = 'pending'
+            $amenityRequest = \App\Models\AmenityRequest::create([
+                'booking_details_id' => $request->booking_detail_id,
+                'amenity_id' => $request->amenity_id,
+                'quantity' => $request->quantity,
+                'price_at_request' => null, // Tiện ích thường không tính phí trực tiếp
+                'status' => 'pending',
+                'notes' => $request->notes,
+            ]);
+
+            // Gửi thông báo cho admin (log để admin có thể xem)
+            Log::info('New amenity request created', [
+                'amenity_request_id' => $amenityRequest->id,
+                'booking_id' => $booking->id,
+                'booking_order_code' => $booking->order_code,
+                'amenity_id' => $amenity->id,
+                'amenity_name' => $amenity->name,
+                'quantity' => $request->quantity,
+                'customer_name' => $booking->customer_name ?? $user->full_name,
+            ]);
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Yêu cầu tiện ích đã được gửi. Vui lòng chờ admin xác nhận.',
+                'data' => $amenityRequest->load('amenity'),
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Dữ liệu không hợp lệ',
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('BookingOrderController@requestAmenity failed', [
+                'booking_id' => $id,
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi yêu cầu tiện ích.',
+                'error' => config('app.debug') ? $e->getMessage() : null,
+            ], 500);
+        }
+    }
+
+    /**
+     * Admin: Lấy danh sách amenity requests
+     */
+    public function getAmenityRequests(Request $request): JsonResponse
+    {
+        try {
+            $request->validate([
+                'status' => 'sometimes|in:pending,approved,rejected,completed',
+                'booking_id' => 'sometimes|exists:booking_orders,id',
+                'page' => 'sometimes|integer|min:1',
+                'per_page' => 'sometimes|integer|min:1|max:100',
+            ]);
+
+            $perPage = (int) ($request->get('per_page', 15));
+            $query = \App\Models\AmenityRequest::with([
+                'amenity',
+                'detail.room',
+                'detail.bookingOrder.guest',
+                'processedBy:id,full_name',
+            ])
+            ->orderBy('created_at', 'desc');
+
+            // Filter by status
+            if ($request->has('status')) {
+                $query->where('status', $request->status);
+            } else {
+                // Mặc định chỉ lấy pending
+                $query->where('status', 'pending');
+            }
+
+            // Filter by booking_id
+            if ($request->has('booking_id')) {
+                $query->whereHas('detail', function($q) use ($request) {
+                    $q->where('booking_order_id', $request->booking_id);
+                });
+            }
+
+            $amenityRequests = $query->paginate($perPage);
+
+            $result = collect($amenityRequests->items())->map(function($amenityRequest) {
+                $detail = $amenityRequest->detail;
+                $booking = $detail->bookingOrder ?? null;
+                $amenity = $amenityRequest->amenity;
+                $room = $detail->room ?? null;
+
+                return [
+                    'id' => $amenityRequest->id,
+                    'booking_id' => $booking->id ?? null,
+                    'booking_order_code' => $booking->order_code ?? null,
+                    'room_name' => $room->name ?? null,
+                    'amenity' => $amenity ? [
+                        'id' => $amenity->id,
+                        'name' => $amenity->name,
+                        'icon_url' => $amenity->icon_url,
+                        'type' => $amenity->type,
+                        'category' => $amenity->category,
+                    ] : null,
+                    'quantity' => $amenityRequest->quantity,
+                    'status' => $amenityRequest->status,
+                    'notes' => $amenityRequest->notes,
+                    'admin_notes' => $amenityRequest->admin_notes,
+                    'customer_name' => $booking->customer_name ?? $booking->guest->full_name ?? null,
+                    'processed_by' => $amenityRequest->processedBy ? [
+                        'id' => $amenityRequest->processedBy->id,
+                        'name' => $amenityRequest->processedBy->full_name,
+                    ] : null,
+                    'created_at' => $amenityRequest->created_at?->toISOString(),
+                    'approved_at' => $amenityRequest->approved_at?->toISOString(),
+                    'rejected_at' => $amenityRequest->rejected_at?->toISOString(),
+                    'completed_at' => $amenityRequest->completed_at?->toISOString(),
+                ];
+            });
+
+            return response()->json([
+                'success' => true,
+                'data' => $result,
+                'meta' => [
+                    'pagination' => [
+                        'page' => $amenityRequests->currentPage(),
+                        'per_page' => $amenityRequests->perPage(),
+                        'total' => $amenityRequests->total(),
+                        'last_page' => $amenityRequests->lastPage(),
+                    ],
+                ],
+            ]);
+        } catch (\Exception $e) {
+            Log::error('BookingOrderController@getAmenityRequests failed', [
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi lấy danh sách yêu cầu tiện ích.',
+                'error' => config('app.debug') ? $e->getMessage() : null,
+            ], 500);
+        }
+    }
+
+    /**
+     * Admin: Approve amenity request
+     */
+    public function approveAmenityRequest(Request $request, string $id): JsonResponse
+    {
+        try {
+            $admin = $request->user();
+            
+            if (!$admin || !in_array($admin->role, ['admin', 'staff'])) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Unauthorized',
+                ], 401);
+            }
+
+            $request->validate([
+                'admin_notes' => 'nullable|string|max:1000',
+            ]);
+
+            DB::beginTransaction();
+
+            $amenityRequest = \App\Models\AmenityRequest::with([
+                'amenity',
+                'detail.bookingOrder',
+                'detail.room',
+            ])->findOrFail($id);
+
+            // Kiểm tra status
+            if ($amenityRequest->status !== 'pending') {
+                DB::rollBack();
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Yêu cầu tiện ích này đã được xử lý.',
+                ], 400);
+            }
+
+            // Cập nhật status
+            $amenityRequest->update([
+                'status' => 'approved',
+                'admin_notes' => $request->admin_notes,
+                'approved_at' => now(),
+                'processed_by' => $admin->id,
+            ]);
+
+            $booking = $amenityRequest->detail->bookingOrder;
+            $amenity = $amenityRequest->amenity;
+
+            Log::info('Amenity request approved', [
+                'amenity_request_id' => $amenityRequest->id,
+                'booking_id' => $booking->id,
+                'amenity_name' => $amenity->name ?? 'N/A',
+                'approved_by' => $admin->id,
+            ]);
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Yêu cầu tiện ích đã được chấp nhận.',
+                'data' => $amenityRequest->fresh(['amenity', 'detail.bookingOrder', 'processedBy']),
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Dữ liệu không hợp lệ',
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('BookingOrderController@approveAmenityRequest failed', [
+                'request_id' => $id,
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi chấp nhận yêu cầu tiện ích.',
+                'error' => config('app.debug') ? $e->getMessage() : null,
+            ], 500);
+        }
+    }
+
+    /**
+     * Admin: Reject amenity request
+     */
+    public function rejectAmenityRequest(Request $request, string $id): JsonResponse
+    {
+        try {
+            $admin = $request->user();
+            
+            if (!$admin || !in_array($admin->role, ['admin', 'staff'])) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Unauthorized',
+                ], 401);
+            }
+
+            $request->validate([
+                'admin_notes' => 'nullable|string|max:1000',
+            ]);
+
+            DB::beginTransaction();
+
+            $amenityRequest = \App\Models\AmenityRequest::with([
+                'amenity',
+                'detail.bookingOrder',
+            ])->findOrFail($id);
+
+            // Kiểm tra status
+            if ($amenityRequest->status !== 'pending') {
+                DB::rollBack();
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Yêu cầu tiện ích này đã được xử lý.',
+                ], 400);
+            }
+
+            // Cập nhật status
+            $amenityRequest->update([
+                'status' => 'rejected',
+                'admin_notes' => $request->admin_notes,
+                'rejected_at' => now(),
+                'processed_by' => $admin->id,
+            ]);
+
+            $booking = $amenityRequest->detail->bookingOrder;
+            $amenity = $amenityRequest->amenity;
+
+            Log::info('Amenity request rejected', [
+                'amenity_request_id' => $amenityRequest->id,
+                'booking_id' => $booking->id,
+                'amenity_name' => $amenity->name ?? 'N/A',
+                'rejected_by' => $admin->id,
+                'reason' => $request->admin_notes,
+            ]);
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Yêu cầu tiện ích đã bị từ chối.',
+                'data' => $amenityRequest->fresh(['amenity', 'detail.bookingOrder', 'processedBy']),
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Dữ liệu không hợp lệ',
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('BookingOrderController@rejectAmenityRequest failed', [
+                'request_id' => $id,
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi từ chối yêu cầu tiện ích.',
+                'error' => config('app.debug') ? $e->getMessage() : null,
+            ], 500);
+        }
+    }
+
+    /**
+     * Admin: Mark amenity request as completed
+     */
+    public function completeAmenityRequest(Request $request, string $id): JsonResponse
+    {
+        try {
+            $admin = $request->user();
+            
+            if (!$admin || !in_array($admin->role, ['admin', 'staff'])) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Unauthorized',
+                ], 401);
+            }
+
+            $request->validate([
+                'admin_notes' => 'nullable|string|max:1000',
+            ]);
+
+            DB::beginTransaction();
+
+            $amenityRequest = \App\Models\AmenityRequest::with([
+                'amenity',
+                'detail.bookingOrder',
+            ])->findOrFail($id);
+
+            // Kiểm tra status - chỉ có thể complete nếu đã approved
+            if ($amenityRequest->status !== 'approved') {
+                DB::rollBack();
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Chỉ có thể hoàn thành yêu cầu đã được chấp nhận.',
+                ], 400);
+            }
+
+            // Cập nhật status
+            $amenityRequest->update([
+                'status' => 'completed',
+                'admin_notes' => $request->admin_notes ?? $amenityRequest->admin_notes,
+                'completed_at' => now(),
+                'processed_by' => $admin->id,
+            ]);
+
+            Log::info('Amenity request completed', [
+                'amenity_request_id' => $amenityRequest->id,
+                'completed_by' => $admin->id,
+            ]);
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Yêu cầu tiện ích đã được hoàn thành.',
+                'data' => $amenityRequest->fresh(['amenity', 'detail.bookingOrder', 'processedBy']),
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('BookingOrderController@completeAmenityRequest failed', [
+                'request_id' => $id,
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi hoàn thành yêu cầu tiện ích.',
                 'error' => config('app.debug') ? $e->getMessage() : null,
             ], 500);
         }

@@ -56,19 +56,26 @@ class VoucherController extends Controller
     {
         try {
             $validatedData = $request->validate([
-                'property_id' => 'required|integer|exists:properties,id',
+                'property_id' => 'nullable|integer|exists:properties,id',
                 'code' => 'required|string|max:50|unique:vouchers,code',
-                'discount_type' => 'required|string|max:50',
+                'name' => 'nullable|string|max:255',
+                'description' => 'nullable|string|max:1000',
+                'discount_type' => 'required|string|in:percentage,fixed_amount',
                 'discount_value' => 'required|numeric|min:0',
+                'min_order_amount' => 'nullable|numeric|min:0',
+                'max_discount_amount' => 'nullable|numeric|min:0',
+                'usage_limit' => 'nullable|integer|min:1',
+                'max_usage_per_user' => 'nullable|integer|min:1',
                 'start_date' => 'required|date',
                 'end_date' => 'required|date|after:start_date',
                 'is_active' => 'sometimes|boolean',
+                'is_public' => 'sometimes|boolean',
             ], [
-                'property_id.required' => 'Vui lòng chọn property.',
                 'property_id.exists' => 'Property không tồn tại.',
                 'code.required' => 'Vui lòng nhập mã voucher.',
                 'code.unique' => 'Mã voucher đã tồn tại.',
                 'discount_type.required' => 'Vui lòng chọn loại giảm giá.',
+                'discount_type.in' => 'Loại giảm giá phải là percentage hoặc fixed_amount.',
                 'discount_value.required' => 'Vui lòng nhập giá trị giảm giá.',
                 'discount_value.numeric' => 'Giá trị giảm giá phải là số.',
                 'discount_value.min' => 'Giá trị giảm giá phải lớn hơn hoặc bằng 0.',
@@ -77,9 +84,12 @@ class VoucherController extends Controller
                 'end_date.after' => 'Ngày kết thúc phải sau ngày bắt đầu.',
             ]);
 
-            if (!isset($validatedData['is_active'])) {
-                $validatedData['is_active'] = true;
-            }
+            // Set defaults
+            $validatedData['is_active'] = $validatedData['is_active'] ?? true;
+            $validatedData['is_public'] = $validatedData['is_public'] ?? true;
+            $validatedData['min_order_amount'] = $validatedData['min_order_amount'] ?? 0;
+            $validatedData['max_usage_per_user'] = $validatedData['max_usage_per_user'] ?? 1;
+            $validatedData['code'] = strtoupper(trim($validatedData['code']));
 
             $voucher = Voucher::create($validatedData);
 
@@ -149,20 +159,33 @@ class VoucherController extends Controller
     {
         try {
             $validatedData = $request->validate([
-                'property_id' => 'sometimes|integer|exists:properties,id',
+                'property_id' => 'sometimes|nullable|integer|exists:properties,id',
                 'code' => 'sometimes|string|max:50|unique:vouchers,code,' . $voucher->id,
-                'discount_type' => 'sometimes|string|max:50',
+                'name' => 'sometimes|nullable|string|max:255',
+                'description' => 'sometimes|nullable|string|max:1000',
+                'discount_type' => 'sometimes|string|in:percentage,fixed_amount',
                 'discount_value' => 'sometimes|numeric|min:0',
+                'min_order_amount' => 'sometimes|nullable|numeric|min:0',
+                'max_discount_amount' => 'sometimes|nullable|numeric|min:0',
+                'usage_limit' => 'sometimes|nullable|integer|min:1',
+                'max_usage_per_user' => 'sometimes|nullable|integer|min:1',
                 'start_date' => 'sometimes|date',
                 'end_date' => 'sometimes|date|after:start_date',
                 'is_active' => 'sometimes|boolean',
+                'is_public' => 'sometimes|boolean',
             ], [
                 'property_id.exists' => 'Property không tồn tại.',
                 'code.unique' => 'Mã voucher đã tồn tại.',
+                'discount_type.in' => 'Loại giảm giá phải là percentage hoặc fixed_amount.',
                 'discount_value.numeric' => 'Giá trị giảm giá phải là số.',
                 'discount_value.min' => 'Giá trị giảm giá phải lớn hơn hoặc bằng 0.',
                 'end_date.after' => 'Ngày kết thúc phải sau ngày bắt đầu.',
             ]);
+
+            // Uppercase code if provided
+            if (isset($validatedData['code'])) {
+                $validatedData['code'] = strtoupper(trim($validatedData['code']));
+            }
 
             $voucher->update($validatedData);
 
