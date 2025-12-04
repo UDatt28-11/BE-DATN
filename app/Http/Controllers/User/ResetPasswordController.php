@@ -7,11 +7,12 @@ use Illuminate\Http\Request;
 
 class ResetPasswordController extends Controller
 {
-    public function showResetForm($token)
+    public function showResetForm(Request $request, $token)
     {
-        return response()->json([
-            'message' => 'Hiển thị form reset password',
-            'token' => $token,
-        ]);
+        $email = $request->query('email');
+        $frontendUrl = env('FRONTEND_URL', 'http://localhost:5173');
+        
+        // Redirect đến trang reset password trên frontend
+        return redirect("{$frontendUrl}/reset-password?token={$token}&email={$email}");
     }
 }

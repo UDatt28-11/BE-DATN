@@ -55,6 +55,17 @@ class AuthController extends Controller
             ]);
         }
 
+        // Kiểm tra user bị khóa
+        if ($user->status === 'locked') {
+            throw ValidationException::withMessages([
+                'email' => [
+                    'Tài khoản của bạn đã bị khóa.',
+                    'Lý do: ' . ($user->ly_do_block ?? 'Không xác định'),
+                    $user->block_den_ngay ? 'Khóa đến: ' . $user->block_den_ngay : '',
+                ]
+            ]);
+        }
+
         // Xóa token cũ
         $user->tokens()->delete();
 
@@ -64,7 +75,7 @@ class AuthController extends Controller
 
         return response()->json([
             'message' => 'Đăng nhập thành công',
-            'user' => $user->only(['id', 'full_name', 'email', 'role', 'phone_number']),
+            'user' => $user->only(['id', 'full_name', 'email', 'role', 'phone_number', 'avatar']),
             'token' => $token,
         ]);
     }
