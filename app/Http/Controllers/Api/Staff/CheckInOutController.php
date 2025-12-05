@@ -8,6 +8,11 @@ use App\Models\BookingDetail;
 use App\Models\CheckedInGuest;
 use App\Models\Room;
 use App\Models\Invoice;
+use App\Models\InvoiceItem;
+use App\Models\Supply;
+use App\Models\SupplyLog;
+use App\Models\Service;
+use App\Models\BookingService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -441,6 +446,7 @@ class CheckInOutController extends Controller
                 'damaged_supplies' => 'nullable|array',
                 'damaged_supplies.*.supply_id' => 'required|exists:supplies,id',
                 'damaged_supplies.*.quantity' => 'required|integer|min:1',
+                'damaged_supplies.*.unit_price' => 'nullable|numeric|min:0',
                 'damaged_supplies.*.notes' => 'nullable|string|max:500',
                 'notes' => 'nullable|string|max:1000',
                 'create_invoice' => 'nullable|boolean',
@@ -448,7 +454,7 @@ class CheckInOutController extends Controller
 
             DB::beginTransaction();
 
-            $booking = BookingOrder::with(['details.room', 'invoices'])->findOrFail($id);
+            $booking = BookingOrder::with(['details.room', 'invoices.invoiceItems'])->findOrFail($id);
 
             // Kiểm tra booking có thể check-out không
             if (!in_array($booking->status, ['checked_in', 'partially_checked_in', 'partially_checked_out'])) {
@@ -478,6 +484,103 @@ class CheckInOutController extends Controller
                 ], 400);
             }
 
+            // Lấy hoặc tạo invoice cho booking
+            $invoice = $booking->invoices()->first();
+            if (!$invoice) {
+                $invoice = Invoice::create([
+                    'booking_order_id' => $booking->id,
+                    'invoice_code' => 'INV-' . strtoupper(Str::random(8)),
+                    'total_amount' => $booking->total_amount,
+                    'paid_amount' => $booking->deposit_amount ?? 0,
+                    'status' => 'pending',
+                    'issued_date' => now(),
+                    'due_date' => now()->addDays(7),
+                ]);
+            }
+
+            // Biến để theo dõi tổng phí thiệt hại
+            $totalDamageFee = 0;
+            $damageItems = [];
+
+            // Xử lý vật tư bị hỏng (nếu có)
+            if ($request->has('damaged_supplies') && !empty($request->damaged_supplies)) {
+                foreach ($request->damaged_supplies as $damagedItem) {
+                    $supply = Supply::findOrFail($damagedItem['supply_id']);
+                    $quantity = (int) $damagedItem['quantity'];
+                    $unitPrice = $damagedItem['unit_price'] ?? $supply->unit_price;
+                    $totalLine = $quantity * $unitPrice;
+                    $notes = $damagedItem['notes'] ?? '';
+
+                    // Tạo InvoiceItem cho thiệt hại
+                    InvoiceItem::create([
+                        'invoice_id' => $invoice->id,
+                        'description' => "Thiệt hại vật tư: {$supply->name}" . ($notes ? " - {$notes}" : ''),
+                        'quantity' => $quantity,
+                        'unit_price' => $unitPrice,
+                        'total_line' => $totalLine,
+                        'item_type' => 'damage_fee',
+                    ]);
+
+                    // Ghi log vào supply_logs
+                    SupplyLog::create([
+                        'supply_id' => $supply->id,
+                        'user_id' => Auth::id(),
+                        'type' => 'damage',
+                        'quantity_change' => -$quantity,
+                        'quantity_before' => $supply->current_stock,
+                        'quantity_after' => max(0, $supply->current_stock - $quantity),
+                        'notes' => "Thiệt hại khi checkout booking #{$booking->order_code}. " . ($notes ? "Ghi chú: {$notes}" : ''),
+                    ]);
+
+                    // Cập nhật stock của supply
+                    $supply->update([
+                        'current_stock' => max(0, $supply->current_stock - $quantity),
+                    ]);
+
+                    $totalDamageFee += $totalLine;
+                    $damageItems[] = [
+                        'supply' => $supply->name,
+                        'quantity' => $quantity,
+                        'unit_price' => $unitPrice,
+                        'total' => $totalLine,
+                        'notes' => $notes,
+                    ];
+                }
+
+                // Cập nhật tổng tiền invoice
+                $invoice->update([
+                    'total_amount' => $invoice->total_amount + $totalDamageFee,
+                ]);
+            }
+
+            // Xử lý dịch vụ phát sinh (nếu có)
+            $totalServiceFee = 0;
+            if ($request->has('additional_services') && !empty($request->additional_services)) {
+                foreach ($request->additional_services as $serviceData) {
+                    $service = Service::findOrFail($serviceData['service_id']);
+                    $quantity = (int) $serviceData['quantity'];
+                    $unitPrice = $service->unit_price;
+                    $totalLine = $quantity * $unitPrice;
+
+                    // Tạo InvoiceItem cho dịch vụ
+                    InvoiceItem::create([
+                        'invoice_id' => $invoice->id,
+                        'description' => "Dịch vụ: {$service->name}",
+                        'quantity' => $quantity,
+                        'unit_price' => $unitPrice,
+                        'total_line' => $totalLine,
+                        'item_type' => 'service_charge',
+                    ]);
+
+                    $totalServiceFee += $totalLine;
+                }
+
+                // Cập nhật tổng tiền invoice
+                $invoice->update([
+                    'total_amount' => $invoice->total_amount + $totalServiceFee,
+                ]);
+            }
+
             // Cập nhật trạng thái booking details - CHỈ các phòng được chọn
             BookingDetail::whereIn('id', $checkOutDetailIds)->update(['status' => 'checked_out']);
 
@@ -500,23 +603,21 @@ class CheckInOutController extends Controller
                 'notes' => $request->notes ?? $booking->notes,
             ]);
 
-            // Xử lý dịch vụ phát sinh (nếu có)
-            // TODO: Implement logic để thêm dịch vụ vào booking và tính phí
-
-            // Xử lý vật tư bị hỏng (nếu có)
-            // TODO: Implement logic để ghi nhận vật tư bị hỏng và trừ vào tồn kho
-
-            // Tạo invoice nếu chưa có và được yêu cầu
-            if ($request->get('create_invoice', true) && !$booking->invoices()->exists()) {
-                // TODO: Gọi InvoiceController@createFromBooking hoặc tạo invoice trực tiếp
-            }
-
             DB::commit();
+
+            // Refresh booking với đầy đủ thông tin
+            $booking->refresh();
+            $booking->load(['guest', 'details.room', 'invoices.invoiceItems']);
 
             return response()->json([
                 'success' => true,
                 'message' => 'Check-out thành công.',
-                'data' => $booking->fresh(['guest', 'details.room', 'invoices']),
+                'data' => $booking,
+                'damage_summary' => [
+                    'total_damage_fee' => $totalDamageFee,
+                    'items' => $damageItems,
+                ],
+                'invoice' => $invoice->fresh(['invoiceItems']),
             ]);
         } catch (\Illuminate\Validation\ValidationException $e) {
             DB::rollBack();
@@ -538,6 +639,157 @@ class CheckInOutController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Có lỗi xảy ra khi check-out: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Get supplies for checkout - lấy danh sách vật tư để ghi nhận thiệt hại
+     */
+    public function getSuppliesForCheckout(Request $request, string $id): JsonResponse
+    {
+        try {
+            $booking = BookingOrder::with(['details.room.property'])->findOrFail($id);
+
+            // Lấy property_id từ booking
+            $propertyIds = $booking->details->map(function ($detail) {
+                return $detail->room->property_id ?? null;
+            })->filter()->unique()->values()->toArray();
+
+            // Lấy room_ids từ booking
+            $roomIds = $booking->details->pluck('room_id')->toArray();
+
+            // Lấy supplies theo room hoặc property
+            $supplies = Supply::where('status', 'active')
+                ->where(function ($query) use ($roomIds, $propertyIds) {
+                    // Supplies thuộc về các phòng trong booking
+                    $query->whereIn('room_id', $roomIds);
+                    
+                    // Hoặc supplies không thuộc phòng cụ thể nào (supplies chung)
+                    if (!empty($propertyIds)) {
+                        $query->orWhereNull('room_id');
+                    }
+                })
+                ->orderBy('category')
+                ->orderBy('name')
+                ->get(['id', 'name', 'description', 'category', 'unit', 'unit_price', 'current_stock']);
+
+            return response()->json([
+                'success' => true,
+                'data' => $supplies,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('CheckInOutController@getSuppliesForCheckout failed', [
+                'booking_id' => $id,
+                'message' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi lấy danh sách vật tư.',
+            ], 500);
+        }
+    }
+
+    /**
+     * Preview checkout - xem trước hóa đơn checkout với thiệt hại
+     */
+    public function previewCheckout(Request $request, string $id): JsonResponse
+    {
+        try {
+            $request->validate([
+                'damaged_supplies' => 'nullable|array',
+                'damaged_supplies.*.supply_id' => 'required|exists:supplies,id',
+                'damaged_supplies.*.quantity' => 'required|integer|min:1',
+                'damaged_supplies.*.unit_price' => 'nullable|numeric|min:0',
+                'additional_services' => 'nullable|array',
+                'additional_services.*.service_id' => 'required|exists:services,id',
+                'additional_services.*.quantity' => 'required|integer|min:1',
+            ]);
+
+            $booking = BookingOrder::with(['details', 'invoices.invoiceItems'])->findOrFail($id);
+
+            // Tính toán chi phí hiện có
+            $existingInvoice = $booking->invoices()->first();
+            $existingTotal = $existingInvoice ? $existingInvoice->total_amount : $booking->total_amount;
+            $paidAmount = $existingInvoice ? $existingInvoice->paid_amount : ($booking->deposit_amount ?? 0);
+
+            // Tính chi phí thiệt hại
+            $damageItems = [];
+            $totalDamageFee = 0;
+            if ($request->has('damaged_supplies') && !empty($request->damaged_supplies)) {
+                foreach ($request->damaged_supplies as $damagedItem) {
+                    $supply = Supply::find($damagedItem['supply_id']);
+                    if ($supply) {
+                        $quantity = (int) $damagedItem['quantity'];
+                        $unitPrice = $damagedItem['unit_price'] ?? $supply->unit_price;
+                        $totalLine = $quantity * $unitPrice;
+
+                        $damageItems[] = [
+                            'supply_id' => $supply->id,
+                            'name' => $supply->name,
+                            'category' => $supply->category,
+                            'quantity' => $quantity,
+                            'unit' => $supply->unit,
+                            'unit_price' => $unitPrice,
+                            'total' => $totalLine,
+                        ];
+
+                        $totalDamageFee += $totalLine;
+                    }
+                }
+            }
+
+            // Tính chi phí dịch vụ phát sinh
+            $serviceItems = [];
+            $totalServiceFee = 0;
+            if ($request->has('additional_services') && !empty($request->additional_services)) {
+                foreach ($request->additional_services as $serviceData) {
+                    $service = Service::find($serviceData['service_id']);
+                    if ($service) {
+                        $quantity = (int) $serviceData['quantity'];
+                        $unitPrice = $service->unit_price;
+                        $totalLine = $quantity * $unitPrice;
+
+                        $serviceItems[] = [
+                            'service_id' => $service->id,
+                            'name' => $service->name,
+                            'quantity' => $quantity,
+                            'unit_price' => $unitPrice,
+                            'total' => $totalLine,
+                        ];
+
+                        $totalServiceFee += $totalLine;
+                    }
+                }
+            }
+
+            // Tổng hợp
+            $grandTotal = $existingTotal + $totalDamageFee + $totalServiceFee;
+            $remainingAmount = $grandTotal - $paidAmount;
+
+            return response()->json([
+                'success' => true,
+                'preview' => [
+                    'existing_total' => $existingTotal,
+                    'paid_amount' => $paidAmount,
+                    'damage_items' => $damageItems,
+                    'total_damage_fee' => $totalDamageFee,
+                    'service_items' => $serviceItems,
+                    'total_service_fee' => $totalServiceFee,
+                    'grand_total' => $grandTotal,
+                    'remaining_amount' => $remainingAmount,
+                ],
+            ]);
+        } catch (\Exception $e) {
+            Log::error('CheckInOutController@previewCheckout failed', [
+                'booking_id' => $id,
+                'message' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi tạo bản xem trước.',
             ], 500);
         }
     }
