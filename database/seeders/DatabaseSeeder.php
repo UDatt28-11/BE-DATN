@@ -16,8 +16,6 @@ class DatabaseSeeder extends Seeder
      * 4. Amenities & RoomAmenities (cần rooms)
      * 5. Services, Promotions, Vouchers (cần property)
      * 6. Supplies (cần property)
-     * 7. Bookings (cần rooms, users)
-     * 8. Invoices & Reviews (cần bookings)
      */
     public function run(): void
     {
@@ -27,17 +25,17 @@ class DatabaseSeeder extends Seeder
         // Bước 1: Roles & Users
         $this->command->info('📋 Step 1: Creating roles and users...');
         $this->call([
-            RoleSeeder::class,          // Tạo roles trước
-            UserSeeder::class,          // Tạo users (admin, owner, user)
-            StaffSeeder::class,         // Tạo staff user
+            RoleSeeder::class,
+            UserSeeder::class,
+            StaffSeeder::class,
         ]);
         $this->command->info('✅ Step 1 completed');
         $this->command->newLine();
 
         // Bước 2: Properties
-        $this->command->info('🏢 Step 2: Creating properties...');
+        $this->command->info('🏢 Step 2: Creating property...');
         $this->call([
-            PropertySeeder::class,      // Tạo properties (cần owner)
+            PropertySeeder::class,
         ]);
         $this->command->info('✅ Step 2 completed');
         $this->command->newLine();
@@ -45,9 +43,9 @@ class DatabaseSeeder extends Seeder
         // Bước 3: RoomTypes & Rooms
         $this->command->info('🛏️  Step 3: Creating room types and rooms...');
         $this->call([
-            RoomTypeSeeder::class,      // Tạo room types (cần property)
-            RoomTypeImageSeeder::class, // Tạo ảnh cho room types
-            RoomSeeder::class,          // Tạo rooms (cần room types)
+            RoomTypeSeeder::class,
+            RoomTypeImageSeeder::class,
+            RoomSeeder::class,
         ]);
         $this->command->info('✅ Step 3 completed');
         $this->command->newLine();
@@ -55,8 +53,8 @@ class DatabaseSeeder extends Seeder
         // Bước 4: Amenities
         $this->command->info('✨ Step 4: Creating amenities and assigning to rooms...');
         $this->call([
-            AmenitySeeder::class,       // Tạo amenities (cần property)
-            RoomAmenitySeeder::class,   // Gán amenities cho rooms (cần rooms & amenities)
+            AmenitySeeder::class,
+            RoomAmenitySeeder::class,
         ]);
         $this->command->info('✅ Step 4 completed');
         $this->command->newLine();
@@ -64,9 +62,9 @@ class DatabaseSeeder extends Seeder
         // Bước 5: Services, Promotions, Vouchers
         $this->command->info('🎁 Step 5: Creating services, promotions, and vouchers...');
         $this->call([
-            ServiceSeeder::class,       // Tạo services (cần property)
-            PromotionSeeder::class,     // Tạo promotions (cần property)
-            VoucherSeeder::class,       // Tạo vouchers (cần property)
+            ServiceSeeder::class,
+            PromotionSeeder::class,
+            VoucherSeeder::class,
         ]);
         $this->command->info('✅ Step 5 completed');
         $this->command->newLine();
@@ -74,26 +72,9 @@ class DatabaseSeeder extends Seeder
         // Bước 6: Supplies
         $this->command->info('📦 Step 6: Creating supplies...');
         $this->call([
-            SupplySeeder::class,        // Tạo supplies (cần property)
+            SupplySeeder::class,
         ]);
         $this->command->info('✅ Step 6 completed');
-        $this->command->newLine();
-
-        // Bước 7: Bookings (optional - có thể bỏ qua nếu muốn dữ liệu sạch)
-        $this->command->info('📅 Step 7: Creating sample bookings...');
-        $this->call([
-            BookingSeeder::class,       // Tạo booking orders (cần rooms, users)
-        ]);
-        $this->command->info('✅ Step 7 completed');
-        $this->command->newLine();
-
-        // Bước 8: Invoices & Reviews (optional)
-        $this->command->info('📄 Step 8: Creating invoices and reviews...');
-        $this->call([
-            InvoiceSeeder::class,       // Tạo invoices (cần booking orders)
-            ReviewSeeder::class,        // Tạo reviews (cần booking details)
-        ]);
-        $this->command->info('✅ Step 8 completed');
         $this->command->newLine();
 
         $this->command->info('🎉 Database seeding completed successfully!');
@@ -101,12 +82,20 @@ class DatabaseSeeder extends Seeder
         $this->command->info('📊 Summary:');
         $this->command->info('   - Roles: admin, owner, staff, user');
         $this->command->info('   - Users: admin, owner, staff, and test users');
-        $this->command->info('   - Properties: 1 property');
-        $this->command->info('   - Room Types: 4 types');
-        $this->command->info('   - Rooms: Multiple rooms per type');
-        $this->command->info('   - Amenities: Full set with filter categories');
-        $this->command->info('   - Services, Promotions, Vouchers: Sample data');
-        $this->command->info('   - Supplies: Sample inventory');
-        $this->command->info('   - Bookings: Sample bookings for testing');
+        $this->command->info('   - Properties: 1 (Sunrise Beach Resort & Spa)');
+        $this->command->info('   - Room Types: 10 loại (1-10 người/phòng)');
+        $this->command->info('   - Rooms: 78 phòng');
+        $this->command->info('   - Amenities: 32 tiện ích');
+        $this->command->newLine();
+        $this->command->info('💡 Room capacity for smart allocation:');
+        $this->command->info('   - 1 người: 10 phòng  (Single)');
+        $this->command->info('   - 2 người: 35 phòng  (Standard/Superior/Deluxe)');
+        $this->command->info('   - 3 người: 8 phòng   (Triple)');
+        $this->command->info('   - 4 người: 8 phòng   (Family Deluxe)');
+        $this->command->info('   - 5 người: 5 phòng   (Family Suite)');
+        $this->command->info('   - 6 người: 6 phòng   (Group Room)');
+        $this->command->info('   - 8 người: 4 villa   (Garden View)');
+        $this->command->info('   - 10 người: 2 villa  (Beach Front)');
+        $this->command->info('   => Tổng sức chứa: 200+ khách');
     }
 }

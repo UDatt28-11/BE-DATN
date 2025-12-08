@@ -24,12 +24,12 @@ class PropertySeeder extends Seeder
         // Xóa properties cũ nếu có
         Property::query()->delete();
 
-        // Chỉ tạo 1 property với dữ liệu sạch và thực tế
+        // Tạo 1 property với dữ liệu sạch và thực tế
         Property::create([
             'owner_id' => $owner->id,
-            'name' => 'Homestay Sài Gòn View',
-            'address' => '123 Đường Nguyễn Huệ, Quận 1, Thành phố Hồ Chí Minh',
-            'description' => 'Homestay hiện đại nằm tại trung tâm Quận 1, gần các điểm du lịch nổi tiếng. Không gian rộng rãi, tiện nghi đầy đủ, view đẹp. Phù hợp cho gia đình và nhóm bạn.',
+            'name' => 'Sunrise Beach Resort & Spa',
+            'address' => '88 Đường Trần Phú, Bãi Trước, Thành phố Vũng Tàu, Bà Rịa - Vũng Tàu',
+            'description' => 'Resort 5 sao nằm ngay bờ biển Vũng Tàu với view hoàng hôn tuyệt đẹp. Hồ bơi vô cực, spa cao cấp, nhà hàng buffet quốc tế. Phù hợp cho du lịch nghỉ dưỡng, team building và hội nghị. Đa dạng loại phòng từ phòng đơn đến villa mặt biển.',
             'check_in_time' => '14:00',
             'check_out_time' => '12:00',
             'status' => 'active',
@@ -37,6 +37,6 @@ class PropertySeeder extends Seeder
             'verified_at' => now(),
         ]);
 
-        $this->command->info('✅ Created 1 property: Homestay Sài Gòn View');
+        $this->command->info('✅ Created 1 property: Sunrise Beach Resort & Spa');
     }
 }
