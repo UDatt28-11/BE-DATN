@@ -17,39 +17,62 @@ class RoomTypeSeeder extends Seeder
             return;
         }
 
-        // Xóa room types cũ của property này
-        RoomType::where('property_id', $property->id)->delete();
+        // Xóa room types cũ
+        RoomType::query()->delete();
 
-        // Tạo các loại phòng thực tế và sạch sẽ
+        // Tạo đầy đủ các loại phòng đa dạng sức chứa (1-10 người)
         $roomTypes = [
             [
-                'name' => 'Phòng Standard',
-                'description' => 'Phòng tiêu chuẩn với đầy đủ tiện nghi cơ bản, phù hợp cho 2 người. Có giường đôi, TV, tủ lạnh mini, phòng tắm riêng.',
+                'name' => 'Phòng Single',
+                'description' => 'Phòng đơn tiêu chuẩn dành cho 1 người, đầy đủ tiện nghi. Giường đơn 1m2, TV 32 inch, minibar, phòng tắm riêng với vòi sen.',
             ],
             [
-                'name' => 'Phòng Deluxe',
-                'description' => 'Phòng cao cấp với không gian rộng rãi hơn, view đẹp. Có ban công, bàn làm việc, tiện nghi hiện đại.',
+                'name' => 'Phòng Standard Double',
+                'description' => 'Phòng tiêu chuẩn với giường đôi King size, phù hợp cho 2 người. Có ban công nhỏ, TV 43 inch, minibar, két sắt.',
             ],
             [
-                'name' => 'Phòng Family',
-                'description' => 'Phòng gia đình rộng rãi, phù hợp cho 4-6 người. Có 2 giường, sofa, không gian sinh hoạt chung.',
+                'name' => 'Phòng Superior Twin',
+                'description' => 'Phòng cao cấp với 2 giường đơn, lý tưởng cho bạn bè hoặc đồng nghiệp đi công tác. View hồ bơi hoặc vườn.',
             ],
             [
-                'name' => 'Studio',
-                'description' => 'Phòng studio với bếp mini đầy đủ, không gian sống tích hợp. Phù hợp cho khách ở dài ngày.',
+                'name' => 'Phòng Deluxe Ocean View',
+                'description' => 'Phòng cao cấp view biển trực diện, ban công rộng. Giường King, bồn tắm, tiện nghi 5 sao. Bao gồm bữa sáng.',
+            ],
+            [
+                'name' => 'Phòng Triple',
+                'description' => 'Phòng 3 người với 3 giường đơn hoặc 1 giường đôi + 1 giường đơn. Không gian rộng 35m², phù hợp nhóm nhỏ.',
+            ],
+            [
+                'name' => 'Phòng Family Deluxe',
+                'description' => 'Phòng gia đình rộng 45m² với 1 giường King + 2 giường đơn. Có sofa bed, bàn ăn nhỏ, view biển hoặc vườn.',
+            ],
+            [
+                'name' => 'Phòng Family Suite',
+                'description' => 'Suite gia đình 2 phòng ngủ liên thông, 65m². Phòng master có giường King, phòng con có 2 giường đơn. Phòng khách riêng.',
+            ],
+            [
+                'name' => 'Phòng Group Room',
+                'description' => 'Phòng dành cho nhóm với 3 giường đôi, chứa tối đa 6 người. Rộng 55m², có 2 phòng tắm. Lý tưởng cho team building.',
+            ],
+            [
+                'name' => 'Villa Garden View',
+                'description' => 'Villa riêng biệt với sân vườn, 2 phòng ngủ, phòng khách rộng. Bếp mini, bàn nướng BBQ. Chứa 6-8 người.',
+            ],
+            [
+                'name' => 'Villa Beach Front',
+                'description' => 'Villa cao cấp mặt biển, 3 phòng ngủ, hồ bơi riêng. Bếp đầy đủ, phòng khách + phòng ăn. Tối đa 10 người.',
             ],
         ];
 
-        foreach ($roomTypes as $roomTypeData) {
+        foreach ($roomTypes as $data) {
             RoomType::create([
                 'property_id' => $property->id,
-                'name' => $roomTypeData['name'],
-                'description' => $roomTypeData['description'],
+                'name' => $data['name'],
+                'description' => $data['description'],
                 'status' => 'active',
             ]);
         }
 
-        $this->command->info('✅ Created ' . count($roomTypes) . ' room types for property');
+        $this->command->info('✅ Created ' . count($roomTypes) . ' room types');
     }
 }
-

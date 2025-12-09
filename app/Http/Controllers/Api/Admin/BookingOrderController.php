@@ -3625,7 +3625,7 @@ class BookingOrderController extends Controller
     }
 
     /**
-     * Admin: Approve checkout request
+     * Admin: Approve checkout request with damage items support
      */
     public function approveCheckoutRequest(Request $request, string $id): JsonResponse
     {
@@ -3638,6 +3638,17 @@ class BookingOrderController extends Controller
                     'message' => 'Unauthorized',
                 ], 401);
             }
+
+            // Validate request với damaged_supplies
+            $request->validate([
+                'room_status' => 'sometimes|in:available,maintenance',
+                'notes' => 'nullable|string|max:1000',
+                'damaged_supplies' => 'nullable|array',
+                'damaged_supplies.*.supply_id' => 'required|exists:supplies,id',
+                'damaged_supplies.*.quantity' => 'required|integer|min:1',
+                'damaged_supplies.*.unit_price' => 'nullable|numeric|min:0',
+                'damaged_supplies.*.notes' => 'nullable|string|max:500',
+            ]);
 
             DB::beginTransaction();
 
@@ -3670,9 +3681,10 @@ class BookingOrderController extends Controller
             // Cập nhật trạng thái booking detail
             $bookingDetail->update(['status' => 'checked_out']);
 
-            // Cập nhật trạng thái phòng thành "available"
+            // Cập nhật trạng thái phòng (mặc định "available", có thể là "maintenance")
+            $roomStatus = $request->get('room_status', 'available');
             if ($bookingDetail->room) {
-                $bookingDetail->room->update(['status' => 'available']);
+                $bookingDetail->room->update(['status' => $roomStatus]);
             }
 
             // Kiểm tra xem tất cả phòng đã checkout chưa
@@ -3683,9 +3695,13 @@ class BookingOrderController extends Controller
             
             // Cập nhật trạng thái booking order
             $newStatus = ($checkedOutCount >= $totalDetails) ? 'checked_out' : 'partially_checked_out';
-            $booking->update(['status' => $newStatus]);
+            $booking->update([
+                'status' => $newStatus,
+                'staff_id' => $admin->id,
+                'notes' => $request->notes ?? $booking->notes,
+            ]);
 
-            // Tạo hoặc cập nhật invoice (tương tự như checkOutUser)
+            // Tạo hoặc cập nhật invoice
             $invoice = $booking->invoices()->first();
             $invoiceModel = \App\Models\Invoice::class;
             $invoiceItemModel = \App\Models\InvoiceItem::class;
@@ -3753,6 +3769,56 @@ class BookingOrderController extends Controller
                 }
             }
 
+            // =====================================================
+            // XỬ LÝ THIỆT HẠI VẬT TƯ (DAMAGED SUPPLIES)
+            // =====================================================
+            $totalDamageFee = 0;
+            $damageItems = [];
+            
+            if ($request->has('damaged_supplies') && !empty($request->damaged_supplies)) {
+                foreach ($request->damaged_supplies as $damagedItem) {
+                    $supply = \App\Models\Supply::findOrFail($damagedItem['supply_id']);
+                    $quantity = (int) $damagedItem['quantity'];
+                    $unitPrice = $damagedItem['unit_price'] ?? $supply->unit_price;
+                    $totalLine = $quantity * $unitPrice;
+                    $notes = $damagedItem['notes'] ?? '';
+
+                    // Tạo InvoiceItem cho thiệt hại
+                    $invoiceItemModel::create([
+                        'invoice_id' => $invoice->id,
+                        'description' => "Thiệt hại vật tư: {$supply->name}" . ($notes ? " - {$notes}" : ''),
+                        'quantity' => $quantity,
+                        'unit_price' => $unitPrice,
+                        'total_line' => $totalLine,
+                        'item_type' => 'damage_fee',
+                    ]);
+
+                    // Ghi log vào supply_logs
+                    \App\Models\SupplyLog::create([
+                        'supply_id' => $supply->id,
+                        'user_id' => $admin->id,
+                        'change_quantity' => -$quantity,
+                        'reason' => "Thiệt hại khi checkout request #{$checkoutRequest->id} - booking #{$booking->order_code}. " . ($notes ? "Ghi chú: {$notes}" : ''),
+                    ]);
+
+                    // Cập nhật stock của supply
+                    $supply->update([
+                        'current_stock' => max(0, $supply->current_stock - $quantity),
+                    ]);
+
+                    $totalDamageFee += $totalLine;
+                    $damageItems[] = [
+                        'supply' => $supply->name,
+                        'quantity' => $quantity,
+                        'unit_price' => $unitPrice,
+                        'total' => $totalLine,
+                        'notes' => $notes,
+                    ];
+                }
+                
+                $totalAmount += $totalDamageFee;
+            }
+
             // Trừ tiền cọc đã thanh toán (nếu có và chưa được thêm vào invoice)
             $hasDeposit = $invoice->invoiceItems()->where('item_type', 'deposit')->exists();
             $paidAmount = $booking->paid_amount ?? 0;
@@ -3778,11 +3844,13 @@ class BookingOrderController extends Controller
                 'reviewed_at' => now(),
             ]);
 
-            Log::info('Checkout request approved', [
+            Log::info('Checkout request approved with damage items', [
                 'checkout_request_id' => $checkoutRequest->id,
                 'booking_id' => $booking->id,
                 'booking_detail_id' => $bookingDetail->id,
                 'admin_id' => $admin->id,
+                'damage_items_count' => count($damageItems),
+                'total_damage_fee' => $totalDamageFee,
             ]);
 
             DB::commit();
@@ -3791,6 +3859,11 @@ class BookingOrderController extends Controller
                 'success' => true,
                 'message' => 'Yêu cầu checkout đã được duyệt. Hóa đơn đã được tạo/cập nhật.',
                 'data' => $checkoutRequest->fresh(['bookingOrder', 'bookingDetail', 'reviewer']),
+                'damage_summary' => [
+                    'total_damage_fee' => $totalDamageFee,
+                    'items' => $damageItems,
+                ],
+                'invoice' => $invoice->fresh(['invoiceItems']),
             ]);
         } catch (\Illuminate\Validation\ValidationException $e) {
             DB::rollBack();

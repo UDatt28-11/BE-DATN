@@ -13,10 +13,9 @@ class RoomAmenitySeeder extends Seeder
     public function run(): void
     {
         $roomTypes = RoomType::with('rooms')->get();
-        $amenities = Amenity::all();
         
-        if ($roomTypes->isEmpty() || $amenities->isEmpty()) {
-            $this->command->warn('⚠️  No room types or amenities found. Skipping room amenities creation.');
+        if ($roomTypes->isEmpty()) {
+            $this->command->warn('⚠️  No room types found. Skipping room amenities creation.');
             return;
         }
 
@@ -25,50 +24,65 @@ class RoomAmenitySeeder extends Seeder
 
         // Định nghĩa amenities cho từng loại phòng
         // Tất cả phòng cùng loại sẽ có cùng bộ amenities
-        // Lưu ý: Tên amenities phải khớp chính xác với tên trong AmenitySeeder
         $roomTypeAmenities = [
-            'Phòng Standard' => [
-                'WiFi miễn phí',
-                'Điều hòa nhiệt độ',
-                'TV màn hình phẳng',
-                'Tủ lạnh mini',
-                'Phòng tắm khép kín',
-                'Máy nước nóng',
+            'Phòng Single' => [
+                'WiFi miễn phí', 'Điều hòa nhiệt độ', 'TV màn hình phẳng', 
+                'Tủ lạnh mini', 'Phòng tắm khép kín', 'Máy nước nóng',
             ],
-            'Phòng Deluxe' => [
-                'WiFi miễn phí',
-                'Điều hòa nhiệt độ',
-                'TV màn hình phẳng',
-                'Tủ lạnh mini',
-                'Phòng tắm khép kín',
-                'Máy nước nóng',
-                'Ban công',
-                'Bàn làm việc',
-                'Bồn tắm',
+            'Phòng Standard Double' => [
+                'WiFi miễn phí', 'Điều hòa nhiệt độ', 'TV màn hình phẳng', 
+                'Tủ lạnh mini', 'Phòng tắm khép kín', 'Máy nước nóng',
+                'Ban công', 'Két sắt', 'Tầng cao',
             ],
-            'Phòng Family' => [
-                'WiFi miễn phí',
-                'Điều hòa nhiệt độ',
-                'TV màn hình phẳng',
-                'Tủ lạnh mini',
-                'Phòng tắm khép kín',
-                'Máy nước nóng',
-                'Bồn tắm',
-                'Tủ quần áo',
-                'Máy sấy tóc',
+            'Phòng Superior Twin' => [
+                'WiFi miễn phí', 'Điều hòa nhiệt độ', 'TV màn hình phẳng', 
+                'Tủ lạnh mini', 'Phòng tắm khép kín', 'Máy nước nóng',
+                'Bàn làm việc', 'View bể bơi',
             ],
-            'Studio' => [
-                'WiFi miễn phí',
-                'Điều hòa nhiệt độ',
-                'TV màn hình phẳng',
-                'Tủ lạnh mini',
-                'Phòng tắm khép kín',
-                'Máy nước nóng',
-                'Bếp đầy đủ',
-                'Bàn làm việc',
-                'Tủ quần áo',
+            'Phòng Deluxe Ocean View' => [
+                'WiFi miễn phí', 'Điều hòa nhiệt độ', 'TV màn hình phẳng', 
+                'Tủ lạnh mini', 'Phòng tắm khép kín', 'Máy nước nóng',
+                'Ban công', 'Bồn tắm', 'View biển', 'Tầng cao',
+                'Máy sấy tóc', 'Két sắt', 'Máy pha cà phê',
+            ],
+            'Phòng Triple' => [
+                'WiFi miễn phí', 'Điều hòa nhiệt độ', 'TV màn hình phẳng', 
+                'Tủ lạnh mini', 'Phòng tắm khép kín', 'Máy nước nóng',
+                'Tủ quần áo', 'View vườn',
+            ],
+            'Phòng Family Deluxe' => [
+                'WiFi miễn phí', 'Điều hòa nhiệt độ', 'TV màn hình phẳng', 
+                'Tủ lạnh mini', 'Phòng tắm khép kín', 'Máy nước nóng',
+                'Ban công', 'Bồn tắm', 'Tủ quần áo', 'Máy sấy tóc',
+                'Két sắt', 'View biển',
+            ],
+            'Phòng Family Suite' => [
+                'WiFi miễn phí', 'Điều hòa nhiệt độ', 'TV màn hình phẳng', 
+                'Tủ lạnh mini', 'Phòng tắm khép kín', 'Máy nước nóng',
+                'Ban công', 'Bồn tắm', 'Tủ quần áo', 'Máy sấy tóc',
+                'Bếp riêng', 'Sofa bed', 'View biển', 'Két sắt',
+            ],
+            'Phòng Group Room' => [
+                'WiFi miễn phí', 'Điều hòa nhiệt độ', 'TV màn hình phẳng', 
+                'Tủ lạnh mini', 'Phòng tắm khép kín', 'Máy nước nóng',
+                'Tủ quần áo', 'View bể bơi', 'Tầng trệt',
+            ],
+            'Villa Garden View' => [
+                'WiFi miễn phí', 'Điều hòa nhiệt độ', 'TV màn hình phẳng', 
+                'Tủ lạnh mini', 'Phòng tắm khép kín', 'Máy nước nóng',
+                'Bếp đầy đủ', 'Sân vườn', 'BBQ', 'Bãi đỗ xe',
+                'Máy giặt', 'View vườn', 'Tầng trệt',
+            ],
+            'Villa Beach Front' => [
+                'WiFi miễn phí', 'Điều hòa nhiệt độ', 'TV màn hình phẳng', 
+                'Tủ lạnh mini', 'Phòng tắm khép kín', 'Máy nước nóng',
+                'Bếp đầy đủ', 'Hồ bơi riêng', 'Sân vườn', 'BBQ', 
+                'Bãi đỗ xe', 'Máy giặt', 'View biển', 'Tầng trệt',
+                'Bồn tắm', 'Ban công',
             ],
         ];
+
+        $totalAssigned = 0;
 
         foreach ($roomTypes as $roomType) {
             // Lấy danh sách amenities cho loại phòng này
@@ -108,14 +122,12 @@ class RoomAmenitySeeder extends Seeder
                             'room_id' => $room->id,
                             'amenity_id' => $amenity->id,
                         ]);
+                        $totalAssigned++;
                     }
                 }
             }
-            
-            $this->command->info("✅ Assigned " . $selectedAmenities->count() . " amenities to all rooms of type: {$roomType->name}");
         }
 
-        $this->command->info('✅ Created room amenities relationships (grouped by room type)');
+        $this->command->info("✅ Assigned {$totalAssigned} amenity relationships to rooms");
     }
 }
-

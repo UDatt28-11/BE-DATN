@@ -111,21 +111,22 @@ class HomeController extends Controller
                 'check_out' => 'sometimes|date|after:check_in',
             ]);
 
-            $limit = (int) ($request->get('limit', 6));
+            $limit = (int) ($request->get('limit', 20));
             $checkIn = $request->get('check_in');
             $checkOut = $request->get('check_out');
             
             // Generate cache key
-            $cacheKey = "room_types_list_{$limit}_{$checkIn}_{$checkOut}";
+            $cacheKey = "room_types_full_{$limit}_{$checkIn}_{$checkOut}";
             
-            // Try to get from cache (2 minutes for listings with dates, 5 minutes without)
-            $cacheDuration = ($checkIn && $checkOut) ? 120 : 300;
+            // Try to get from cache (1 minute for listings with dates, 3 minutes without)
+            $cacheDuration = ($checkIn && $checkOut) ? 60 : 180;
             
             $result = Cache::remember($cacheKey, $cacheDuration, function () use ($limit, $checkIn, $checkOut) {
                 // Check if status column exists (cached)
                 $hasStatus = $this->hasColumn('room_types', 'status');
                 $hasPropertyId = $this->hasColumn('room_types', 'property_id');
                 $hasVerification = $this->hasColumn('rooms', 'verification_status');
+                $hasReviewStatus = $this->hasColumn('reviews', 'status');
                 
                 // Build optimized query with withCount
                 $query = RoomType::query()
@@ -148,17 +149,87 @@ class HomeController extends Controller
                     $query->with('property:id,name');
                 }
                 
+                // Load images for room types
+                $query->with('images:id,room_type_id,image_url,is_primary');
+                
                 $query->orderBy('created_at', 'desc')->limit($limit);
                 
                 $roomTypes = $query->get();
+                $roomTypeIds = $roomTypes->pluck('id')->toArray();
+                
+                // ============================================
+                // OPTIMIZED: Single query to get sample room data for ALL room types
+                // ============================================
+                $sampleRooms = DB::table('rooms')
+                    ->whereIn('room_type_id', $roomTypeIds)
+                    ->where('status', 'available')
+                    ->select([
+                        'room_type_id',
+                        DB::raw('MIN(price_per_night) as min_price'),
+                        DB::raw('MAX(price_per_night) as max_price'),
+                        DB::raw('MAX(max_adults) as max_adults'),
+                        DB::raw('MAX(max_children) as max_children'),
+                    ])
+                    ->groupBy('room_type_id')
+                    ->get()
+                    ->keyBy('room_type_id');
+                
+                // ============================================
+                // OPTIMIZED: Single query to get ratings for ALL room types
+                // Sử dụng room_id trực tiếp trên reviews (nếu có) hoặc qua booking_details
+                // ============================================
+                $hasRoomIdOnReviews = $this->hasColumn('reviews', 'room_id');
+                
+                if ($hasRoomIdOnReviews) {
+                    // Cách mới: reviews có room_id trực tiếp
+                    $reviewsQuery = DB::table('reviews')
+                        ->join('rooms', 'reviews.room_id', '=', 'rooms.id')
+                        ->whereIn('rooms.room_type_id', $roomTypeIds)
+                        ->whereNotNull('reviews.room_id');
+                } else {
+                    // Cách cũ: qua booking_details (dùng booking_details_id với 's')
+                    $reviewsQuery = DB::table('reviews')
+                        ->join('booking_details', 'reviews.booking_details_id', '=', 'booking_details.id')
+                        ->join('rooms', 'booking_details.room_id', '=', 'rooms.id')
+                        ->whereIn('rooms.room_type_id', $roomTypeIds);
+                }
+                
+                if ($hasReviewStatus) {
+                    $reviewsQuery->where('reviews.status', 'approved');
+                }
+                
+                $reviewStats = $reviewsQuery
+                    ->select([
+                        'rooms.room_type_id',
+                        DB::raw('AVG(reviews.rating) as avg_rating'),
+                        DB::raw('COUNT(reviews.id) as reviews_count'),
+                    ])
+                    ->groupBy('rooms.room_type_id')
+                    ->get()
+                    ->keyBy('room_type_id');
+                
+                // ============================================
+                // OPTIMIZED: Single query to get amenities for ALL room types
+                // ============================================
+                $amenitiesData = DB::table('room_amenities')
+                    ->join('amenities', 'room_amenities.amenity_id', '=', 'amenities.id')
+                    ->join('rooms', 'room_amenities.room_id', '=', 'rooms.id')
+                    ->whereIn('rooms.room_type_id', $roomTypeIds)
+                    ->select([
+                        'rooms.room_type_id',
+                        'amenities.id',
+                        'amenities.name',
+                        'amenities.filter_category',
+                    ])
+                    ->distinct()
+                    ->get()
+                    ->groupBy('room_type_id');
                 
                 // If date range provided, calculate available rooms
                 $hasValidDateRange = !empty($checkIn) && !empty($checkOut);
+                $availableCounts = [];
                 
                 if ($hasValidDateRange) {
-                    // Get all room type IDs
-                    $roomTypeIds = $roomTypes->pluck('id')->toArray();
-                    
                     // Single query to get booked room counts per room type
                     $bookedCounts = DB::table('rooms')
                         ->join('booking_details', 'rooms.id', '=', 'booking_details.room_id')
@@ -173,26 +244,53 @@ class HomeController extends Controller
                         ->pluck('booked_count', 'room_type_id')
                         ->toArray();
                     
-                    // Subtract booked rooms from total
-                    $roomTypes = $roomTypes->map(function ($roomType) use ($bookedCounts) {
+                    // Calculate available counts
+                    foreach ($roomTypes as $roomType) {
                         $booked = $bookedCounts[$roomType->id] ?? 0;
-                        $roomType->rooms_count = max(0, $roomType->rooms_count - $booked);
-                        return $roomType;
-                    });
+                        $availableCounts[$roomType->id] = max(0, $roomType->rooms_count - $booked);
+                    }
                 }
                 
-                // Format response
-                return $roomTypes->map(function ($roomType) {
+                // Format response with ALL details
+                return $roomTypes->map(function ($roomType) use ($sampleRooms, $reviewStats, $amenitiesData, $hasValidDateRange, $availableCounts) {
+                    $sampleRoom = $sampleRooms->get($roomType->id);
+                    $reviewStat = $reviewStats->get($roomType->id);
+                    $amenities = $amenitiesData->get($roomType->id, collect());
+                    
+                    $availableCount = $hasValidDateRange 
+                        ? ($availableCounts[$roomType->id] ?? 0)
+                        : ($roomType->rooms_count ?? 0);
+                    
                     return [
                         'id' => $roomType->id,
                         'name' => $roomType->name,
                         'description' => $roomType->description,
                         'image_url' => $roomType->image_url,
                         'rooms_count' => $roomType->rooms_count ?? 0,
+                        'available_count' => $availableCount,
                         'property' => $roomType->relationLoaded('property') && $roomType->property ? [
                             'id' => $roomType->property->id,
                             'name' => $roomType->property->name,
                         ] : null,
+                        // Sample room data (aggregated)
+                        'price_per_night' => $sampleRoom->min_price ?? 0,
+                        'max_adults' => $sampleRoom->max_adults ?? 2,
+                        'max_children' => $sampleRoom->max_children ?? 0,
+                        // Images from room type
+                        'images' => $roomType->images->map(fn($img) => [
+                            'id' => $img->id,
+                            'image_url' => $img->image_url,
+                            'is_primary' => $img->is_primary,
+                        ])->values()->toArray(),
+                        // Review stats
+                        'rating' => round((float)($reviewStat->avg_rating ?? 0), 1),
+                        'reviews_count' => (int)($reviewStat->reviews_count ?? 0),
+                        // Amenities
+                        'amenities' => $amenities->map(fn($a) => [
+                            'id' => $a->id,
+                            'name' => $a->name,
+                            'filter_category' => $a->filter_category,
+                        ])->unique('id')->values()->toArray(),
                     ];
                 })->values()->toArray();
             });

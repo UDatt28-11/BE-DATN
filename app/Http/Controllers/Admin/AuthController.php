@@ -66,8 +66,8 @@ class AuthController extends Controller
         // Xóa token cũ
         $user->tokens()->delete();
 
-        // Tạo token mới
-        $token = $user->createToken('admin_token')->plainTextToken;
+        // Tạo token mới với role abilities
+        $token = $user->createToken('admin_token', ['role:admin'])->plainTextToken;
 
         return response()->json([
             'message' => 'Đăng nhập thành công',

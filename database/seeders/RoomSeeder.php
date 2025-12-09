@@ -19,124 +19,139 @@ class RoomSeeder extends Seeder
         }
 
         $roomTypes = RoomType::where('property_id', $property->id)->get();
-        
+
         if ($roomTypes->isEmpty()) {
             $this->command->warn('⚠️  No room types found. Skipping rooms creation.');
             return;
         }
 
         // Xóa rooms cũ
-        Room::where('property_id', $property->id)->delete();
+        Room::query()->delete();
 
-        // Định nghĩa giá và thông tin cho từng loại phòng
-        $roomTypeConfig = [
-            'Phòng Standard' => [
-                'price' => 500000,
+        // ========================================
+        // Cấu hình phòng - Tổng khoảng 80 phòng
+        // Đủ cho nhóm 40+ người test tính năng chia phòng
+        // ========================================
+        $roomConfig = [
+            'Phòng Single' => [
+                'price' => 350000,
+                'max_adults' => 1,
+                'max_children' => 0,
+                'count' => 10,
+            ],
+            'Phòng Standard Double' => [
+                'price' => 550000,
                 'max_adults' => 2,
                 'max_children' => 1,
-                'count' => 3,
+                'count' => 15,
             ],
-            'Phòng Deluxe' => [
-                'price' => 800000,
+            'Phòng Superior Twin' => [
+                'price' => 650000,
+                'max_adults' => 2,
+                'max_children' => 0,
+                'count' => 12,
+            ],
+            'Phòng Deluxe Ocean View' => [
+                'price' => 1200000,
                 'max_adults' => 2,
                 'max_children' => 2,
-                'count' => 2,
+                'count' => 8,
             ],
-            'Phòng Family' => [
-                'price' => 1200000,
+            'Phòng Triple' => [
+                'price' => 850000,
+                'max_adults' => 3,
+                'max_children' => 1,
+                'count' => 8,
+            ],
+            'Phòng Family Deluxe' => [
+                'price' => 1500000,
                 'max_adults' => 4,
                 'max_children' => 2,
-                'count' => 2,
+                'count' => 8,
             ],
-            'Studio' => [
-                'price' => 600000,
-                'max_adults' => 2,
-                'max_children' => 1,
+            'Phòng Family Suite' => [
+                'price' => 2200000,
+                'max_adults' => 5,
+                'max_children' => 2,
+                'count' => 5,
+            ],
+            'Phòng Group Room' => [
+                'price' => 1800000,
+                'max_adults' => 6,
+                'max_children' => 0,
+                'count' => 6,
+            ],
+            'Villa Garden View' => [
+                'price' => 4500000,
+                'max_adults' => 8,
+                'max_children' => 2,
+                'count' => 4,
+            ],
+            'Villa Beach Front' => [
+                'price' => 8000000,
+                'max_adults' => 10,
+                'max_children' => 3,
                 'count' => 2,
             ],
         ];
 
+        // Định nghĩa tầng và phân loại theo enum (ground_floor, upper_floor, attic)
+        $floorCategories = [
+            ['floor' => 0, 'category' => 'ground_floor'],  // Tầng trệt
+            ['floor' => 1, 'category' => 'upper_floor'],   // Tầng 1
+            ['floor' => 2, 'category' => 'upper_floor'],   // Tầng 2
+            ['floor' => 3, 'category' => 'upper_floor'],   // Tầng 3
+            ['floor' => 4, 'category' => 'attic'],         // Gác mái
+        ];
+
+        $totalCreated = 0;
+
         foreach ($roomTypes as $roomType) {
-            $config = $roomTypeConfig[$roomType->name] ?? [
+            $config = $roomConfig[$roomType->name] ?? [
                 'price' => 500000,
                 'max_adults' => 2,
                 'max_children' => 1,
-                'count' => 2,
+                'count' => 3,
             ];
-            
-            // Đảm bảo tất cả phòng cùng loại có thông tin giống nhau
-            // Description chung cho tất cả phòng cùng loại (không thêm số phòng)
-            $commonDescription = $roomType->description;
-            
-            // Phân bổ phòng vào các tầng khác nhau
-            // Tầng 0 (tầng trệt): 30% phòng
-            // Tầng 1-3 (tầng cao): 60% phòng
-            // Tầng 4+ (gác mái): 10% phòng
-            $groundFloorCount = max(1, (int) ceil($config['count'] * 0.3));
-            $upperFloorCount = max(1, (int) ceil($config['count'] * 0.6));
-            $atticCount = $config['count'] - $groundFloorCount - $upperFloorCount;
-            
-            $roomIndex = 1;
-            
-            // Tạo phòng tầng trệt
-            for ($i = 0; $i < $groundFloorCount && $roomIndex <= $config['count']; $i++, $roomIndex++) {
+
+            // Tạo các phòng cho loại phòng này
+            for ($i = 1; $i <= $config['count']; $i++) {
+                // Phân bổ tầng theo vòng lặp
+                $floorIndex = ($i - 1) % count($floorCategories);
+                $floorInfo = $floorCategories[$floorIndex];
+
+                // Tạo tên phòng dễ hiểu (VD: P101, P102, P201...)
+                $roomNumber = ($floorInfo['floor'] * 100) + $i;
+                $roomName = $roomType->name . ' - P' . str_pad($roomNumber, 3, '0', STR_PAD_LEFT);
+
                 Room::create([
                     'property_id' => $property->id,
                     'room_type_id' => $roomType->id,
-                    'name' => $roomType->name . ' ' . $roomIndex,
-                    'description' => $commonDescription, // Cùng description cho tất cả phòng cùng loại
-                    'floor_number' => 0,
-                    'floor_category' => 'ground_floor',
-                    'max_adults' => $config['max_adults'], // Cùng max_adults
-                    'max_children' => $config['max_children'], // Cùng max_children
-                    'price_per_night' => $config['price'], // Cùng giá
+                    'name' => $roomName,
+                    'description' => $roomType->description,
+                    'floor_number' => $floorInfo['floor'],
+                    'floor_category' => $floorInfo['category'],
+                    'max_adults' => $config['max_adults'],
+                    'max_children' => $config['max_children'],
+                    'price_per_night' => $config['price'],
                     'status' => 'available',
                     'verification_status' => 'verified',
                     'verified_at' => now(),
                 ]);
-            }
-            
-            // Tạo phòng tầng cao (1-3)
-            $currentFloor = 1;
-            for ($i = 0; $i < $upperFloorCount && $roomIndex <= $config['count']; $i++, $roomIndex++) {
-                Room::create([
-                    'property_id' => $property->id,
-                    'room_type_id' => $roomType->id,
-                    'name' => $roomType->name . ' ' . $roomIndex,
-                    'description' => $commonDescription, // Cùng description cho tất cả phòng cùng loại
-                    'floor_number' => $currentFloor,
-                    'floor_category' => 'upper_floor',
-                    'max_adults' => $config['max_adults'], // Cùng max_adults
-                    'max_children' => $config['max_children'], // Cùng max_children
-                    'price_per_night' => $config['price'], // Cùng giá
-                    'status' => 'available',
-                    'verification_status' => 'verified',
-                    'verified_at' => now(),
-                ]);
-                
-                // Luân phiên giữa tầng 1, 2, 3
-                $currentFloor = ($currentFloor % 3) + 1;
-            }
-            
-            // Tạo phòng gác mái (tầng 4+)
-            for ($i = 0; $i < $atticCount && $roomIndex <= $config['count']; $i++, $roomIndex++) {
-                Room::create([
-                    'property_id' => $property->id,
-                    'room_type_id' => $roomType->id,
-                    'name' => $roomType->name . ' ' . $roomIndex,
-                    'description' => $commonDescription, // Cùng description cho tất cả phòng cùng loại
-                    'floor_number' => 4,
-                    'floor_category' => 'attic',
-                    'max_adults' => $config['max_adults'], // Cùng max_adults
-                    'max_children' => $config['max_children'], // Cùng max_children
-                    'price_per_night' => $config['price'], // Cùng giá
-                    'status' => 'available',
-                    'verification_status' => 'verified',
-                    'verified_at' => now(),
-                ]);
+
+                $totalCreated++;
             }
         }
 
-        $this->command->info('✅ Created rooms for property');
+        $this->command->info("✅ Created {$totalCreated} rooms");
+        $this->command->info("   Room distribution by capacity:");
+        $this->command->info("   - 1 người: 10 phòng (Single)");
+        $this->command->info("   - 2 người: 35 phòng (Standard + Superior + Deluxe)");
+        $this->command->info("   - 3 người: 8 phòng (Triple)");
+        $this->command->info("   - 4 người: 8 phòng (Family Deluxe)");
+        $this->command->info("   - 5 người: 5 phòng (Family Suite)");
+        $this->command->info("   - 6 người: 6 phòng (Group Room)");
+        $this->command->info("   - 8 người: 4 villa (Garden View)");
+        $this->command->info("   - 10 người: 2 villa (Beach Front)");
     }
 }

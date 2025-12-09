@@ -654,6 +654,8 @@ Route::middleware(['auth:sanctum', 'role:staff,admin'])->prefix('staff')->group(
     Route::post('/check-in/{id}', [\App\Http\Controllers\Api\Staff\CheckInOutController::class, 'checkIn']);
     Route::get('/check-out/list', [\App\Http\Controllers\Api\Staff\CheckInOutController::class, 'getCheckOutList']);
     Route::get('/check-out/{id}', [\App\Http\Controllers\Api\Staff\CheckInOutController::class, 'getCheckOutDetails']);
+    Route::get('/check-out/{id}/supplies', [\App\Http\Controllers\Api\Staff\CheckInOutController::class, 'getSuppliesForCheckout']);
+    Route::post('/check-out/{id}/preview', [\App\Http\Controllers\Api\Staff\CheckInOutController::class, 'previewCheckout']);
     Route::post('/check-out/{id}', [\App\Http\Controllers\Api\Staff\CheckInOutController::class, 'checkOut']);
 
     // ========================================

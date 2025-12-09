@@ -145,8 +145,8 @@ class GoogleController extends Controller
                 ]
             );
 
-            // Tạo token
-            $token = $user->createToken('auth_token')->plainTextToken;
+            // Tạo token với role abilities
+            $token = $user->createToken('auth_token', ['role:' . $user->role])->plainTextToken;
 
             // Encode user data để truyền qua URL
             $userData = base64_encode(json_encode([

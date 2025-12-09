@@ -27,8 +27,8 @@ class AmenitySeeder extends Seeder
             return;
         }
 
-        // Xóa amenities cũ của property này
-        Amenity::where('property_id', $property->id)->delete();
+        // Xóa amenities cũ
+        Amenity::query()->delete();
 
         // Tạo danh sách amenities đầy đủ theo yêu cầu filter
         $amenities = [
@@ -37,6 +37,8 @@ class AmenitySeeder extends Seeder
             ['name' => 'Ban công', 'type' => 'advanced', 'category' => 'facility', 'filter_category' => 'key_amenity'],
             ['name' => 'Bếp riêng', 'type' => 'advanced', 'category' => 'facility', 'filter_category' => 'key_amenity'],
             ['name' => 'Phòng tắm khép kín', 'type' => 'advanced', 'category' => 'facility', 'filter_category' => 'key_amenity'],
+            ['name' => 'Hồ bơi riêng', 'type' => 'advanced', 'category' => 'facility', 'filter_category' => 'key_amenity'],
+            ['name' => 'Sân vườn', 'type' => 'advanced', 'category' => 'facility', 'filter_category' => 'key_amenity'],
             
             // ========== VIEW (Hướng nhìn) ==========
             ['name' => 'View vườn', 'type' => 'advanced', 'category' => 'facility', 'filter_category' => 'view'],
@@ -65,6 +67,10 @@ class AmenitySeeder extends Seeder
             ['name' => 'Tủ quần áo', 'type' => 'basic', 'category' => 'facility', 'filter_category' => null],
             ['name' => 'Máy sấy tóc', 'type' => 'basic', 'category' => 'facility', 'filter_category' => null],
             ['name' => 'Dịch vụ dọn phòng', 'type' => 'advanced', 'category' => 'service', 'filter_category' => null],
+            ['name' => 'Két sắt', 'type' => 'safety', 'category' => 'facility', 'filter_category' => null],
+            ['name' => 'Máy pha cà phê', 'type' => 'advanced', 'category' => 'facility', 'filter_category' => null],
+            ['name' => 'Sofa bed', 'type' => 'basic', 'category' => 'facility', 'filter_category' => null],
+            ['name' => 'BBQ', 'type' => 'advanced', 'category' => 'facility', 'filter_category' => null],
         ];
 
         foreach ($amenities as $amenityData) {
@@ -87,7 +93,7 @@ class AmenitySeeder extends Seeder
             $amenity->save();
         }
 
-        $this->command->info('✅ Created ' . count($amenities) . ' amenities for property');
+        $this->command->info('✅ Created ' . count($amenities) . ' amenities');
         $this->command->info('   - Key Amenities: ' . count(array_filter($amenities, fn($a) => $a['filter_category'] === 'key_amenity')));
         $this->command->info('   - View: ' . count(array_filter($amenities, fn($a) => $a['filter_category'] === 'view')));
         $this->command->info('   - Floor: ' . count(array_filter($amenities, fn($a) => $a['filter_category'] === 'floor')));
