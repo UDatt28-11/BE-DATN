@@ -24,24 +24,23 @@ class VerifyEmailController extends Controller
         $user = User::find($id);
 
         if (!$user) {
-            return response()->json([
-                'message' => 'Người dùng không tồn tại.'
-            ], 404);
+            // Redirect về frontend với thông báo lỗi
+            $frontendUrl = config('app.frontend_url', env('FRONTEND_URL', 'http://localhost:5173'));
+            return redirect($frontendUrl . '/verified?status=error&message=' . urlencode('Người dùng không tồn tại.'));
         }
 
         // 2. Kiểm tra hash (chuẩn Laravel)
         if (!hash_equals((string) $hash, sha1($user->getEmailForVerification()))) {
-            return response()->json([
-                'message' => 'Liên kết xác thực không hợp lệ hoặc đã hết hạn.'
-            ], 400);
+            // Redirect về frontend với thông báo lỗi
+            $frontendUrl = config('app.frontend_url', env('FRONTEND_URL', 'http://localhost:5173'));
+            return redirect($frontendUrl . '/verified?status=error&message=' . urlencode('Liên kết xác thực không hợp lệ hoặc đã hết hạn.'));
         }
 
         // 3. Đã xác thực rồi?
         if ($user->hasVerifiedEmail()) {
-            return response()->json([
-                'message' => 'Email đã được xác thực trước đó.',
-                'redirect' => config('app.frontend_url') . '/verified?status=already'
-            ], 200);
+            // Redirect về frontend với status already
+            $frontendUrl = config('app.frontend_url', env('FRONTEND_URL', 'http://localhost:5173'));
+            return redirect($frontendUrl . '/verified?status=already');
         }
 
         // 4. Xác thực thành công
@@ -49,9 +48,8 @@ class VerifyEmailController extends Controller
             event(new Verified($user));
         }
 
-        return response()->json([
-            'message' => 'Xác thực email thành công!',
-            'redirect' => config('app.frontend_url') . '/verified?status=success'
-        ], 200);
+        // Redirect về frontend với status success
+        $frontendUrl = config('app.frontend_url', env('FRONTEND_URL', 'http://localhost:5173'));
+        return redirect($frontendUrl . '/verified?status=success');
     }
 }
