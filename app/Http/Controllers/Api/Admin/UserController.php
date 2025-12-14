@@ -486,6 +486,17 @@ class UserController extends Controller
             $userId = $user->id;
             $userEmail = $user->email;
 
+            // Kiểm tra: Không cho phép xóa admin nếu chỉ còn 1 admin duy nhất
+            if ($user->role === 'admin') {
+                $adminCount = User::where('role', 'admin')->count();
+                if ($adminCount <= 1) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Không thể xóa tài khoản admin. Hệ thống phải có ít nhất 1 tài khoản admin.',
+                    ], 422);
+                }
+            }
+
             // Xóa các file trên S3 trước khi xóa user
             try {
                 // Xóa identity_image_url nếu có (lưu trong s3_private)
