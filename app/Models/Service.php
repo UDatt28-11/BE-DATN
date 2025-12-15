@@ -19,6 +19,7 @@ class Service extends Model
         'name',
         'price',
         'unit',
+        'status',
     ];
 
     protected $casts = [

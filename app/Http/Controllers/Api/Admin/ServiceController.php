@@ -97,6 +97,7 @@ class ServiceController extends Controller
                 'name' => 'required|string|max:255',
                 'price' => 'required|numeric|min:0',
                 'unit' => 'required|string|max:50',
+                'status' => 'sometimes|in:active,disabled',
             ], [
                 'property_id.required' => 'Vui lòng chọn property.',
                 'property_id.exists' => 'Property không tồn tại.',
@@ -179,6 +180,7 @@ class ServiceController extends Controller
                 'name' => 'sometimes|string|max:255',
                 'price' => 'sometimes|numeric|min:0',
                 'unit' => 'sometimes|string|max:50',
+                'status' => 'sometimes|in:active,disabled',
             ], [
                 'property_id.exists' => 'Property không tồn tại.',
                 'price.numeric' => 'Giá phải là số.',
@@ -249,6 +251,53 @@ class ServiceController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Có lỗi xảy ra khi xóa dịch vụ.',
+            ], 500);
+        }
+    }
+
+    /**
+     * Update service status
+     */
+    public function updateStatus(Request $request, Service $service): JsonResponse
+    {
+        try {
+            $validatedData = $request->validate([
+                'status' => 'required|in:active,disabled',
+            ], [
+                'status.required' => 'Vui lòng chọn trạng thái.',
+                'status.in' => 'Trạng thái không hợp lệ.',
+            ]);
+
+            $service->update(['status' => $validatedData['status']]);
+
+            Log::info('Service status updated', [
+                'service_id' => $service->id,
+                'name' => $service->name,
+                'status' => $service->status,
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Cập nhật trạng thái dịch vụ thành công',
+                'data' => new ServiceResource($service->load('property:id,name')),
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Dữ liệu không hợp lệ',
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Exception $e) {
+            Log::error('ServiceController@updateStatus failed', [
+                'service_id' => $service->id,
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi cập nhật trạng thái dịch vụ.',
             ], 500);
         }
     }

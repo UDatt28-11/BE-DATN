@@ -14,6 +14,7 @@ class ServiceResource extends JsonResource
             'name' => $this->name,
             'price' => (float) $this->price,
             'unit' => $this->unit,
+            'status' => $this->status ?? 'active',
             'property' => $this->whenLoaded('property', function () {
                 return [
                     'id' => $this->property->id,
