@@ -263,7 +263,11 @@ class RoomTypeController extends Controller
             
             return response()->json([
                 'success' => true,
-                'data' => $roomType->load(['property:id,name', 'images']),
+                'data' => $roomType->load([
+                    'property:id,name',
+                    'images',
+                    'services:id,name,price,unit,property_id',
+                ]),
             ]);
         } catch (\Exception $e) {
             Log::error('RoomTypeController@show failed', [
@@ -340,7 +344,16 @@ class RoomTypeController extends Controller
                 }
 
         $validatedData['image_url'] = $imageUrl;
+        // Tách service_ids ra khỏi validatedData để tránh lỗi fillable
+        $serviceIds = $request->input('service_ids', []);
+        unset($validatedData['service_ids']);
+
         $roomType = RoomType::create($validatedData);
+
+        // Gán dịch vụ cho loại phòng nếu có
+        if (!empty($serviceIds)) {
+            $roomType->services()->sync($serviceIds);
+        }
 
             Log::info('RoomType created', [
                 'room_type_id' => $roomType->id,
@@ -430,7 +443,17 @@ class RoomTypeController extends Controller
                 }
 
         $validatedData['image_url'] = $imageUrl;
+
+        // Tách service_ids để xử lý pivot
+        $serviceIds = $request->input('service_ids', null);
+        unset($validatedData['service_ids']);
+
         $roomType->update($validatedData);
+
+        // Cập nhật danh sách dịch vụ nếu client gửi lên (kể cả mảng rỗng để clear)
+        if (!is_null($serviceIds)) {
+            $roomType->services()->sync($serviceIds);
+        }
 
             Log::info('RoomType updated', [
                 'room_type_id' => $roomType->id,

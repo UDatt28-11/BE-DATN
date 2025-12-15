@@ -34,10 +34,10 @@ class Service extends Model
     }
 
     /**
-     * Các booking service sử dụng dịch vụ này
+     * Các loại phòng có thể sử dụng dịch vụ này
      */
-    public function bookingServices(): HasMany
+    public function roomTypes()
     {
-        return $this->hasMany(BookingService::class);
+        return $this->belongsToMany(RoomType::class, 'room_type_services', 'service_id', 'room_type_id');
     }
 }

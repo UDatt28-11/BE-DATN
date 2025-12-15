@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use App\Models\RoomTypeImage;
+use App\Models\Service;
 
 class RoomType extends Model
 {
@@ -53,6 +54,14 @@ class RoomType extends Model
     {
         return $this->belongsToMany(Promotion::class, 'promotion_room_type', 'room_type_id', 'promotion_id')
             ->withTimestamps();
+    }
+
+    /**
+     * Các dịch vụ mà loại phòng này có thể sử dụng
+     */
+    public function services(): BelongsToMany
+    {
+        return $this->belongsToMany(Service::class, 'room_type_services', 'room_type_id', 'service_id');
     }
 
     /**
