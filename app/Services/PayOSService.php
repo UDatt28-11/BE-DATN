@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Http;
 use Exception;
 use PayOS\PayOS;
 
@@ -24,6 +25,94 @@ class PayOSService
 
         // Khởi tạo SDK PayOS giống SportZone
         $this->sdk = new PayOS($this->clientId, $this->apiKey, $this->checksumKey);
+    }
+
+    /**
+     * Tạo signature cho PayOS request
+     */
+    private function createSignature(array $data): string
+    {
+        // Sort data by key alphabetically and create signature string
+        $signData = "amount={$data['amount']}&cancelUrl={$data['cancelUrl']}&description={$data['description']}&orderCode={$data['orderCode']}&returnUrl={$data['returnUrl']}";
+        return hash_hmac('sha256', $signData, $this->checksumKey);
+    }
+
+    /**
+     * Tạo signature từ response data để verify
+     */
+    private function createSignatureFromResponse(array $data): string
+    {
+        // Lấy các field cần thiết từ response theo thứ tự alphabet
+        $fields = ['accountNumber', 'amount', 'bin', 'checkoutUrl', 'currency', 'description', 
+                   'orderCode', 'paymentLinkId', 'qrCode', 'status'];
+        
+        $signParts = [];
+        foreach ($fields as $field) {
+            if (isset($data[$field])) {
+                $signParts[] = "{$field}={$data[$field]}";
+            }
+        }
+        
+        $signData = implode('&', $signParts);
+        return hash_hmac('sha256', $signData, $this->checksumKey);
+    }
+
+    /**
+     * Custom implementation of createPaymentLink using Laravel HTTP client
+     * This handles SSL certificate issues better on Windows
+     */
+    private function createPaymentLinkCustom(array $requestData): array
+    {
+        $url = $this->baseUrl . '/v2/payment-requests';
+        
+        // Create signature
+        $signature = $this->createSignature($requestData);
+        $requestData['signature'] = $signature;
+        
+        Log::info('PayOS Custom: Making request', [
+            'url' => $url,
+            'orderCode' => $requestData['orderCode'],
+        ]);
+        
+        try {
+            $response = Http::withHeaders([
+                'Content-Type' => 'application/json',
+                'x-client-id' => $this->clientId,
+                'x-api-key' => $this->apiKey,
+            ])
+            ->withOptions([
+                'verify' => false, // Disable SSL verification for development (Windows issue)
+            ])
+            ->timeout(30)
+            ->post($url, $requestData);
+            
+            Log::info('PayOS Custom: Response received', [
+                'status' => $response->status(),
+                'body' => $response->body(),
+            ]);
+            
+            if (!$response->successful()) {
+                throw new Exception("PayOS API returned HTTP {$response->status()}: {$response->body()}");
+            }
+            
+            $json = $response->json();
+            
+            if (!$json) {
+                throw new Exception('PayOS API returned invalid JSON');
+            }
+            
+            if (($json['code'] ?? '') !== '00') {
+                throw new Exception($json['desc'] ?? 'PayOS API error: ' . ($json['code'] ?? 'unknown'));
+            }
+            
+            return $json['data'] ?? [];
+            
+        } catch (Exception $e) {
+            Log::error('PayOS Custom: Request failed', [
+                'error' => $e->getMessage(),
+            ]);
+            throw $e;
+        }
     }
 
     /**
@@ -221,7 +310,7 @@ class PayOSService
                 throw new Exception('items không được để trống và phải là array');
             }
 
-            Log::info('PayOS creating payment link (SDK)', [
+            Log::info('PayOS creating payment link', [
                 'order_code' => $orderCode,
                 'amount' => $amount,
                 'base_url' => $this->baseUrl,
@@ -230,14 +319,17 @@ class PayOSService
                 'request_data' => $requestData,
             ]);
 
-            // Gọi SDK PayOS (giống SportZone1)
-            $response = $this->sdk->createPaymentLink($requestData);
+            // Sử dụng custom implementation thay vì SDK để xử lý SSL issue trên Windows
+            // SDK PayOS sử dụng curl trực tiếp và không xử lý SSL certificate tốt
+            $response = $this->createPaymentLinkCustom($requestData);
 
-            Log::info('PayOS SDK createPaymentLink response', [
+            Log::info('PayOS createPaymentLink response', [
                 'response' => $response,
+                'response_type' => gettype($response),
             ]);
 
-            $data = $response['data'] ?? $response;
+            // Response từ custom implementation đã là data array
+            $data = $response;
 
             // Nếu response vẫn có code/desc, kiểm tra thêm
             $responseCode = $data['code'] ?? $response['code'] ?? null;
