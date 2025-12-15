@@ -448,7 +448,17 @@ class RoomTypeController extends Controller
         $serviceIds = $request->input('service_ids', null);
         unset($validatedData['service_ids']);
 
+        // Lưu lại giá cũ để kiểm tra xem base_price có thay đổi không
+        $oldBasePrice = $roomType->base_price;
+
         $roomType->update($validatedData);
+
+        // Nếu giá cơ bản thay đổi, đồng bộ lại price_per_night cho tất cả phòng thuộc loại phòng này
+        if (array_key_exists('base_price', $validatedData) && $roomType->base_price != $oldBasePrice) {
+            Room::where('room_type_id', $roomType->id)->update([
+                'price_per_night' => $roomType->base_price,
+            ]);
+        }
 
         // Cập nhật danh sách dịch vụ nếu client gửi lên (kể cả mảng rỗng để clear)
         if (!is_null($serviceIds)) {
