@@ -2,7 +2,7 @@
 
 namespace App\Http\Controllers\Api\Admin;
 
-use App\Http\Controllers\Api\BaseController;
+use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\IndexPropertyRequest;
 use App\Models\Property;
 use App\Http\Requests\Admin\StorePropertyRequest;
@@ -19,7 +19,7 @@ use Illuminate\Support\Facades\Storage;
  *     description="API Endpoints for Property Management"
  * )
  */
-class PropertyController extends BaseController
+class PropertyController extends Controller
 {
     /**
      * Số lượng bản ghi mỗi trang mặc định
@@ -94,7 +94,17 @@ class PropertyController extends BaseController
             // Use raw query params to avoid dropping filters when validation is lenient
             $result = $service->index($request->query());
 
-            return $this->successResponse($result['data'], 'Properties retrieved successfully', 200, $result['meta'] ?? null);
+            $response = [
+                'success' => true,
+                'message' => 'Properties retrieved successfully',
+                'data' => $result['data'],
+            ];
+            
+            if (isset($result['meta'])) {
+                $response['meta'] = $result['meta'];
+            }
+            
+            return response()->json($response, 200);
         } catch (\Exception $e) {
             Log::error('PropertyController@index failed', [
                 'message' => $e->getMessage(),
