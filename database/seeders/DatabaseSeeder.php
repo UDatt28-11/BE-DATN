@@ -51,10 +51,10 @@ class DatabaseSeeder extends Seeder
         $this->command->newLine();
 
         // Bước 4: Amenities
-        $this->command->info('✨ Step 4: Creating amenities and assigning to rooms...');
+        $this->command->info('✨ Step 4: Creating amenities and assigning to room types...');
         $this->call([
             AmenitySeeder::class,
-            RoomAmenitySeeder::class,
+            RoomTypeAmenitySeeder::class, // Gán amenities cho room types thay vì rooms
         ]);
         $this->command->info('✅ Step 4 completed');
         $this->command->newLine();

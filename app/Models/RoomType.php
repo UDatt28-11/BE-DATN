@@ -13,13 +13,21 @@ class RoomType extends Model
 {
     use HasFactory, SoftDeletes;
 
-    // Khớp CSDL bookstay.sql
     protected $fillable = [
         'property_id',
         'name',
         'description',
         'image_url',
+        'base_price',
+        'max_adults',
+        'max_children',
         'status',
+    ];
+
+    protected $casts = [
+        'base_price' => 'decimal:2',
+        'max_adults' => 'integer',
+        'max_children' => 'integer',
     ];
 
     public function property(): BelongsTo {
@@ -34,9 +42,24 @@ class RoomType extends Model
         return $this->hasMany(RoomTypeImage::class);
     }
 
+    /**
+     * Tiện ích của loại phòng
+     */
+    public function amenities(): BelongsToMany {
+        return $this->belongsToMany(Amenity::class, 'room_type_amenities', 'room_type_id', 'amenity_id');
+    }
+
     public function promotions(): BelongsToMany
     {
         return $this->belongsToMany(Promotion::class, 'promotion_room_type', 'room_type_id', 'promotion_id')
             ->withTimestamps();
+    }
+
+    /**
+     * Tính tổng sức chứa
+     */
+    public function getTotalCapacityAttribute(): int
+    {
+        return $this->max_adults + $this->max_children;
     }
 }

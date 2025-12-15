@@ -534,6 +534,9 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
     // 📦 SUPPLIES MANAGEMENT (Quản lý Vật tư)
     // ========================================
     Route::apiResource('supplies', SupplyController::class);
+    // Lấy vật tư theo phòng cụ thể
+    Route::get('supplies/room/{room}', [SupplyController::class, 'getByRoom'])
+        ->where('room', '[0-9]+');
     Route::get('supplies/low-stock/items', [SupplyController::class, 'getLowStockItems']);
     Route::get('supplies/out-of-stock/items', [SupplyController::class, 'getOutOfStockItems']);
     Route::get('supplies/statistics/overview', [SupplyController::class, 'getStatistics']);

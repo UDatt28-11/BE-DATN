@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\RoomType;
+use App\Models\Property;
 use App\Models\Room;
 use App\Http\Requests\Admin\StoreRoomTypeRequest;
 use App\Http\Requests\Admin\UpdateRoomTypeRequest;
@@ -320,6 +321,18 @@ class RoomTypeController extends Controller
             
         $validatedData = $request->validated();
         $imageUrl = null;
+
+        // Nếu không truyền property_id, tự gán property đầu tiên (hệ thống đang có 1 property mặc định)
+        if (empty($validatedData['property_id'])) {
+            $defaultProperty = Property::first();
+            if (!$defaultProperty) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Chưa có property nào trong hệ thống. Vui lòng tạo property trước.',
+                ], 422);
+            }
+            $validatedData['property_id'] = $defaultProperty->id;
+        }
 
             // Handle file upload
         if ($request->hasFile('image_file')) {
