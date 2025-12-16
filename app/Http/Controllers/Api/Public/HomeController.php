@@ -111,26 +111,45 @@ class HomeController extends Controller
                 'check_out' => 'sometimes|date|after:check_in',
             ]);
 
-            $limit = (int) ($request->get('limit', 20));
+            // Pagination support
+            $perPage = (int) ($request->get('per_page', 20));
+            $page = (int) ($request->get('page', 1));
+            $limit = (int) ($request->get('limit', $perPage)); // Backward compatibility
             $checkIn = $request->get('check_in');
             $checkOut = $request->get('check_out');
             
-            // Generate cache key
-            $cacheKey = "room_types_full_{$limit}_{$checkIn}_{$checkOut}";
+            // Generate cache key - include all filters for aggressive caching
+            $cacheKey = sprintf(
+                'room_types_page_%s_limit_%s_in_%s_out_%s',
+                $page,
+                $perPage,
+                $checkIn ?? 'null',
+                $checkOut ?? 'null'
+            );
             
-            // Try to get from cache (1 minute for listings with dates, 3 minutes without)
-            $cacheDuration = ($checkIn && $checkOut) ? 60 : 180;
+            // Aggressive caching: 5 minutes (300 seconds) for better performance
+            $cacheDuration = 300;
             
-            $result = Cache::remember($cacheKey, $cacheDuration, function () use ($limit, $checkIn, $checkOut) {
+            $result = Cache::remember($cacheKey, $cacheDuration, function () use ($limit, $perPage, $page, $checkIn, $checkOut) {
                 // Check if status column exists (cached)
                 $hasStatus = $this->hasColumn('room_types', 'status');
                 $hasPropertyId = $this->hasColumn('room_types', 'property_id');
                 $hasVerification = $this->hasColumn('rooms', 'verification_status');
                 $hasReviewStatus = $this->hasColumn('reviews', 'status');
                 
-                // Build optimized query with withCount
+                // Build optimized query with select() for specific columns only
                 $query = RoomType::query()
-                    ->select(['id', 'name', 'description', 'image_url', 'property_id', 'created_at']);
+                    ->select([
+                        'id',
+                        'name',
+                        'description',
+                        'image_url',
+                        'property_id',
+                        'base_price',
+                        'max_adults',
+                        'max_children',
+                        'created_at'
+                    ]);
                 
                 if ($hasStatus) {
                     $query->where('status', 'active');
@@ -149,12 +168,38 @@ class HomeController extends Controller
                     $query->with('property:id,name');
                 }
                 
-                // Load images for room types
-                $query->with('images:id,room_type_id,image_url,is_primary');
+                // Load top 3 images, prioritize primary
+                $query->with(['images' => function ($q) {
+                    $q->select('id', 'room_type_id', 'image_url', 'is_primary')
+                      ->orderByDesc('is_primary')
+                      ->limit(3);
+                }]);
                 
-                $query->orderBy('created_at', 'desc')->limit($limit);
+                $query->orderBy('created_at', 'desc');
                 
-                $roomTypes = $query->get();
+                // Use pagination if per_page is provided, otherwise use limit
+                $meta = null;
+                if ($perPage && $perPage < 100) {
+                    $paginated = $query->paginate($perPage, ['*'], 'page', $page);
+                    $roomTypes = collect($paginated->items());
+                    $meta = [
+                        'current_page' => $paginated->currentPage(),
+                        'last_page' => $paginated->lastPage(),
+                        'per_page' => $paginated->perPage(),
+                        'total' => $paginated->total(),
+                    ];
+                } else {
+                    $roomTypes = $query->limit($limit)->get();
+                }
+                
+                // Skip if no room types found
+                if ($roomTypes->isEmpty()) {
+                    return [
+                        'data' => [],
+                        'meta' => $meta,
+                    ];
+                }
+                
                 $roomTypeIds = $roomTypes->pluck('id')->toArray();
                 
                 // ============================================
@@ -252,7 +297,7 @@ class HomeController extends Controller
                 }
                 
                 // Format response với ALL details (ưu tiên dữ liệu từ RoomType)
-                return $roomTypes->map(function ($roomType) use ($sampleRooms, $reviewStats, $amenitiesData, $hasValidDateRange, $availableCounts) {
+                $data = $roomTypes->map(function ($roomType) use ($sampleRooms, $reviewStats, $amenitiesData, $hasValidDateRange, $availableCounts) {
                     $sampleRoom = $sampleRooms->get($roomType->id);
                     $reviewStat = $reviewStats->get($roomType->id);
                     $amenities = $amenitiesData->get($roomType->id, collect());
@@ -295,13 +340,24 @@ class HomeController extends Controller
                         ])->unique('id')->values()->toArray(),
                     ];
                 })->values()->toArray();
+                
+                return [
+                    'data' => $data,
+                    'meta' => $meta,
+                ];
             });
 
-            return response()->json([
+            $response = [
                 'success' => true,
-                'data' => $result,
+                'data' => $result['data'],
                 'cached' => Cache::has($cacheKey),
-            ]);
+            ];
+            
+            if ($result['meta']) {
+                $response['meta'] = $result['meta'];
+            }
+
+            return response()->json($response);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json([
                 'success' => false,
@@ -516,8 +572,8 @@ class HomeController extends Controller
             // Cache key
             $cacheKey = "amenities_list_{$limit}_{$propertyId}";
             
-            // Cache for 10 minutes (amenities rarely change)
-            $result = Cache::remember($cacheKey, 600, function () use ($limit, $propertyId) {
+            // Cache for 1 hour (3600 seconds) - amenities rarely change
+            $result = Cache::remember($cacheKey, 3600, function () use ($limit, $propertyId) {
                 $hasStatus = $this->hasColumn('amenities', 'status');
                 $hasPropertyId = $this->hasColumn('amenities', 'property_id');
                 
@@ -1591,6 +1647,54 @@ class HomeController extends Controller
             return 'Tuyệt hảo';
         } else {
             return 'Tốt';
+        }
+    }
+
+    /**
+     * Clear room types cache (Admin only)
+     * Call this after creating/updating rooms or bookings
+     */
+    public function clearRoomTypesCache(Request $request): JsonResponse
+    {
+        try {
+            $pattern = 'room_types_*';
+            $cleared = 0;
+
+            // For Redis cache driver
+            if (config('cache.default') === 'redis') {
+                try {
+                    $redis = Cache::getRedis();
+                    $prefix = config('cache.prefix') ? config('cache.prefix') . ':' : '';
+                    $keys = $redis->keys($prefix . $pattern);
+                    
+                    foreach ($keys as $key) {
+                        $cleanKey = str_replace($prefix, '', $key);
+                        Cache::forget($cleanKey);
+                        $cleared++;
+                    }
+                } catch (\Exception $e) {
+                    Log::error('Redis cache clear failed', ['error' => $e->getMessage()]);
+                }
+            } else {
+                // For file/database cache, use tags or flush all
+                Cache::flush();
+                $cleared = 'all';
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Room types cache cleared successfully',
+                'cleared' => $cleared
+            ]);
+        } catch (\Exception $e) {
+            Log::error('HomeController@clearRoomTypesCache failed', [
+                'message' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to clear cache'
+            ], 500);
         }
     }
 }
