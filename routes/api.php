@@ -619,6 +619,7 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
     // 🛎️ SERVICES MANAGEMENT (Quản lý Dịch vụ)
     // ========================================
     Route::apiResource('services', ServiceController::class);
+    Route::patch('services/{service}/status', [ServiceController::class, 'updateStatus']);
 
     // ========================================
     // 📅 SUBSCRIPTIONS MANAGEMENT (Quản lý Đăng ký)
