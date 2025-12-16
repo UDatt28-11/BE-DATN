@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Admin;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\IndexRoomRequest;
 use App\Models\Room;
+use App\Models\RoomType;
 use App\Models\Review;
 use App\Http\Requests\Admin\StoreRoomRequest;
 use App\Http\Requests\Admin\UpdateRoomRequest;
@@ -639,15 +640,20 @@ class RoomController extends Controller
     {
         try {
             // Authorization is handled by route middleware (role:admin)
-            
-        $validatedData = $request->validated();
+            $validatedData = $request->validated();
 
-        // Tách mảng 'amenities' ra khỏi dữ liệu chính
-        $amenityIds = $validatedData['amenities'] ?? [];
+            // Tách mảng 'amenities' ra khỏi dữ liệu chính
+            $amenityIds = $validatedData['amenities'] ?? [];
             unset($validatedData['amenities']);
 
+            // Đồng bộ giá & sức chứa từ RoomType để đảm bảo luôn khớp
+            $roomType = RoomType::findOrFail($validatedData['room_type_id']);
+            $validatedData['max_adults'] = $roomType->max_adults ?? 2;
+            $validatedData['max_children'] = $roomType->max_children ?? 0;
+            $validatedData['price_per_night'] = $roomType->base_price ?? 0;
+
             // Tạo phòng
-        $room = Room::create($validatedData);
+            $room = Room::create($validatedData);
 
             // Đồng bộ các tiện ích vào bảng 'room_amenities'
         if (!empty($amenityIds)) {
@@ -831,14 +837,22 @@ class RoomController extends Controller
     {
         try {
             // Authorization is handled by route middleware (role:admin)
-            
-        $validatedData = $request->validated();
+            $validatedData = $request->validated();
 
-        $amenityIds = $validatedData['amenities'] ?? [];
-        unset($validatedData['amenities']);
+            $amenityIds = $validatedData['amenities'] ?? [];
+            unset($validatedData['amenities']);
+
+            // Nếu room_type_id được cập nhật (hoặc có base_price mới), đồng bộ lại giá & sức chứa
+            $roomTypeId = $validatedData['room_type_id'] ?? $room->room_type_id;
+            if ($roomTypeId) {
+                $roomType = RoomType::findOrFail($roomTypeId);
+                $validatedData['max_adults'] = $roomType->max_adults ?? $room->max_adults;
+                $validatedData['max_children'] = $roomType->max_children ?? $room->max_children;
+                $validatedData['price_per_night'] = $roomType->base_price ?? $room->price_per_night;
+            }
 
             // Cập nhật phòng
-        $room->update($validatedData);
+            $room->update($validatedData);
         
         // Refresh room để đảm bảo có đầy đủ thông tin
         $room->refresh();

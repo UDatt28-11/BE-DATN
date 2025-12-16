@@ -7,6 +7,7 @@ use App\Http\Requests\Admin\IndexSupplyRequest;
 use App\Services\Supply\QueryService;
 use App\Models\Supply;
 use App\Models\SupplyLog;
+use App\Models\Room;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
@@ -103,6 +104,42 @@ class SupplyController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Có lỗi xảy ra khi lấy danh sách vật tư.',
+            ], 500);
+        }
+    }
+
+    /**
+     * Lấy danh sách vật tư theo phòng
+     */
+    public function getByRoom(int $roomId): JsonResponse
+    {
+        try {
+            // Đảm bảo phòng tồn tại
+            $room = Room::findOrFail($roomId);
+
+            $supplies = Supply::where('room_id', $room->id)->get();
+
+            return response()->json([
+                'success' => true,
+                'data' => $supplies,
+            ]);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Không tìm thấy phòng.',
+            ], 404);
+        } catch (\Exception $e) {
+            Log::error('SupplyController@getByRoom failed', [
+                'room_id' => $roomId,
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi lấy vật tư theo phòng.',
             ], 500);
         }
     }

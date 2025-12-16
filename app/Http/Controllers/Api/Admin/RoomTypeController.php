@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\RoomType;
+use App\Models\Property;
 use App\Models\Room;
 use App\Http\Requests\Admin\StoreRoomTypeRequest;
 use App\Http\Requests\Admin\UpdateRoomTypeRequest;
@@ -262,7 +263,11 @@ class RoomTypeController extends Controller
             
             return response()->json([
                 'success' => true,
-                'data' => $roomType->load(['property:id,name', 'images']),
+                'data' => $roomType->load([
+                    'property:id,name',
+                    'images',
+                    'services:id,name,price,unit,property_id',
+                ]),
             ]);
         } catch (\Exception $e) {
             Log::error('RoomTypeController@show failed', [
@@ -321,13 +326,34 @@ class RoomTypeController extends Controller
         $validatedData = $request->validated();
         $imageUrl = null;
 
+        // Nếu không truyền property_id, tự gán property đầu tiên (hệ thống đang có 1 property mặc định)
+        if (empty($validatedData['property_id'])) {
+            $defaultProperty = Property::first();
+            if (!$defaultProperty) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Chưa có property nào trong hệ thống. Vui lòng tạo property trước.',
+                ], 422);
+            }
+            $validatedData['property_id'] = $defaultProperty->id;
+        }
+
             // Handle file upload
         if ($request->hasFile('image_file')) {
                 $imageUrl = $this->storeLocalFile($request->file('image_file'));
                 }
 
         $validatedData['image_url'] = $imageUrl;
+        // Tách service_ids ra khỏi validatedData để tránh lỗi fillable
+        $serviceIds = $request->input('service_ids', []);
+        unset($validatedData['service_ids']);
+
         $roomType = RoomType::create($validatedData);
+
+        // Gán dịch vụ cho loại phòng nếu có
+        if (!empty($serviceIds)) {
+            $roomType->services()->sync($serviceIds);
+        }
 
             Log::info('RoomType created', [
                 'room_type_id' => $roomType->id,
@@ -417,7 +443,27 @@ class RoomTypeController extends Controller
                 }
 
         $validatedData['image_url'] = $imageUrl;
+
+        // Tách service_ids để xử lý pivot
+        $serviceIds = $request->input('service_ids', null);
+        unset($validatedData['service_ids']);
+
+        // Lưu lại giá cũ để kiểm tra xem base_price có thay đổi không
+        $oldBasePrice = $roomType->base_price;
+
         $roomType->update($validatedData);
+
+        // Nếu giá cơ bản thay đổi, đồng bộ lại price_per_night cho tất cả phòng thuộc loại phòng này
+        if (array_key_exists('base_price', $validatedData) && $roomType->base_price != $oldBasePrice) {
+            Room::where('room_type_id', $roomType->id)->update([
+                'price_per_night' => $roomType->base_price,
+            ]);
+        }
+
+        // Cập nhật danh sách dịch vụ nếu client gửi lên (kể cả mảng rỗng để clear)
+        if (!is_null($serviceIds)) {
+            $roomType->services()->sync($serviceIds);
+        }
 
             Log::info('RoomType updated', [
                 'room_type_id' => $roomType->id,

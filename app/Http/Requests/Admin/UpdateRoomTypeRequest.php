@@ -10,9 +10,15 @@ class UpdateRoomTypeRequest extends FormRequest
     public function rules(): array
     {
         $rules = [
-            'property_id' => 'sometimes|required|exists:properties,id',
+            'property_id' => 'sometimes|nullable|exists:properties,id',
             'name' => 'sometimes|required|string|max:255',
             'description' => 'nullable|string',
+            // Các trường mới: cho phép cập nhật nếu gửi lên
+            'base_price' => 'sometimes|required|numeric|min:0',
+            'max_adults' => 'sometimes|required|integer|min:1',
+            'max_children' => 'sometimes|nullable|integer|min:0',
+            'service_ids' => 'sometimes|array',
+            'service_ids.*' => 'integer|exists:services,id',
         ];
         
         // Chỉ validate image_file nếu nó thực sự được gửi lên (có file)

@@ -13,10 +13,12 @@ class UpdateRoomRequest extends FormRequest
             'room_type_id' => 'sometimes|required|exists:room_types,id',
             'name' => 'sometimes|required|string|max:255',
             'description' => 'nullable|string',
-            'max_adults' => 'sometimes|required|integer|min:1',
-            'max_children' => 'sometimes|required|integer|min:0',
-            'price_per_night' => 'sometimes|required|numeric|min:0',
+            // Các trường này được đồng bộ từ RoomType
+            'max_adults' => 'sometimes|nullable|integer|min:1',
+            'max_children' => 'sometimes|nullable|integer|min:0',
+            'price_per_night' => 'sometimes|nullable|numeric|min:0',
             'status' => 'sometimes|required|in:available,maintenance,occupied',
+            'verification_status' => 'sometimes|nullable|in:pending,verified,rejected',
 
             // Validation cho mảng các tiện ích (React sẽ gửi lên 1 mảng ID)
             'amenities' => 'nullable|array',

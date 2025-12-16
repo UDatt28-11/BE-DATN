@@ -251,7 +251,7 @@ class HomeController extends Controller
                     }
                 }
                 
-                // Format response with ALL details
+                // Format response với ALL details (ưu tiên dữ liệu từ RoomType)
                 return $roomTypes->map(function ($roomType) use ($sampleRooms, $reviewStats, $amenitiesData, $hasValidDateRange, $availableCounts) {
                     $sampleRoom = $sampleRooms->get($roomType->id);
                     $reviewStat = $reviewStats->get($roomType->id);
@@ -272,10 +272,12 @@ class HomeController extends Controller
                             'id' => $roomType->property->id,
                             'name' => $roomType->property->name,
                         ] : null,
-                        // Sample room data (aggregated)
-                        'price_per_night' => $sampleRoom->min_price ?? 0,
-                        'max_adults' => $sampleRoom->max_adults ?? 2,
-                        'max_children' => $sampleRoom->max_children ?? 0,
+                        // Giá & sức chứa: lấy từ RoomType (schema mới), fallback sampleRoom nếu cần
+                        'base_price' => (float) ($roomType->base_price ?? $sampleRoom->min_price ?? 0),
+                        // Giữ key cũ để FE không phải sửa quá nhiều
+                        'price_per_night' => (float) ($roomType->base_price ?? $sampleRoom->min_price ?? 0),
+                        'max_adults' => (int) ($roomType->max_adults ?? $sampleRoom->max_adults ?? 2),
+                        'max_children' => (int) ($roomType->max_children ?? $sampleRoom->max_children ?? 0),
                         // Images from room type
                         'images' => $roomType->images->map(fn($img) => [
                             'id' => $img->id,
@@ -341,9 +343,9 @@ class HomeController extends Controller
                 ], 404);
             }
 
-            // Load property nếu có
+            // Load property & amenities nếu có
             if (Schema::hasColumn('room_types', 'property_id')) {
-                $roomType->load('property:id,name,address');
+                $roomType->load(['property:id,name,address', 'amenities:id,name,filter_category']);
             }
 
             $checkIn = $request->get('check_in');
@@ -420,6 +422,12 @@ class HomeController extends Controller
                 'description' => $roomType->description,
                 'image_url' => $roomType->image_url,
                 'available_count' => $availableCount,
+                // Giá & sức chứa: lấy trực tiếp từ RoomType (schema mới)
+                'base_price' => (float) ($roomType->base_price ?? 0),
+                // Giữ key cũ price_per_night để FE dùng chung
+                'price_per_night' => (float) ($roomType->base_price ?? 0),
+                'max_adults' => (int) ($roomType->max_adults ?? 2),
+                'max_children' => (int) ($roomType->max_children ?? 0),
                 'property' => $roomType->relationLoaded('property') && $roomType->property ? [
                     'id' => $roomType->property->id,
                     'name' => $roomType->property->name,
@@ -431,16 +439,6 @@ class HomeController extends Controller
 
             // Thêm thông tin từ Room mẫu nếu có
             if ($sampleRoom) {
-                $response['price_per_night'] = (float) $sampleRoom->price_per_night;
-                $response['max_adults'] = $sampleRoom->max_adults;
-                $response['max_children'] = $sampleRoom->max_children;
-                $response['amenities'] = $sampleRoom->amenities->map(function ($amenity) {
-                    return [
-                        'id' => $amenity->id,
-                        'name' => $amenity->name,
-                        'filter_category' => $amenity->filter_category ?? null,
-                    ];
-                });
                 // Get images from roomType instead of room
                 $images = [];
                 if ($sampleRoom->roomType && $sampleRoom->roomType->relationLoaded('images') && $sampleRoom->roomType->images) {
@@ -459,6 +457,27 @@ class HomeController extends Controller
                 }
                 if (Schema::hasColumn('rooms', 'floor_category')) {
                     $response['floor_category'] = $sampleRoom->floor_category;
+                }
+            }
+
+            // Nếu chưa có amenities từ RoomType (do chưa load), fallback từ sampleRoom
+            if (!isset($response['amenities'])) {
+                if ($roomType->relationLoaded('amenities') && $roomType->amenities) {
+                    $response['amenities'] = $roomType->amenities->map(function ($amenity) {
+                        return [
+                            'id' => $amenity->id,
+                            'name' => $amenity->name,
+                            'filter_category' => $amenity->filter_category ?? null,
+                        ];
+                    })->values();
+                } elseif ($sampleRoom) {
+                    $response['amenities'] = $sampleRoom->amenities->map(function ($amenity) {
+                        return [
+                            'id' => $amenity->id,
+                            'name' => $amenity->name,
+                            'filter_category' => $amenity->filter_category ?? null,
+                        ];
+                    });
                 }
             }
 
