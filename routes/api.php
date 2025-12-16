@@ -1036,6 +1036,9 @@ Route::prefix('public')->group(function () {
     Route::get('/featured-rooms', [HomeController::class, 'featuredRooms']);
     Route::get('/popular-rooms', [HomeController::class, 'popularRooms']);
     Route::get('/properties', [HomeController::class, 'properties']); // Featured properties for homepage
+    
+    // Cache management (can be protected with admin middleware later)
+    Route::post('/room-types/clear-cache', [HomeController::class, 'clearRoomTypesCache']);
 });
 
 // API tổng hợp homepage data
