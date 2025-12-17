@@ -9,7 +9,7 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('booking_services', function (Blueprint $table) {
-            $table->enum('status', ['pending', 'approved', 'rejected'])->default('pending')->after('price_at_booking');
+            $table->enum('status', ['pending', 'approved', 'rejected', 'in_use', 'completed'])->default('pending')->after('price_at_booking');
             $table->text('notes')->nullable()->after('status');
         });
     }

@@ -76,13 +76,63 @@ class BookingOrderResource extends JsonResource
                 return $this->details->map(function($detail) {
                     $room = null;
                     if ($detail->relationLoaded('room') && $detail->room) {
+                        // Lấy room_type_id trực tiếp từ foreign key (luôn có trong database)
+                        // Thử nhiều cách để lấy room_type_id
+                        $roomTypeId = null;
+                        
+                        // Cách 1: Từ attribute trực tiếp
+                        if (isset($detail->room->room_type_id)) {
+                            $roomTypeId = $detail->room->room_type_id;
+                        }
+                        // Cách 2: Từ getAttribute (nếu có accessor)
+                        else if ($detail->room->getAttribute('room_type_id')) {
+                            $roomTypeId = $detail->room->getAttribute('room_type_id');
+                        }
+                        // Cách 3: Từ roomType relationship nếu đã load
+                        else if ($detail->room->relationLoaded('roomType') && $detail->room->roomType) {
+                            $roomTypeId = $detail->room->roomType->id;
+                        }
+                        // Cách 4: Query trực tiếp từ database nếu cần
+                        else if ($detail->room->id) {
+                            try {
+                                $roomTypeId = \App\Models\Room::where('id', $detail->room->id)->value('room_type_id');
+                            } catch (\Exception $e) {
+                                \Illuminate\Support\Facades\Log::warning('Cannot get room_type_id for room', [
+                                    'room_id' => $detail->room->id,
+                                    'error' => $e->getMessage(),
+                                ]);
+                            }
+                        }
+                        
+                        $roomTypeName = null;
+                        $roomTypeObject = null;
+                        
+                        // Nếu roomType relationship đã được load, lấy thông tin từ đó
+                        if ($detail->room->relationLoaded('roomType') && $detail->room->roomType) {
+                            $roomTypeName = $detail->room->roomType->name;
+                            $roomTypeObject = [
+                                'id' => $detail->room->roomType->id,
+                                'name' => $detail->room->roomType->name,
+                            ];
+                            // Đảm bảo room_type_id từ roomType.id nếu có
+                            if (!$roomTypeId) {
+                                $roomTypeId = $detail->room->roomType->id;
+                            }
+                        } else if ($roomTypeId) {
+                            // Nếu chỉ có room_type_id, tạo object với id
+                            $roomTypeObject = [
+                                'id' => $roomTypeId,
+                                'name' => null,
+                            ];
+                        }
+                        
                         $room = [
                             'id' => $detail->room->id,
                             'name' => $detail->room->name,
-                            'property_id' => $detail->room->property_id, // Thêm property_id trực tiếp
-                            'room_type' => $detail->room->relationLoaded('roomType') && $detail->room->roomType 
-                                ? $detail->room->roomType->name 
-                                : null,
+                            'property_id' => $detail->room->property_id,
+                            'room_type_id' => $roomTypeId, // Luôn có giá trị từ foreign key
+                            'room_type' => $roomTypeName, // Chỉ có khi roomType được load
+                            'roomType' => $roomTypeObject, // Object với id (và name nếu có)
                             'property' => $detail->room->relationLoaded('property') && $detail->room->property 
                                 ? [
                                     'id' => $detail->room->property->id,
