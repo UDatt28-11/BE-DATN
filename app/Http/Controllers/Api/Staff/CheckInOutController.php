@@ -213,6 +213,23 @@ class CheckInOutController extends Controller
                     throw new \Exception('Booking detail không thuộc về booking order này.');
                 }
 
+                // Validate: Chỉ cho phép check-in vào đúng ngày check-in của booking
+                if ($bookingDetail->check_in_date) {
+                    // Sử dụng timezone của ứng dụng để so sánh ngày
+                    $checkInDate = \Carbon\Carbon::parse($bookingDetail->check_in_date)
+                        ->setTimezone(config('app.timezone'))
+                        ->startOfDay();
+                    $today = \Carbon\Carbon::now(config('app.timezone'))->startOfDay();
+                    
+                    if (!$today->equalTo($checkInDate)) {
+                        DB::rollBack();
+                        return response()->json([
+                            'success' => false,
+                            'message' => "Không thể check-in. Phòng này chỉ có thể check-in vào ngày " . $checkInDate->format('d/m/Y') . ". Ngày hiện tại: " . $today->format('d/m/Y'),
+                        ], 400);
+                    }
+                }
+
                 // Kiểm tra booking detail đã check-in chưa (nếu đã check-in thì bỏ qua, không cần check-in lại)
                 // Cho phép check-in lại nếu cần thêm khách
                 // if ($bookingDetail->status === 'checked_in') {

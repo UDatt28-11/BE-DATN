@@ -102,7 +102,7 @@ class RoomTypeController extends Controller
             ]);
 
             $perPage = (int) ($request->get('per_page', self::DEFAULT_PER_PAGE));
-            $query = RoomType::query()->with(['property:id,name', 'images']);
+            $query = RoomType::query()->with(['property:id,name', 'images', 'services:id,name,price,unit,property_id']);
 
             // Filter by property_id
             if ($request->has('property_id')) {
@@ -176,7 +176,7 @@ class RoomTypeController extends Controller
             ]);
 
             $perPage = (int) ($request->get('per_page', self::DEFAULT_PER_PAGE));
-            $query = RoomType::onlyTrashed()->with(['property:id,name', 'images']);
+            $query = RoomType::onlyTrashed()->with(['property:id,name', 'images', 'services:id,name,price,unit,property_id']);
 
             if ($request->has('property_id')) {
                 $query->where('property_id', $request->property_id);
@@ -346,14 +346,22 @@ class RoomTypeController extends Controller
         $validatedData['image_url'] = $imageUrl;
         // Tách service_ids ra khỏi validatedData để tránh lỗi fillable
         $serviceIds = $request->input('service_ids', []);
+        // Đảm bảo service_ids là array
+        if (!is_array($serviceIds)) {
+            $serviceIds = [];
+        }
         unset($validatedData['service_ids']);
 
         $roomType = RoomType::create($validatedData);
 
-        // Gán dịch vụ cho loại phòng nếu có
-        if (!empty($serviceIds)) {
-            $roomType->services()->sync($serviceIds);
-        }
+        // Gán dịch vụ cho loại phòng (sync luôn, kể cả mảng rỗng để clear)
+        $roomType->services()->sync($serviceIds);
+        
+        Log::info('RoomType created with services', [
+            'room_type_id' => $roomType->id,
+            'service_ids' => $serviceIds,
+            'services_count' => count($serviceIds),
+        ]);
 
             Log::info('RoomType created', [
                 'room_type_id' => $roomType->id,
@@ -462,7 +470,17 @@ class RoomTypeController extends Controller
 
         // Cập nhật danh sách dịch vụ nếu client gửi lên (kể cả mảng rỗng để clear)
         if (!is_null($serviceIds)) {
+            // Đảm bảo service_ids là array
+            if (!is_array($serviceIds)) {
+                $serviceIds = [];
+            }
             $roomType->services()->sync($serviceIds);
+            
+            Log::info('RoomType services synced', [
+                'room_type_id' => $roomType->id,
+                'service_ids' => $serviceIds,
+                'services_count' => count($serviceIds),
+            ]);
         }
 
             Log::info('RoomType updated', [
