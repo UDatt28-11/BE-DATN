@@ -8,8 +8,10 @@ use App\Http\Resources\Admin\BookingOrderResource;
 use App\Http\Requests\Admin\StoreBookingOrderRequest;
 use App\Http\Requests\Admin\UpdateBookingOrderRequest;
 use App\Http\Requests\Admin\IndexBookingOrderRequest;
+use App\Http\Requests\Admin\UpdateBookingStatusRequest;
 use App\Models\BookingOrder;
 use App\Models\BookingDetail;
+use App\Models\CheckoutRequest;
 use App\Services\BookingOrder\QueryService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -19,7 +21,6 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Symfony\Component\HttpFoundation\StreamedResponse;
-use App\Http\Requests\Admin\UpdateBookingStatusRequest;
 
 /**
  * @OA\Tag(
@@ -34,6 +35,42 @@ class BookingOrderController extends Controller
      * Số lượng bản ghi mỗi trang mặc định
      */
     private const DEFAULT_PER_PAGE = 15;
+
+    /**
+     * Tạo CheckoutRequest (pending) cho tất cả phòng đã check-in của một booking,
+     * dùng trong các luồng check-in trực tiếp/duyệt check-in khi bạn muốn
+     * quản lý checkout tại màn hình "Yêu cầu checkout" của admin.
+     */
+    protected function createPendingCheckoutRequestsForBooking(BookingOrder $booking, ?string $notes = null): void
+    {
+        // Chỉ áp dụng cho booking đã/đang check-in
+        if (!in_array($booking->status, ['checked_in', 'partially_checked_in', 'partially_checked_out'], true)) {
+            return;
+        }
+
+        // Lấy tất cả booking_detail đã check-in
+        $details = $booking->details()
+            ->where('status', 'checked_in')
+            ->get();
+
+        foreach ($details as $detail) {
+            // Nếu đã có CheckoutRequest pending cho detail này thì bỏ qua
+            $existing = CheckoutRequest::where('booking_detail_id', $detail->id)
+                ->where('status', 'pending')
+                ->first();
+
+            if ($existing) {
+                continue;
+            }
+
+            CheckoutRequest::create([
+                'booking_order_id' => $booking->id,
+                'booking_detail_id' => $detail->id,
+                'status' => 'pending',
+                'notes' => $notes,
+            ]);
+        }
+    }
 
     /**
      * Display a listing of booking orders
@@ -2463,6 +2500,9 @@ class BookingOrderController extends Controller
             
             $booking->update(['status' => $newStatus]);
 
+            // Sau khi booking đã/đang check-in, tự tạo CheckoutRequest pending
+            $this->createPendingCheckoutRequestsForBooking($booking, $request->notes ?? null);
+
             DB::commit();
 
             return response()->json([
@@ -2694,6 +2734,9 @@ class BookingOrderController extends Controller
                 'staff_id' => $admin->id,
                 'notes' => $request->notes ?? $booking->notes,
             ]);
+
+            // Sau khi booking đã/đang check-in, tự tạo CheckoutRequest pending
+            $this->createPendingCheckoutRequestsForBooking($booking, $request->notes ?? null);
 
             DB::commit();
 
