@@ -485,6 +485,8 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
     Route::get('service-requests', [BookingOrderController::class, 'getServiceRequests']);
     Route::post('service-requests/{id}/approve', [BookingOrderController::class, 'approveServiceRequest']);
     Route::post('service-requests/{id}/reject', [BookingOrderController::class, 'rejectServiceRequest']);
+    Route::post('service-requests/{id}/complete', [BookingOrderController::class, 'completeServiceRequest']);
+    Route::post('bookings/{id}/request-service-for-guest', [BookingOrderController::class, 'requestServiceForGuest']);
 
     // Quản lý yêu cầu tiện ích
     Route::get('amenity-requests', [BookingOrderController::class, 'getAmenityRequests']);
