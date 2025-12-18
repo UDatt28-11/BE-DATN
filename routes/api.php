@@ -52,6 +52,7 @@ use App\Http\Controllers\Auth\AdminPasswordResetController;
 use App\Http\Controllers\Api\User\VoucherController as UserVoucherController;
 use App\Http\Controllers\Api\Staff\BookingController as StaffBookingController;
 use App\Http\Controllers\Api\PayOSController;
+use App\Http\Controllers\Api\VNPayController;
 
 // === MODELS & FACADES FOR PAYMENT REDIRECT ===
 use App\Models\BookingOrder;
@@ -113,6 +114,18 @@ Route::prefix('staff')->group(function () {
 // PAYOS WEBHOOK (PUBLIC ROUTE - Không cần auth)
 // ========================================
 Route::post('payos/webhook', [PayOSController::class, 'webhook'])->name('payos.webhook');
+
+// ========================================
+// VNPAY ROUTES (PUBLIC - Không cần auth)
+// ========================================
+Route::prefix('vnpay')->group(function () {
+    // Return URL - VNPAY redirect về sau khi thanh toán
+    Route::get('return', [VNPayController::class, 'handleReturn'])->name('vnpay.return');
+    // IPN URL - VNPAY gọi để thông báo kết quả (server-to-server)
+    Route::post('ipn', [VNPayController::class, 'handleIPN'])->name('vnpay.ipn');
+    // Lấy danh sách ngân hàng hỗ trợ
+    Route::get('banks', [VNPayController::class, 'getBanks'])->name('vnpay.banks');
+});
 
 // PAYOS REDIRECT (PUBLIC ROUTE - Redirect về localhost)
 // ========================================
@@ -731,6 +744,11 @@ Route::middleware(['auth:sanctum', 'role:user,staff,admin'])->prefix('user')->gr
     Route::post('payos/create-payment-link', [PayOSController::class, 'createPaymentLink'])->middleware('role:user,admin')->name('payos.createPaymentLink');
     Route::post('payos/create-invoice-payment-link', [PayOSController::class, 'createInvoicePaymentLink'])->middleware('role:user,admin')->name('payos.createInvoicePaymentLink');
     Route::get('payos/check-status/{orderCode}', [PayOSController::class, 'checkPaymentStatus'])->middleware('role:user,admin')->where('orderCode', '[0-9]+')->name('payos.checkStatus');
+    
+    // VNPay payment routes (user và admin đều có thể sử dụng)
+    Route::post('vnpay/create-payment', [VNPayController::class, 'createPayment'])->middleware('role:user,admin')->name('vnpay.createPayment');
+    Route::post('vnpay/create-invoice-payment', [VNPayController::class, 'createInvoicePayment'])->middleware('role:user,admin')->name('vnpay.createInvoicePayment');
+    Route::post('vnpay/query-transaction', [VNPayController::class, 'queryTransaction'])->middleware('role:user,admin')->name('vnpay.queryTransaction');
     
     // Invoices - User có thể xem và thanh toán invoice của chính mình
     Route::get('invoices', [\App\Http\Controllers\Api\Admin\InvoiceController::class, 'getUserInvoices'])->name('user.invoices.index');
