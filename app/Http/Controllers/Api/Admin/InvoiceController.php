@@ -512,7 +512,7 @@ class InvoiceController extends Controller
             }
 
             $request->validate([
-                'payment_method' => 'required|string|in:cash,bank,momo,card',
+                'payment_method' => 'required|string|in:cash,bank,momo,card,payos,vnpay',
                 'payment_notes' => 'nullable|string|max:500',
             ]);
 

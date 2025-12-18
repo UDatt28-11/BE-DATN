@@ -43,15 +43,29 @@ class BookingOrderController extends Controller
      */
     protected function createPendingCheckoutRequestsForBooking(BookingOrder $booking, ?string $notes = null): void
     {
+        // Refresh booking để có dữ liệu mới nhất từ database
+        $booking->refresh();
+        $booking->load('details');
+        
         // Chỉ áp dụng cho booking đã/đang check-in
         if (!in_array($booking->status, ['checked_in', 'partially_checked_in', 'partially_checked_out'], true)) {
+            Log::info('createPendingCheckoutRequestsForBooking - Skipping, booking status not valid', [
+                'booking_id' => $booking->id,
+                'status' => $booking->status,
+            ]);
             return;
         }
 
-        // Lấy tất cả booking_detail đã check-in
-        $details = $booking->details()
+        // Lấy tất cả booking_detail đã check-in (query trực tiếp từ DB để có dữ liệu mới nhất)
+        $details = BookingDetail::where('booking_order_id', $booking->id)
             ->where('status', 'checked_in')
             ->get();
+
+        Log::info('createPendingCheckoutRequestsForBooking - Found checked-in details', [
+            'booking_id' => $booking->id,
+            'details_count' => $details->count(),
+            'detail_ids' => $details->pluck('id')->toArray(),
+        ]);
 
         foreach ($details as $detail) {
             // Nếu đã có CheckoutRequest pending cho detail này thì bỏ qua
@@ -60,14 +74,24 @@ class BookingOrderController extends Controller
                 ->first();
 
             if ($existing) {
+                Log::info('createPendingCheckoutRequestsForBooking - CheckoutRequest already exists', [
+                    'booking_detail_id' => $detail->id,
+                    'existing_checkout_request_id' => $existing->id,
+                ]);
                 continue;
             }
 
-            CheckoutRequest::create([
+            $checkoutRequest = CheckoutRequest::create([
                 'booking_order_id' => $booking->id,
                 'booking_detail_id' => $detail->id,
                 'status' => 'pending',
                 'notes' => $notes,
+            ]);
+
+            Log::info('createPendingCheckoutRequestsForBooking - Created CheckoutRequest', [
+                'checkout_request_id' => $checkoutRequest->id,
+                'booking_order_id' => $booking->id,
+                'booking_detail_id' => $detail->id,
             ]);
         }
     }
@@ -1011,7 +1035,7 @@ class BookingOrderController extends Controller
                 'customer_phone' => 'required|string|max:20',
                 'customer_email' => 'nullable|email|max:255',
                 'total_amount' => 'required|numeric|min:0',
-                'payment_method' => 'nullable|string|max:50|in:cash,bank,momo,card',
+                'payment_method' => 'nullable|string|max:50|in:cash,bank,momo,card,payos,vnpay',
                 'notes' => 'nullable|string',
                 'voucher_id' => 'nullable|integer|exists:vouchers,id',
                 'discount_amount' => 'nullable|numeric|min:0',
@@ -1267,7 +1291,7 @@ class BookingOrderController extends Controller
             }
 
             $validated = $request->validate([
-                'payment_method' => 'required|string|in:cash,bank,momo,card',
+                'payment_method' => 'required|string|in:cash,bank,momo,card,payos,vnpay',
             ]);
 
             $booking = BookingOrder::findOrFail($id);
@@ -1341,7 +1365,7 @@ class BookingOrderController extends Controller
             }
 
             $validated = $request->validate([
-                'payment_method' => 'required|string|in:cash,bank,momo,card',
+                'payment_method' => 'required|string|in:cash,bank,momo,card,payos,vnpay',
                 'deposit_amount' => 'nullable|numeric|min:0',
                 'transaction_id' => 'nullable|string|max:255',
             ]);
