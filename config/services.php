@@ -50,4 +50,29 @@ return [
         'base_url' => env('PAYOS_BASE_URL', 'https://api-merchant.payos.vn'),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | VNPAY Payment Gateway Configuration
+    |--------------------------------------------------------------------------
+    |
+    | VNPAY Sandbox Test Card:
+    | - Bank: NCB
+    | - Card Number: 9704198526191432198
+    | - Card Holder: NGUYEN VAN A
+    | - Expiry Date: 07/15
+    | - OTP: 123456
+    |
+    */
+    'vnpay' => [
+        'tmn_code' => env('VNP_TMN_CODE', ''),
+        'hash_secret' => env('VNP_HASH_SECRET', ''),
+        'url' => env('VNP_URL', 'https://sandbox.vnpayment.vn/paymentv2/vpcpay.html'),
+        'api_url' => env('VNP_API_URL', 'https://sandbox.vnpayment.vn/merchant_webapi/api/transaction'),
+        'return_url' => env('VNP_RETURN_URL'),
+        'version' => '2.1.0',
+        'command' => 'pay',
+        'curr_code' => 'VND',
+        'locale' => 'vn',
+    ],
+
 ];
