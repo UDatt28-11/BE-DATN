@@ -1049,14 +1049,125 @@ class InvoiceController extends Controller
      */
     public function statistics(): JsonResponse
     {
+        // Đếm invoices dựa trên status trong database
+        $totalInvoices = Invoice::count();
+        
+        // Đếm invoices đã hủy: 
+        // 1. Invoice có status = 'cancelled' HOẶC
+        // 2. Invoice có booking order đã cancelled
+        $cancelledInvoices = Invoice::where(function($query) {
+            $query->where('status', 'cancelled')
+                ->orWhereHas('bookingOrder', function($q) {
+                    $q->where('status', 'cancelled');
+                });
+        })->count();
+        
+        // Đếm invoices đã thanh toán dựa trên payments thực tế
+        // Một invoice được coi là "paid" nếu:
+        // 1. status = 'paid' HOẶC
+        // 2. tổng payments thành công >= total_amount
+        // VÀ không phải cancelled (cả invoice và booking order)
+        $paidInvoices = Invoice::where(function($query) {
+            $query->where('status', 'paid')
+                ->orWhereRaw('(
+                    SELECT COALESCE(SUM(amount), 0)
+                    FROM payments
+                    WHERE payments.invoice_id = invoices.id
+                    AND payments.status IN ("success", "paid")
+                ) >= invoices.total_amount');
+        })
+        ->where('status', '!=', 'cancelled')
+        ->whereDoesntHave('bookingOrder', function($q) {
+            $q->where('status', 'cancelled');
+        })
+        ->count();
+        
+        // Đếm invoices chưa thanh toán (không phải cancelled và chưa paid)
+        $unpaidInvoices = Invoice::where('status', '!=', 'cancelled')
+            ->whereDoesntHave('bookingOrder', function($q) {
+                $q->where('status', 'cancelled');
+            })
+            ->where(function($query) {
+                $query->where('status', '!=', 'paid')
+                    ->whereRaw('(
+                        SELECT COALESCE(SUM(amount), 0)
+                        FROM payments
+                        WHERE payments.invoice_id = invoices.id
+                        AND payments.status IN ("success", "paid")
+                    ) < invoices.total_amount');
+            })
+            ->count();
+        
+        // Đếm overdue invoices (status = overdue)
+        $overdueInvoices = Invoice::where('status', 'overdue')
+            ->whereDoesntHave('bookingOrder', function($q) {
+                $q->where('status', 'cancelled');
+            })
+            ->count();
+        
+        // Tính tổng doanh thu từ payments thực tế
+        // Doanh thu = tổng payments thành công
+        // Loại trừ invoices/booking orders đã cancelled
+        $totalRevenue = \App\Models\Payment::whereIn('status', ['success', 'paid'])
+            ->whereHas('invoice', function($query) {
+                $query->where('status', '!=', 'cancelled')
+                    ->whereDoesntHave('bookingOrder', function($q) {
+                        $q->where('status', 'cancelled');
+                    });
+            })
+            ->sum('amount');
+        
+        // Trừ refunds từ booking orders (nếu có)
+        // refund_amount nằm trong booking_orders, không phải invoices
+        $totalRefunds = BookingOrder::where('status', '!=', 'cancelled')
+            ->whereNotNull('refund_amount')
+            ->whereHas('invoices', function($query) {
+                $query->where(function($q) {
+                    $q->where('status', 'paid')
+                        ->orWhereRaw('(
+                            SELECT COALESCE(SUM(amount), 0)
+                            FROM payments
+                            WHERE payments.invoice_id = invoices.id
+                            AND payments.status IN ("success", "paid")
+                        ) >= invoices.total_amount');
+                });
+            })
+            ->sum('refund_amount');
+        
+        $netRevenue = max(0, $totalRevenue - $totalRefunds);
+        
+        // Tính pending revenue (tổng tiền chưa thanh toán)
+        $pendingRevenue = Invoice::where('status', '!=', 'cancelled')
+            ->whereDoesntHave('bookingOrder', function($q) {
+                $q->where('status', 'cancelled');
+            })
+            ->where(function($query) {
+                $query->where('status', '!=', 'paid')
+                    ->whereRaw('(
+                        SELECT COALESCE(SUM(amount), 0)
+                        FROM payments
+                        WHERE payments.invoice_id = invoices.id
+                        AND payments.status IN ("success", "paid")
+                    ) < invoices.total_amount');
+            })
+            ->sum('total_amount');
+        
+        // Tính overdue revenue
+        $overdueRevenue = Invoice::where('status', 'overdue')
+            ->whereDoesntHave('bookingOrder', function($q) {
+                $q->where('status', 'cancelled');
+            })
+            ->sum('total_amount');
+        
         $stats = [
-            'total_invoices' => Invoice::count(),
-            'paid_invoices' => Invoice::paid()->count(),
-            'unpaid_invoices' => Invoice::unpaid()->count(),
-            'overdue_invoices' => Invoice::overdue()->count(),
-            'total_revenue' => Invoice::paid()->sum('total_amount'),
-            'pending_revenue' => Invoice::unpaid()->sum('total_amount'),
-            'overdue_revenue' => Invoice::overdue()->sum('total_amount')
+            'total_invoices' => $totalInvoices,
+            'paid_invoices' => $paidInvoices,
+            'unpaid_invoices' => $unpaidInvoices,
+            'overdue_invoices' => $overdueInvoices,
+            'cancelled_invoices' => $cancelledInvoices,
+            'total_revenue' => $netRevenue,
+            'pending_revenue' => $pendingRevenue,
+            'overdue_revenue' => $overdueRevenue
         ];
 
         return response()->json([
