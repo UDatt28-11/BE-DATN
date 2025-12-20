@@ -165,27 +165,30 @@ class VNPayService
     public function verifyReturnUrl(array $vnpParams, string $receivedHash): bool
     {
         try {
-            // Loại bỏ hash khỏi params
+            // Loại bỏ hash và các param không phải vnp_*
             unset($vnpParams['vnp_SecureHash']);
             unset($vnpParams['vnp_SecureHashType']);
+            
+            // Chỉ giữ lại các param bắt đầu bằng vnp_
+            $vnpParams = array_filter($vnpParams, function($key) {
+                return str_starts_with($key, 'vnp_');
+            }, ARRAY_FILTER_USE_KEY);
 
             // Sắp xếp theo key
             ksort($vnpParams);
 
-            // Tạo hash data
-            $hashData = '';
-            $i = 0;
-            foreach ($vnpParams as $key => $value) {
-                if ($i == 1) {
-                    $hashData .= '&' . urlencode($key) . '=' . urlencode($value);
-                } else {
-                    $hashData .= urlencode($key) . '=' . urlencode($value);
-                    $i = 1;
-                }
-            }
+            // Tạo hash data - VNPAY không encode giá trị khi tính hash cho response
+            $hashData = http_build_query($vnpParams);
 
             // Tạo secure hash để so sánh
             $computedHash = hash_hmac('sha512', $hashData, $this->hashSecret);
+            
+            Log::info('VNPay: Verify signature', [
+                'hash_data' => $hashData,
+                'computed_hash' => $computedHash,
+                'received_hash' => $receivedHash,
+                'match' => hash_equals($computedHash, $receivedHash),
+            ]);
 
             return hash_equals($computedHash, $receivedHash);
         } catch (Exception $e) {

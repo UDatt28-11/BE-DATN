@@ -751,6 +751,7 @@ Route::middleware(['auth:sanctum', 'role:user,staff,admin'])->prefix('user')->gr
     Route::post('vnpay/create-payment', [VNPayController::class, 'createPayment'])->middleware('role:user,admin')->name('vnpay.createPayment');
     Route::post('vnpay/create-invoice-payment', [VNPayController::class, 'createInvoicePayment'])->middleware('role:user,admin')->name('vnpay.createInvoicePayment');
     Route::post('vnpay/query-transaction', [VNPayController::class, 'queryTransaction'])->middleware('role:user,admin')->name('vnpay.queryTransaction');
+    Route::post('vnpay/sync-payment', [VNPayController::class, 'syncPaymentStatus'])->middleware('role:user,admin')->name('vnpay.syncPayment');
     
     // Invoices - User có thể xem và thanh toán invoice của chính mình
     Route::get('invoices', [\App\Http\Controllers\Api\Admin\InvoiceController::class, 'getUserInvoices'])->name('user.invoices.index');
