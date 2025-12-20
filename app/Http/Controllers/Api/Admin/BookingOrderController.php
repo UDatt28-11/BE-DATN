@@ -1011,7 +1011,7 @@ class BookingOrderController extends Controller
                 'customer_phone' => 'required|string|max:20',
                 'customer_email' => 'nullable|email|max:255',
                 'total_amount' => 'required|numeric|min:0',
-                'payment_method' => 'nullable|string|max:50|in:cash,bank,momo,card',
+                'payment_method' => 'nullable|string|max:50|in:cash,bank,momo,card,payos,vnpay',
                 'notes' => 'nullable|string',
                 'voucher_id' => 'nullable|integer|exists:vouchers,id',
                 'discount_amount' => 'nullable|numeric|min:0',

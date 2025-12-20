@@ -307,8 +307,8 @@ class VNPayController extends Controller
 
             $invoice = $payment->invoice;
             $booking = $invoice->bookingOrder ?? null;
-            $bookingId = $request->get('booking_id');
-            $invoiceId = $request->get('invoice_id');
+            $bookingId = $request->get('booking_id') ? (int) $request->get('booking_id') : null;
+            $invoiceId = $request->get('invoice_id') ? (int) $request->get('invoice_id') : null;
 
             if ($status['success']) {
                 // Giao dịch thành công
@@ -360,16 +360,22 @@ class VNPayController extends Controller
                         'bank_code' => $bankCode,
                     ]);
 
-                    return $this->redirectToFrontend('success', $bookingId ?? $invoiceId, null, [
+                    // Xác định là thanh toán invoice hay booking
+                    $isInvoicePayment = !empty($invoiceId);
+                    $redirectId = $isInvoicePayment ? $invoiceId : ($bookingId ?? ($booking ? $booking->id : null));
+
+                    return $this->redirectToFrontend('success', $redirectId, null, [
                         'amount' => $amount,
                         'transaction_no' => $transactionNo,
-                    ]);
+                    ], $isInvoicePayment);
                 } catch (\Exception $e) {
                     DB::rollBack();
                     Log::error('VNPay Return: DB update failed', [
                         'error' => $e->getMessage(),
                     ]);
-                    return $this->redirectToFrontend('error', $bookingId ?? $invoiceId, 'Lỗi cập nhật dữ liệu');
+                    $isInvoicePayment = !empty($invoiceId);
+                    $redirectId = $isInvoicePayment ? $invoiceId : ($bookingId ?? ($booking ? $booking->id : null));
+                    return $this->redirectToFrontend('error', $redirectId, 'Lỗi cập nhật dữ liệu', [], $isInvoicePayment);
                 }
             } else {
                 // Giao dịch thất bại
@@ -391,7 +397,9 @@ class VNPayController extends Controller
                     'message' => $status['message'],
                 ]);
 
-                return $this->redirectToFrontend('cancel', $bookingId ?? $invoiceId, $status['message']);
+                $isInvoicePayment = !empty($invoiceId);
+                $redirectId = $isInvoicePayment ? $invoiceId : ($bookingId ?? ($booking ? $booking->id : null));
+                return $this->redirectToFrontend('cancel', $redirectId, $status['message'], [], $isInvoicePayment);
             }
         } catch (\Exception $e) {
             Log::error('VNPay Return: Exception', [
@@ -579,13 +587,13 @@ class VNPayController extends Controller
     /**
      * Helper: Redirect về frontend
      */
-    private function redirectToFrontend(string $type, ?int $id = null, ?string $error = null, array $extra = []): \Illuminate\Http\RedirectResponse
+    private function redirectToFrontend(string $type, ?int $id = null, ?string $error = null, array $extra = [], bool $isInvoice = false): \Illuminate\Http\RedirectResponse
     {
         $frontendUrl = config('app.frontend_url', env('FRONTEND_URL', 'http://localhost:5173'));
 
         $queryParams = array_filter(array_merge([
             'type' => $type,
-            'id' => $id,
+            $isInvoice ? 'invoice_id' : 'booking_id' => $id,
             'error' => $error,
             'payment_method' => 'vnpay',
         ], $extra));
@@ -634,5 +642,149 @@ class VNPayController extends Controller
         $invoice->update(['total_amount' => max(0, $totalAmount)]);
 
         return $invoice;
+    }
+
+    /**
+     * Đồng bộ trạng thái thanh toán từ VNPay cho booking
+     * API này dùng để kiểm tra và cập nhật trạng thái khi callback không hoạt động
+     */
+    public function syncPaymentStatus(Request $request): JsonResponse
+    {
+        try {
+            $validated = $request->validate([
+                'booking_id' => 'required|integer|exists:booking_orders,id',
+            ]);
+
+            $booking = BookingOrder::with(['invoices.payments'])->find($validated['booking_id']);
+            
+            if (!$booking) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Không tìm thấy booking',
+                ], 404);
+            }
+
+            // Tìm payment VNPay pending của booking
+            $payment = null;
+            foreach ($booking->invoices as $invoice) {
+                $payment = $invoice->payments()
+                    ->where('payment_method', 'vnpay')
+                    ->whereIn('status', ['pending', 'processing'])
+                    ->first();
+                if ($payment) break;
+            }
+
+            if (!$payment) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Không tìm thấy giao dịch VNPay đang chờ xử lý',
+                ], 404);
+            }
+
+            // Lấy transaction_id (order_code) và ngày tạo
+            $txnRef = $payment->transaction_id;
+            $transDate = $payment->created_at->format('YmdHis');
+
+            Log::info('VNPay Sync: Querying transaction', [
+                'booking_id' => $booking->id,
+                'payment_id' => $payment->id,
+                'txn_ref' => $txnRef,
+                'trans_date' => $transDate,
+            ]);
+
+            // Query VNPay để kiểm tra trạng thái
+            $result = $this->vnpayService->queryTransaction($txnRef, $transDate);
+
+            if (!$result['success']) {
+                return response()->json([
+                    'success' => false,
+                    'message' => $result['message'] ?? 'Không thể kiểm tra trạng thái giao dịch',
+                ], 400);
+            }
+
+            $responseCode = $result['data']['vnp_ResponseCode'] ?? '99';
+            $transactionStatus = $result['data']['vnp_TransactionStatus'] ?? '99';
+            $transactionNo = $result['data']['vnp_TransactionNo'] ?? '';
+
+            // Giao dịch thành công (ResponseCode = 00 và TransactionStatus = 00)
+            if ($responseCode === '00' && $transactionStatus === '00') {
+                DB::beginTransaction();
+                try {
+                    // Cập nhật payment
+                    $payment->update([
+                        'status' => 'success',
+                        'transaction_id' => $transactionNo ?: $txnRef,
+                        'paid_at' => now(),
+                    ]);
+
+                    $invoice = $payment->invoice;
+
+                    // Tính tổng đã thanh toán
+                    $totalPaidAmount = $invoice->payments()
+                        ->whereIn('status', ['success', 'paid'])
+                        ->sum('amount');
+
+                    // Cập nhật invoice
+                    if ($totalPaidAmount >= $invoice->total_amount) {
+                        $invoice->update(['status' => 'paid']);
+                    } else {
+                        $invoice->update(['status' => 'partial']);
+                    }
+
+                    // Cập nhật booking
+                    $depositAmount = $booking->total_amount;
+                    if ($totalPaidAmount >= $depositAmount) {
+                        $booking->update([
+                            'status' => 'confirmed',
+                            'payment_status' => 'paid', // enum: unpaid, partial, paid
+                        ]);
+                    }
+
+                    DB::commit();
+
+                    Log::info('VNPay Sync: Payment synchronized successfully', [
+                        'booking_id' => $booking->id,
+                        'payment_id' => $payment->id,
+                        'new_status' => 'success',
+                    ]);
+
+                    return response()->json([
+                        'success' => true,
+                        'message' => 'Đồng bộ trạng thái thanh toán thành công',
+                        'data' => [
+                            'booking_id' => $booking->id,
+                            'booking_status' => $booking->fresh()->status,
+                            'payment_status' => $booking->fresh()->payment_status,
+                            'transaction_no' => $transactionNo,
+                        ],
+                    ]);
+                } catch (\Exception $e) {
+                    DB::rollBack();
+                    throw $e;
+                }
+            } else {
+                // Giao dịch không thành công
+                $statusInfo = $this->vnpayService->getTransactionStatus($responseCode);
+                
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Giao dịch VNPay chưa thành công: ' . $statusInfo['message'],
+                    'data' => [
+                        'response_code' => $responseCode,
+                        'transaction_status' => $transactionStatus,
+                    ],
+                ], 400);
+            }
+        } catch (\Exception $e) {
+            Log::error('VNPay Sync: Exception', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Đã xảy ra lỗi: ' . $e->getMessage(),
+            ], 500);
+        }
     }
 }
