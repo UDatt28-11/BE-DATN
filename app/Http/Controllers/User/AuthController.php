@@ -45,7 +45,13 @@ class AuthController extends Controller
         $data = $request->validate([
             'full_name' => 'required|string|max:255',
             'email' => 'required|email|unique:users,email',
-            'password' => 'required|string|min:6|confirmed',
+            'password' => [
+                'required',
+                'string',
+                'min:6',
+                'confirmed',
+                'regex:/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).+$/',
+            ],
             'phone_number' => 'nullable|regex:/^[0-9]{9,11}$/|unique:users,phone_number',
         ], [
             'full_name.required' => 'Vui lòng nhập họ và tên.',
@@ -54,6 +60,7 @@ class AuthController extends Controller
             'email.unique' => 'Email đã được sử dụng.',
             'password.required' => 'Vui lòng nhập mật khẩu.',
             'password.min' => 'Mật khẩu phải có ít nhất 6 ký tự.',
+            'password.regex' => 'Mật khẩu phải bao gồm chữ hoa, chữ thường và số.',
             'password.confirmed' => 'Xác nhận mật khẩu không khớp.',
             'phone_number.regex' => 'Số điện thoại không hợp lệ.',
             'phone_number.unique' => 'Số điện thoại đã tồn tại.',
@@ -131,7 +138,18 @@ class AuthController extends Controller
         $request->validate([
             'token' => 'required',
             'email' => 'required|email|exists:users,email',
-            'password' => 'required|min:6|confirmed',
+            'password' => [
+                'required',
+                'string',
+                'min:6',
+                'confirmed',
+                'regex:/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).+$/',
+            ],
+        ], [
+            'password.required' => 'Vui lòng nhập mật khẩu mới.',
+            'password.min' => 'Mật khẩu phải có ít nhất 6 ký tự.',
+            'password.regex' => 'Mật khẩu phải bao gồm chữ hoa, chữ thường và số.',
+            'password.confirmed' => 'Xác nhận mật khẩu không khớp.',
         ]);
 
         $status = Password::reset(

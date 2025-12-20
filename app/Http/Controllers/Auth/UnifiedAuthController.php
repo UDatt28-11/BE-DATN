@@ -68,8 +68,19 @@ class UnifiedAuthController extends Controller
         $request->validate([
             'full_name' => 'required|string|min:2|max:100',
             'email' => 'required|email|unique:users,email',
-            'password' => 'required|string|min:6|confirmed',
+            'password' => [
+                'required',
+                'string',
+                'min:6',
+                'confirmed',
+                'regex:/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).+$/',
+            ],
             'phone_number' => 'nullable|string|regex:/^[0-9]{9,11}$/',
+        ], [
+            'password.required' => 'Vui lòng nhập mật khẩu.',
+            'password.min' => 'Mật khẩu phải có ít nhất 6 ký tự.',
+            'password.regex' => 'Mật khẩu phải bao gồm chữ hoa, chữ thường và số.',
+            'password.confirmed' => 'Xác nhận mật khẩu không khớp.',
         ]);
 
         $user = User::create([
@@ -123,7 +134,18 @@ class UnifiedAuthController extends Controller
         $request->validate([
             'token' => 'required|string',
             'email' => 'required|email|exists:users,email',
-            'password' => 'required|string|min:6|confirmed',
+            'password' => [
+                'required',
+                'string',
+                'min:6',
+                'confirmed',
+                'regex:/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).+$/',
+            ],
+        ], [
+            'password.required' => 'Vui lòng nhập mật khẩu mới.',
+            'password.min' => 'Mật khẩu phải có ít nhất 6 ký tự.',
+            'password.regex' => 'Mật khẩu phải bao gồm chữ hoa, chữ thường và số.',
+            'password.confirmed' => 'Xác nhận mật khẩu không khớp.',
         ]);
 
         // TODO: Validate reset token

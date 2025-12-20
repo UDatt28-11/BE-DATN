@@ -105,7 +105,13 @@ class AdminPasswordResetController extends Controller
             $validatedData = $request->validate([
                 'email' => 'required|email|exists:users,email',
                 'otp' => 'required|string|size:6',
-                'password' => 'required|string|min:6|confirmed',
+                'password' => [
+                    'required',
+                    'string',
+                    'min:6',
+                    'confirmed',
+                    'regex:/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).+$/',
+                ],
             ], [
                 'email.required' => 'Vui lòng nhập email.',
                 'email.email' => 'Email không hợp lệ.',
@@ -114,6 +120,7 @@ class AdminPasswordResetController extends Controller
                 'otp.size' => 'Mã OTP phải có 6 chữ số.',
                 'password.required' => 'Vui lòng nhập mật khẩu mới.',
                 'password.min' => 'Mật khẩu phải có ít nhất 6 ký tự.',
+                'password.regex' => 'Mật khẩu phải bao gồm chữ hoa, chữ thường và số.',
                 'password.confirmed' => 'Xác nhận mật khẩu không khớp.',
             ]);
 
