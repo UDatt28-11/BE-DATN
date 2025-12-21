@@ -324,7 +324,21 @@ class RoomTypeController extends Controller
         try {
             // Authorization is handled by route middleware (role:admin)
             
+            // Debug: Log dữ liệu nhận được
+            Log::info('RoomTypeController@store - Request data', [
+                'all' => $request->all(),
+                'base_price' => $request->input('base_price'),
+                'max_adults' => $request->input('max_adults'),
+                'max_children' => $request->input('max_children'),
+                'property_id' => $request->input('property_id'),
+                'name' => $request->input('name'),
+                'service_ids' => $request->input('service_ids'),
+            ]);
+            
         $validatedData = $request->validated();
+        
+        // Debug: Log validated data
+        Log::info('RoomTypeController@store - Validated data', $validatedData);
         $imageUrl = null;
 
         // Nếu không truyền property_id, tự gán property đầu tiên (hệ thống đang có 1 property mặc định)

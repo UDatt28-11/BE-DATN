@@ -10,6 +10,8 @@ use App\Models\InvoiceItem;
 use App\Models\InvoiceConfig;
 use App\Models\RefundPolicy;
 use App\Models\InvoiceDiscount;
+use App\Models\SplitInvoice;
+use App\Models\BookingDetail;
 use App\Services\Invoice\QueryService;
 use App\Support\LogHelper;
 use Illuminate\Http\Request;
@@ -1958,6 +1960,245 @@ class InvoiceController extends Controller
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi tách hóa đơn: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Tách hóa đơn theo phòng (mỗi phòng một hóa đơn riêng)
+     * Phân bổ voucher và tiền cọc theo tỷ lệ giá phòng
+     *
+     * @OA\Post(
+     *     path="/api/invoices/{id}/split-by-rooms",
+     *     operationId="splitInvoiceByRooms",
+     *     tags={"Invoices"},
+     *     summary="Tách hóa đơn theo phòng",
+     *     description="Tách hóa đơn thành nhiều hóa đơn, mỗi phòng một hóa đơn riêng. Tự động phân bổ voucher và tiền cọc theo tỷ lệ giá phòng.",
+     *     @OA\Parameter(
+     *         name="id",
+     *         in="path",
+     *         required=true,
+     *         @OA\Schema(type="string")
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Hóa đơn được tách thành công"
+     *     )
+     * )
+     */
+    public function splitInvoiceByRooms(Request $request, string $id): JsonResponse
+    {
+        try {
+            DB::beginTransaction();
+
+            $originalInvoice = Invoice::with([
+                'bookingOrder.details.room',
+                'bookingOrder.details.bookingServices.service',
+                'invoiceItems.damageImages',
+                'bookingOrder'
+            ])->findOrFail($id);
+
+            $bookingOrder = $originalInvoice->bookingOrder;
+
+            // Kiểm tra xem có nhiều hơn 1 phòng không
+            $bookingDetails = $bookingOrder->details;
+            if ($bookingDetails->count() <= 1) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Hóa đơn này chỉ có 1 phòng, không thể tách'
+                ], 400);
+            }
+
+            // Kiểm tra xem đã tách chưa
+            $existingSplit = SplitInvoice::where('original_invoice_id', $id)->exists();
+            if ($existingSplit) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Hóa đơn này đã được tách rồi'
+                ], 400);
+            }
+
+            // Tính tổng giá phòng (trước voucher) để phân bổ voucher
+            $totalRoomPrice = 0;
+            $roomPrices = [];
+            foreach ($bookingDetails as $detail) {
+                $checkIn = \Carbon\Carbon::parse($detail->check_in_date);
+                $checkOut = \Carbon\Carbon::parse($detail->check_out_date);
+                $nights = max(1, $checkOut->diffInDays($checkIn));
+                $roomPrice = ($detail->room->price_per_night ?? 0) * $nights;
+                $roomPrices[$detail->id] = $roomPrice;
+                $totalRoomPrice += $roomPrice;
+            }
+
+            // Lấy thông tin voucher và tiền cọc
+            $voucherAmount = $bookingOrder->discount_amount ?? 0;
+            $depositAmount = $bookingOrder->deposit_amount ?? 0;
+            $paidAmount = $bookingOrder->paid_amount ?? 0;
+
+            // Tạo hóa đơn mới cho từng phòng
+            $splitInvoices = [];
+            $totalRemainingAmount = $originalInvoice->total_amount;
+
+            foreach ($bookingDetails as $detail) {
+                $roomPrice = $roomPrices[$detail->id] ?? 0;
+
+                // Phân bổ voucher theo tỷ lệ giá phòng
+                $voucherDiscount = $totalRoomPrice > 0 
+                    ? round(($roomPrice / $totalRoomPrice) * $voucherAmount, 2)
+                    : 0;
+
+                // Phân bổ tiền cọc theo tỷ lệ giá phòng
+                $roomDeposit = $totalRoomPrice > 0 
+                    ? round(($roomPrice / $totalRoomPrice) * $depositAmount, 2)
+                    : 0;
+
+                // Tính tổng dịch vụ của phòng này
+                $servicePrice = 0;
+                $serviceItems = [];
+                foreach ($detail->bookingServices as $bookingService) {
+                    $serviceItemPrice = ($bookingService->actual_price ?? $bookingService->price_at_booking ?? 0) * ($bookingService->actual_quantity ?? $bookingService->quantity ?? 0);
+                    $servicePrice += $serviceItemPrice;
+                    $serviceItems[] = $bookingService;
+                }
+
+                // Tính tổng thiệt hại của phòng này (từ invoice items có booking_detail_id)
+                $damagePrice = 0;
+                $damageItems = $originalInvoice->invoiceItems()
+                    ->where('booking_detail_id', $detail->id)
+                    ->where('item_type', 'damage_fee')
+                    ->get();
+                foreach ($damageItems as $damageItem) {
+                    $damagePrice += $damageItem->total_line ?? 0;
+                }
+
+                // Tính tổng tiền hóa đơn cho phòng này
+                $roomInvoiceAmount = $roomPrice - $voucherDiscount + $servicePrice + $damagePrice - $roomDeposit;
+                $roomInvoiceAmount = max(0, $roomInvoiceAmount); // Đảm bảo không âm
+
+                // Tạo hóa đơn mới
+                $newInvoice = Invoice::create([
+                    'booking_order_id' => $bookingOrder->id,
+                    'issue_date' => $originalInvoice->issue_date,
+                    'due_date' => $originalInvoice->due_date,
+                    'total_amount' => $roomInvoiceAmount,
+                    'status' => $originalInvoice->status,
+                    'discount_amount' => $voucherDiscount,
+                    'calculation_method' => $originalInvoice->calculation_method,
+                ]);
+
+                // Di chuyển các invoice items liên quan đến phòng này
+                // Room charge items
+                $roomChargeItems = $originalInvoice->invoiceItems()
+                    ->where('booking_detail_id', $detail->id)
+                    ->where('item_type', 'room_charge')
+                    ->get();
+                foreach ($roomChargeItems as $item) {
+                    $item->update(['invoice_id' => $newInvoice->id]);
+                }
+
+                // Service charge items (cần tìm từ booking services)
+                foreach ($serviceItems as $bookingService) {
+                    $serviceItemsInInvoice = $originalInvoice->invoiceItems()
+                        ->where('item_type', 'service_charge')
+                        ->where('description', 'like', '%' . ($bookingService->service->name ?? '') . '%')
+                        ->get();
+                    foreach ($serviceItemsInInvoice as $item) {
+                        // Kiểm tra xem item này có thuộc phòng này không (dựa vào description hoặc booking_detail_id)
+                        if (!$item->booking_detail_id || $item->booking_detail_id == $detail->id) {
+                            $item->update([
+                                'invoice_id' => $newInvoice->id,
+                                'booking_detail_id' => $detail->id
+                            ]);
+                        }
+                    }
+                }
+
+                // Damage fee items
+                foreach ($damageItems as $item) {
+                    $item->update(['invoice_id' => $newInvoice->id]);
+                }
+
+                // Thêm item voucher discount nếu có
+                if ($voucherDiscount > 0) {
+                    InvoiceItem::create([
+                        'invoice_id' => $newInvoice->id,
+                        'booking_detail_id' => $detail->id,
+                        'description' => 'Giảm giá voucher (phân bổ)',
+                        'quantity' => 1,
+                        'unit_price' => -$voucherDiscount,
+                        'total_line' => -$voucherDiscount,
+                        'item_type' => 'voucher_discount',
+                    ]);
+                }
+
+                // Thêm item deposit nếu có
+                if ($roomDeposit > 0) {
+                    InvoiceItem::create([
+                        'invoice_id' => $newInvoice->id,
+                        'booking_detail_id' => $detail->id,
+                        'description' => 'Tiền cọc đã thanh toán (phân bổ)',
+                        'quantity' => 1,
+                        'unit_price' => -$roomDeposit,
+                        'total_line' => -$roomDeposit,
+                        'item_type' => 'deposit',
+                    ]);
+                }
+
+                // Tạo record split_invoice
+                $splitInvoice = SplitInvoice::create([
+                    'original_invoice_id' => $originalInvoice->id,
+                    'booking_detail_id' => $detail->id,
+                    'new_invoice_id' => $newInvoice->id,
+                    'room_price' => $roomPrice,
+                    'service_price' => $servicePrice,
+                    'damage_price' => $damagePrice,
+                    'deposit_amount' => $roomDeposit,
+                    'voucher_discount' => $voucherDiscount,
+                    'total_amount' => $roomInvoiceAmount,
+                    'notes' => "Hóa đơn tách cho phòng {$detail->room->name ?? 'N/A'}",
+                ]);
+
+                $splitInvoices[] = [
+                    'split_invoice' => $splitInvoice,
+                    'new_invoice' => $newInvoice->load('invoiceItems.damageImages'),
+                    'room' => $detail->room,
+                ];
+
+                $totalRemainingAmount -= $roomInvoiceAmount;
+            }
+
+            // Cập nhật hóa đơn gốc (có thể xóa hoặc đánh dấu là đã tách)
+            $originalInvoice->update([
+                'total_amount' => 0,
+                'status' => 'cancelled', // Đánh dấu là đã tách
+            ]);
+
+            // Xóa các items còn lại trong hóa đơn gốc (nếu có)
+            $remainingItems = $originalInvoice->invoiceItems()->get();
+            foreach ($remainingItems as $item) {
+                $item->delete();
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Hóa đơn đã được tách thành công theo phòng',
+                'data' => [
+                    'original_invoice_id' => $originalInvoice->id,
+                    'split_invoices' => $splitInvoices,
+                    'total_split' => count($splitInvoices),
+                ]
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Error splitting invoice by rooms: ' . $e->getMessage(), [
+                'invoice_id' => $id,
+                'trace' => $e->getTraceAsString()
+            ]);
             return response()->json([
                 'success' => false,
                 'message' => 'Có lỗi xảy ra khi tách hóa đơn: ' . $e->getMessage()

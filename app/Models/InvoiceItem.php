@@ -9,6 +9,7 @@ class InvoiceItem extends Model
 {
     protected $fillable = [
         'invoice_id',
+        'booking_detail_id',
         'description',
         'quantity',
         'unit_price',
@@ -31,6 +32,11 @@ class InvoiceItem extends Model
     public function damageImages()
     {
         return $this->hasMany(DamageImage::class);
+    }
+
+    public function bookingDetail(): BelongsTo
+    {
+        return $this->belongsTo(BookingDetail::class);
     }
 
     // Scopes
