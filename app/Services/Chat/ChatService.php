@@ -12,34 +12,34 @@ use Illuminate\Support\Str;
 
 class ChatService
 {
-    // No longer need AIService - admin will reply manually
-    // private AIService $aiService;
+    private AIService $aiService;
 
-    public function __construct()
+    public function __construct(AIService $aiService)
     {
-        // No longer need AIService
-        // $this->aiService = $aiService;
+        $this->aiService = $aiService;
     }
 
     /**
      * Get or create conversation for user
-     * For logged-in users: create user_to_user conversation (admin will reply)
-     * For guest users: create user_to_ai conversation (can still use AI if needed)
+     * Supports both user_to_user (admin) and user_to_ai (AI) conversation types
      *
      * @param User|null $user User object or null for guest
      * @param string|null $sessionId Session ID for guest users
+     * @param string $type Conversation type: 'admin' (user_to_user) or 'ai' (user_to_ai)
      * @return Conversation
      */
-    public function getOrCreateAIConversation(?User $user = null, ?string $sessionId = null): Conversation
+    public function getOrCreateConversation(?User $user = null, ?string $sessionId = null, string $type = 'ai'): Conversation
     {
         try {
+            // Map type parameter to conversation type
+            $conversationType = $type === 'admin' ? 'user_to_user' : 'user_to_ai';
+            
             if ($user) {
-                // For logged-in users, find existing conversation (user_to_user type)
-                // Check if 'type' column exists before using it
+                // For logged-in users, find existing conversation by type
                 $hasTypeColumn = Schema::hasColumn('conversations', 'type');
                 
                 if ($hasTypeColumn) {
-                    $conversation = Conversation::where('type', 'user_to_user')
+                    $conversation = Conversation::where('type', $conversationType)
                         ->whereHas('participants', function ($q) use ($user) {
                             $q->where('user_id', $user->id);
                         })
@@ -55,12 +55,12 @@ class ChatService
                     return $conversation;
                 }
 
-                // Create new conversation for logged-in user (user_to_user - admin will reply)
+                // Create new conversation for logged-in user
                 DB::beginTransaction();
                 try {
                     $conversationData = [];
                     if ($hasTypeColumn) {
-                        $conversationData['type'] = 'user_to_user';
+                        $conversationData['type'] = $conversationType;
                     }
                     
                     $conversation = Conversation::create($conversationData);
@@ -72,13 +72,14 @@ class ChatService
                     DB::rollBack();
                     Log::error('ChatService: Failed to create conversation', [
                         'user_id' => $user->id,
+                        'type' => $type,
                         'error' => $e->getMessage(),
                         'trace' => $e->getTraceAsString(),
                     ]);
                     throw $e;
                 }
             } else {
-                // For guest users, use session_id (still user_to_ai for backward compatibility)
+                // For guest users, use session_id
                 if (!$sessionId) {
                     $sessionId = Str::uuid()->toString();
                 }
@@ -87,9 +88,9 @@ class ChatService
                 $hasTypeColumn = Schema::hasColumn('conversations', 'type');
                 $hasSessionIdColumn = Schema::hasColumn('conversations', 'session_id');
 
-                // For guest users, find by session_id
+                // For guest users, find by session_id and type
                 if ($hasTypeColumn && $hasSessionIdColumn) {
-                    $conversation = Conversation::where('type', 'user_to_ai')
+                    $conversation = Conversation::where('type', $conversationType)
                         ->where('session_id', $sessionId)
                         ->first();
                 } elseif ($hasSessionIdColumn) {
@@ -108,7 +109,7 @@ class ChatService
                 try {
                     $conversationData = [];
                     if ($hasTypeColumn) {
-                        $conversationData['type'] = 'user_to_ai';
+                        $conversationData['type'] = $conversationType;
                     }
                     if ($hasSessionIdColumn) {
                         $conversationData['session_id'] = $sessionId;
@@ -125,7 +126,7 @@ class ChatService
                         
                         // Try to find existing conversation again
                         if ($hasTypeColumn && $hasSessionIdColumn) {
-                            $conversation = Conversation::where('type', 'user_to_ai')
+                            $conversation = Conversation::where('type', $conversationType)
                                 ->where('session_id', $sessionId)
                                 ->first();
                         } elseif ($hasSessionIdColumn) {
@@ -143,9 +144,10 @@ class ChatService
                 }
             }
         } catch (\Exception $e) {
-            Log::error('ChatService: getOrCreateAIConversation failed', [
+            Log::error('ChatService: getOrCreateConversation failed', [
                 'user_id' => $user?->id,
                 'session_id' => $sessionId,
+                'type' => $type,
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
             ]);
@@ -154,37 +156,72 @@ class ChatService
     }
 
     /**
-     * Send message - no AI response anymore
-     * For all users (logged-in and guests), only save message and wait for admin reply
+     * Alias for backward compatibility
+     */
+    public function getOrCreateAIConversation(?User $user = null, ?string $sessionId = null, string $type = 'ai'): Conversation
+    {
+        return $this->getOrCreateConversation($user, $sessionId, $type);
+    }
+
+    /**
+     * Send message and get AI response automatically (only for AI mode)
+     * For admin mode, only save message and wait for admin reply
      *
      * @param Conversation $conversation
      * @param string $content User message content
      * @param User|null $user User object or null for guest
      * @param array $context Additional context
-     * @return array ['user_message' => Message, 'ai_message' => null]
+     * @return array ['user_message' => Message, 'ai_message' => Message|null]
      */
     public function sendMessage(Conversation $conversation, string $content, ?User $user = null, array $context = []): array
     {
         DB::beginTransaction();
         try {
             // Save user message
-            // For logged-in users, use their actual user ID to show name and avatar
-            // For guest users, set sender_id to null
             $userMessage = Message::create([
                 'conversation_id' => $conversation->id,
-                'sender_id' => $user?->id ?? null, // Use user ID for logged-in users
+                'sender_id' => $user?->id ?? null,
                 'content' => $content,
                 'message_type' => 'user',
             ]);
 
-            // No AI response anymore - admin will reply manually
+            // Check conversation type to determine if AI should respond
+            $hasTypeColumn = Schema::hasColumn('conversations', 'type');
+            $conversationType = $hasTypeColumn ? ($conversation->type ?? 'user_to_ai') : 'user_to_ai';
+            $isAIMode = $conversationType === 'user_to_ai';
+
             $aiMessage = null;
+            
+            // Only generate AI response for AI mode conversations
+            if ($isAIMode) {
+                // Get conversation history for AI context
+                $historyMessages = $this->getConversationHistory($conversation);
+                
+                // Generate AI response
+                $aiResponse = $this->aiService->generateResponse($historyMessages, $context);
+                
+                // Save AI message
+                if (!empty($aiResponse['content'])) {
+                    $aiMessage = Message::create([
+                        'conversation_id' => $conversation->id,
+                        'sender_id' => null, // AI messages have no sender
+                        'content' => $aiResponse['content'],
+                        'message_type' => 'ai',
+                        'ai_provider' => $aiResponse['metadata']['provider'] ?? config('services.ai.provider'),
+                        'ai_model' => $aiResponse['metadata']['model'] ?? config('services.ai.model'),
+                        'metadata' => $aiResponse['metadata'] ?? [],
+                    ]);
+                }
+            }
 
             // Log message sent
-            Log::info('ChatService: Message sent (waiting for admin reply)', [
+            Log::info('ChatService: Message sent', [
                 'conversation_id' => $conversation->id,
+                'conversation_type' => $conversationType,
                 'user_id' => $user?->id,
                 'is_guest' => !$user,
+                'is_ai_mode' => $isAIMode,
+                'ai_response_length' => $aiMessage ? strlen($aiMessage->content) : 0,
             ]);
 
             // Update conversation
@@ -202,7 +239,7 @@ class ChatService
 
             return [
                 'user_message' => $userMessage,
-                'ai_message' => null, // No AI response
+                'ai_message' => $aiMessage,
             ];
         } catch (\Exception $e) {
             DB::rollBack();
@@ -215,7 +252,31 @@ class ChatService
         }
     }
 
-    // Removed getConversationHistory - no longer needed without AI
+    /**
+     * Get conversation history formatted for AI
+     *
+     * @param Conversation $conversation
+     * @param int $limit Maximum number of messages to retrieve
+     * @return array Array of messages with 'role' and 'content'
+     */
+    private function getConversationHistory(Conversation $conversation, int $limit = 20): array
+    {
+        $messages = Message::where('conversation_id', $conversation->id)
+            ->visible()
+            ->orderBy('created_at', 'asc')
+            ->limit($limit)
+            ->get();
+
+        $history = [];
+        foreach ($messages as $message) {
+            $history[] = [
+                'role' => $message->message_type === 'ai' ? 'ai' : 'user',
+                'content' => $message->content,
+            ];
+        }
+
+        return $history;
+    }
 
     /**
      * Get conversation messages

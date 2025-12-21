@@ -52,13 +52,19 @@ class ChatController extends Controller
         try {
             $user = $request->user();
             $sessionId = $request->get('session_id');
+            $type = $request->get('type', 'ai'); // 'admin' or 'ai', default to 'ai'
+
+            // Validate type parameter
+            if (!in_array($type, ['admin', 'ai'])) {
+                $type = 'ai';
+            }
 
             // Generate session_id for guest if not provided
             if (!$user && !$sessionId) {
                 $sessionId = Str::uuid()->toString();
             }
 
-            $conversation = $this->chatService->getOrCreateAIConversation($user, $sessionId);
+            $conversation = $this->chatService->getOrCreateAIConversation($user, $sessionId, $type);
             
             // Only load participants if user is logged in (guest conversations don't have participants)
             if ($user) {
@@ -180,7 +186,7 @@ class ChatController extends Controller
                 $context['user_name'] = $user->full_name ?? $user->email;
             }
 
-            // Send message - no AI response anymore, admin will reply manually
+            // Send message and get AI response automatically (if AI mode)
             $result = $this->chatService->sendMessage(
                 $conversation,
                 $validated['content'],
@@ -195,11 +201,23 @@ class ChatController extends Controller
                 'user_message' => new MessageResource($userMessage),
             ];
 
-            // No AI message anymore - admin will reply manually
+            // Include AI message if available (only for AI mode)
+            if ($result['ai_message']) {
+                $responseData['ai_message'] = new MessageResource($result['ai_message']);
+            }
+
+            // Determine response message based on conversation type
+            $hasTypeColumn = \Illuminate\Support\Facades\Schema::hasColumn('conversations', 'type');
+            $conversationType = $hasTypeColumn ? ($conversation->type ?? 'user_to_ai') : 'user_to_ai';
+            $isAIMode = $conversationType === 'user_to_ai';
+            
+            $responseMessage = $isAIMode 
+                ? 'Tin nhắn đã được gửi và AI đã trả lời.'
+                : 'Tin nhắn đã được gửi. Admin sẽ trả lời bạn sớm nhất.';
 
             return response()->json([
                 'success' => true,
-                'message' => 'Tin nhắn đã được gửi. Admin sẽ trả lời bạn sớm nhất.',
+                'message' => $responseMessage,
                 'data' => $responseData,
             ]);
         } catch (\Illuminate\Validation\ValidationException $e) {
