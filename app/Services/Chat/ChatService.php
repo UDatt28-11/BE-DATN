@@ -38,17 +38,32 @@ class ChatService
                 // For logged-in users, find existing conversation by type
                 $hasTypeColumn = Schema::hasColumn('conversations', 'type');
                 
-                if ($hasTypeColumn) {
-                    $conversation = Conversation::where('type', $conversationType)
-                        ->whereHas('participants', function ($q) use ($user) {
+                try {
+                    if ($hasTypeColumn) {
+                        $conversation = Conversation::where('type', $conversationType)
+                            ->whereHas('participants', function ($q) use ($user) {
+                                $q->where('user_id', $user->id);
+                            })
+                            ->first();
+                    } else {
+                        // Fallback: find by participants only if type column doesn't exist
+                        $conversation = Conversation::whereHas('participants', function ($q) use ($user) {
                             $q->where('user_id', $user->id);
-                        })
-                        ->first();
-                } else {
-                    // Fallback: find by participants only if type column doesn't exist
-                    $conversation = Conversation::whereHas('participants', function ($q) use ($user) {
-                        $q->where('user_id', $user->id);
-                    })->first();
+                        })->first();
+                    }
+                } catch (\Exception $e) {
+                    // If whereHas fails, try without it
+                    Log::warning('ChatService: whereHas participants failed, trying without', [
+                        'user_id' => $user->id,
+                        'type' => $type,
+                        'error' => $e->getMessage(),
+                    ]);
+                    // Try to find by type only (if column exists)
+                    if ($hasTypeColumn) {
+                        $conversation = Conversation::where('type', $conversationType)->first();
+                    } else {
+                        $conversation = null;
+                    }
                 }
 
                 if ($conversation) {
@@ -64,7 +79,20 @@ class ChatService
                     }
                     
                     $conversation = Conversation::create($conversationData);
-                    $conversation->participants()->attach($user->id);
+                    
+                    // Attach user to participants
+                    try {
+                        $conversation->participants()->attach($user->id);
+                        // Refresh to ensure participants are loaded
+                        $conversation->refresh();
+                    } catch (\Exception $attachError) {
+                        Log::error('ChatService: Failed to attach participant', [
+                            'conversation_id' => $conversation->id,
+                            'user_id' => $user->id,
+                            'error' => $attachError->getMessage(),
+                        ]);
+                        // Continue anyway - conversation can exist without participants loaded
+                    }
 
                     DB::commit();
                     return $conversation;
@@ -88,14 +116,22 @@ class ChatService
                 $hasTypeColumn = Schema::hasColumn('conversations', 'type');
                 $hasSessionIdColumn = Schema::hasColumn('conversations', 'session_id');
 
-                // For guest users, find by session_id and type
-                if ($hasTypeColumn && $hasSessionIdColumn) {
-                    $conversation = Conversation::where('type', $conversationType)
-                        ->where('session_id', $sessionId)
-                        ->first();
-                } elseif ($hasSessionIdColumn) {
-                    // Fallback: find by session_id only
+                // For guest users, find by session_id first (session_id is unique)
+                // Since session_id has unique constraint, there can only be ONE conversation per session_id
+                // So we find by session_id first, then check if type matches
+                if ($hasSessionIdColumn) {
                     $conversation = Conversation::where('session_id', $sessionId)->first();
+                    
+                    // If conversation exists but type doesn't match, update the type
+                    if ($conversation && $hasTypeColumn && $conversation->type !== $conversationType) {
+                        Log::info('ChatService: Updating conversation type', [
+                            'conversation_id' => $conversation->id,
+                            'old_type' => $conversation->type,
+                            'new_type' => $conversationType,
+                        ]);
+                        $conversation->update(['type' => $conversationType]);
+                        $conversation->refresh();
+                    }
                 } else {
                     $conversation = null;
                 }
@@ -106,7 +142,31 @@ class ChatService
 
                 // Create new conversation for guest
                 // Handle unique constraint on session_id (race condition)
+                // Use DB transaction to ensure atomicity
+                DB::beginTransaction();
                 try {
+                    // Double-check if conversation was created by another request (race condition)
+                    // Since session_id is unique, we only need to check by session_id
+                    if ($hasSessionIdColumn) {
+                        $conversation = Conversation::where('session_id', $sessionId)
+                            ->lockForUpdate() // Lock row to prevent concurrent creation
+                            ->first();
+                        
+                        // If conversation exists but type doesn't match, update it
+                        if ($conversation && $hasTypeColumn && $conversation->type !== $conversationType) {
+                            $conversation->update(['type' => $conversationType]);
+                            $conversation->refresh();
+                        }
+                    } else {
+                        $conversation = null;
+                    }
+                    
+                    if ($conversation) {
+                        DB::commit();
+                        return $conversation;
+                    }
+
+                    // Create new conversation
                     $conversationData = [];
                     if ($hasTypeColumn) {
                         $conversationData['type'] = $conversationType;
@@ -115,22 +175,30 @@ class ChatService
                         $conversationData['session_id'] = $sessionId;
                     }
 
-                    return Conversation::create($conversationData);
+                    $conversation = Conversation::create($conversationData);
+                    DB::commit();
+                    return $conversation;
                 } catch (\Illuminate\Database\QueryException $e) {
+                    DB::rollBack();
+                    
                     // If unique constraint violation (23000 = Integrity constraint violation)
                     // This can happen in race conditions when multiple requests create conversation at the same time
-                    if (str_contains($e->getMessage(), 'Duplicate entry') || $e->getCode() == 23000) {
+                    if (str_contains($e->getMessage(), 'Duplicate entry') || $e->getCode() == 23000 || $e->getCode() == '23000') {
                         Log::warning('ChatService: Unique constraint violation, retrying to find conversation', [
                             'session_id' => $sessionId,
+                            'type' => $conversationType,
+                            'error_code' => $e->getCode(),
                         ]);
                         
-                        // Try to find existing conversation again
-                        if ($hasTypeColumn && $hasSessionIdColumn) {
-                            $conversation = Conversation::where('type', $conversationType)
-                                ->where('session_id', $sessionId)
-                                ->first();
-                        } elseif ($hasSessionIdColumn) {
+                        // Try to find existing conversation by session_id (session_id is unique)
+                        if ($hasSessionIdColumn) {
                             $conversation = Conversation::where('session_id', $sessionId)->first();
+                            
+                            // If found, update type if needed
+                            if ($conversation && $hasTypeColumn && $conversation->type !== $conversationType) {
+                                $conversation->update(['type' => $conversationType]);
+                                $conversation->refresh();
+                            }
                         } else {
                             $conversation = null;
                         }
@@ -138,8 +206,17 @@ class ChatService
                         if ($conversation) {
                             return $conversation;
                         }
+                        
+                        // If still not found, log error but don't throw - this is unexpected
+                        Log::error('ChatService: Conversation not found after duplicate entry error', [
+                            'session_id' => $sessionId,
+                            'type' => $conversationType,
+                        ]);
                     }
-                    // Re-throw if it's not a unique constraint error or conversation not found
+                    // Re-throw if it's not a unique constraint error
+                    throw $e;
+                } catch (\Exception $e) {
+                    DB::rollBack();
                     throw $e;
                 }
             }

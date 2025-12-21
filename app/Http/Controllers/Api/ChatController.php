@@ -59,36 +59,75 @@ class ChatController extends Controller
                 $type = 'ai';
             }
 
-            // Generate session_id for guest if not provided
-            if (!$user && !$sessionId) {
-                $sessionId = Str::uuid()->toString();
+            // For logged-in users, don't use session_id (use user_id instead)
+            // For guest users, generate session_id if not provided
+            if ($user) {
+                // Logged-in user: don't pass session_id to avoid conflicts
+                $sessionId = null;
+            } else {
+                // Guest user: generate session_id if not provided
+                if (!$sessionId) {
+                    $sessionId = Str::uuid()->toString();
+                }
             }
 
             $conversation = $this->chatService->getOrCreateAIConversation($user, $sessionId, $type);
             
             // Only load participants if user is logged in (guest conversations don't have participants)
+            // For admin mode (user_to_user), participants are required
+            // Load participants safely - don't fail if it doesn't exist or has issues
             if ($user) {
-                $conversation->load(['participants' => function ($q) {
-                    $q->select('id', 'full_name', 'email', 'avatar_url');
-                }]);
+                try {
+                    // Check if participants relationship exists and conversation has participants
+                    if ($conversation->relationLoaded('participants')) {
+                        // Already loaded, skip
+                    } else {
+                        // Try to load with basic select first
+                        $conversation->load(['participants' => function ($q) {
+                            // Only select columns that definitely exist
+                            $q->select('id', 'full_name', 'email');
+                        }]);
+                    }
+                } catch (\Exception $e) {
+                    // If loading participants fails, try without select
+                    try {
+                        $conversation->load('participants');
+                    } catch (\Exception $e2) {
+                        // If still fails, log but continue - conversation can work without loaded participants
+                        Log::warning('ChatController: Failed to load participants', [
+                            'conversation_id' => $conversation->id,
+                            'user_id' => $user->id,
+                            'type' => $type,
+                            'error' => $e2->getMessage(),
+                        ]);
+                    }
+                }
             }
 
             // Build response data safely
             $responseData = [
                 'id' => $conversation->id,
-                'created_at' => $conversation->created_at?->format('Y-m-d H:i:s'),
-                'updated_at' => $conversation->updated_at?->format('Y-m-d H:i:s'),
+                'created_at' => $conversation->created_at?->format('Y-m-d H:i:s') ?? $conversation->created_at,
+                'updated_at' => $conversation->updated_at?->format('Y-m-d H:i:s') ?? $conversation->updated_at,
             ];
 
             // Add optional fields if they exist
-            if (Schema::hasColumn('conversations', 'type')) {
-                $responseData['type'] = $conversation->type ?? 'user_to_ai';
-            }
-            if (Schema::hasColumn('conversations', 'session_id')) {
-                $responseData['session_id'] = $conversation->session_id;
-            }
-            if (Schema::hasColumn('conversations', 'context_data')) {
-                $responseData['context_data'] = $conversation->context_data;
+            try {
+                if (Schema::hasColumn('conversations', 'type')) {
+                    $responseData['type'] = $conversation->type ?? ($type === 'admin' ? 'user_to_user' : 'user_to_ai');
+                }
+                if (Schema::hasColumn('conversations', 'session_id')) {
+                    $responseData['session_id'] = $conversation->session_id;
+                }
+                if (Schema::hasColumn('conversations', 'context_data')) {
+                    $responseData['context_data'] = $conversation->context_data;
+                }
+            } catch (\Exception $e) {
+                Log::warning('ChatController: Error building response data', [
+                    'conversation_id' => $conversation->id,
+                    'error' => $e->getMessage(),
+                ]);
+                // Continue with basic data
             }
 
             return response()->json([
