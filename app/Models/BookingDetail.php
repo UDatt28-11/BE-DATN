@@ -64,4 +64,9 @@ class BookingDetail extends Model
     {
         return $this->hasMany(CheckInRequest::class, 'booking_detail_id');
     }
+
+    public function invoiceItems(): HasMany
+    {
+        return $this->hasMany(InvoiceItem::class);
+    }
 }

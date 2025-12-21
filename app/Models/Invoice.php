@@ -66,6 +66,16 @@ class Invoice extends Model
         return $this->hasMany(Payment::class);
     }
 
+    public function splitInvoices(): HasMany
+    {
+        return $this->hasMany(SplitInvoice::class, 'original_invoice_id');
+    }
+
+    public function splitFrom(): BelongsTo
+    {
+        return $this->belongsTo(SplitInvoice::class, 'id', 'new_invoice_id');
+    }
+
     // Scopes
     public function scopePaid($query)
     {
