@@ -28,6 +28,7 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class InvoiceController extends Controller
 {
+
     /**
      * Display a listing of invoices
      *
@@ -242,7 +243,7 @@ class InvoiceController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Hóa đơn đã được tạo thành công',
-                'data' => $invoice->load(['bookingOrder', 'invoiceItems'])
+                'data' => $invoice->load(['bookingOrder', 'invoiceItems.damageImages'])
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
@@ -334,13 +335,15 @@ class InvoiceController extends Controller
                         $with[] = 'bookingOrder.guest';
                     } elseif ($include === 'invoiceItems') {
                         $with[] = 'invoiceItems';
+                        $with[] = 'invoiceItems.damageImages';
                     }
                 }
             } else {
                 // Default: Load tất cả relationships (backward compatibility)
                 $with = [
                     'bookingOrder.guest',
-                    'invoiceItems'
+                    'invoiceItems',
+                    'invoiceItems.damageImages'
                 ];
             }
             
@@ -477,7 +480,7 @@ class InvoiceController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Hóa đơn đã được xác nhận và đánh dấu là đã thanh toán.',
-                'data' => $invoice->fresh(['invoiceItems', 'bookingOrder']),
+                'data' => $invoice->fresh(['invoiceItems.damageImages', 'bookingOrder']),
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
@@ -666,7 +669,7 @@ class InvoiceController extends Controller
             }
 
             // Luôn load bookingOrder + invoiceItems để có đủ dữ liệu
-            $invoice = Invoice::with(['bookingOrder', 'bookingOrder.guest', 'invoiceItems'])
+            $invoice = Invoice::with(['bookingOrder', 'bookingOrder.guest', 'invoiceItems.damageImages'])
                 ->whereHas('bookingOrder', function ($q) use ($user) {
                     $q->where('guest_id', $user->id);
                 })
@@ -721,11 +724,9 @@ class InvoiceController extends Controller
                         }
                     }
 
-                    // Cập nhật lại total_amount = tổng các total_line (phòng + dịch vụ + cọc âm, ...)
+                    // Cập nhật lại total_amount (chỉ tính các item chưa thanh toán)
                     try {
-                        $newTotal = $invoice->invoiceItems()->sum('total_line');
-                        $invoice->total_amount = max(0, $newTotal);
-                        $invoice->save();
+                        $invoice->recalculateTotalAmount();
                     } catch (\Throwable $e) {
                         Log::error('InvoiceController@getUserInvoice: failed to recalc invoice total_amount', [
                             'invoice_id' => $invoice->id,
@@ -737,7 +738,7 @@ class InvoiceController extends Controller
 
             return response()->json([
                 'success' => true,
-                'data' => $invoice->fresh(['bookingOrder.guest', 'invoiceItems']),
+                'data' => $invoice->fresh(['bookingOrder.guest', 'invoiceItems.damageImages']),
             ]);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json([
@@ -768,14 +769,17 @@ class InvoiceController extends Controller
                 'service_id' => 'required|exists:services,id',
                 'quantity' => 'required|integer|min:1',
                 'description' => 'nullable|string|max:500',
+                'is_paid' => 'nullable|boolean', // Dịch vụ đã thanh toán hay chưa
+                'booking_detail_id' => 'nullable|integer|exists:booking_details,id', // ID phòng để hiển thị trong description
             ]);
 
             DB::beginTransaction();
 
-            $invoice = Invoice::with('invoiceItems')->findOrFail($id);
+            $invoice = Invoice::with('invoiceItems.damageImages')->findOrFail($id);
 
-            // Kiểm tra invoice chưa được thanh toán
-            if ($invoice->status === 'paid') {
+            // Kiểm tra invoice chưa được thanh toán (chỉ khi dịch vụ chưa thanh toán)
+            $isPaid = $request->boolean('is_paid', false);
+            if (!$isPaid && $invoice->status === 'paid') {
                 return response()->json([
                     'success' => false,
                     'message' => 'Không thể thêm dịch vụ vào hóa đơn đã thanh toán.',
@@ -788,28 +792,60 @@ class InvoiceController extends Controller
             $quantity = $request->quantity;
             $totalLine = $unitPrice * $quantity;
 
+            // Tạo description với thông tin phòng nếu có
+            $description = $request->description;
+            if (!$description && $request->has('booking_detail_id')) {
+                $bookingDetail = \App\Models\BookingDetail::with('room')->find($request->booking_detail_id);
+                $roomName = $bookingDetail && $bookingDetail->room ? $bookingDetail->room->name : 'N/A';
+                $description = "Dịch vụ: {$service->name} - Phòng {$roomName} (SL: {$quantity})";
+                if ($isPaid) {
+                    $description .= " [Đã thanh toán]";
+                }
+            } elseif (!$description) {
+                $description = "Dịch vụ: {$service->name}";
+                if ($isPaid) {
+                    $description .= " [Đã thanh toán]";
+                }
+            } elseif ($isPaid && !str_contains($description, '[Đã thanh toán]')) {
+                $description .= " [Đã thanh toán]";
+            }
+
             // Tạo invoice item
             $item = InvoiceItem::create([
                 'invoice_id' => $invoice->id,
-                'description' => $request->description ?? "Dịch vụ: {$service->name}",
+                'description' => $description,
                 'quantity' => $quantity,
                 'unit_price' => $unitPrice,
                 'total_line' => $totalLine,
                 'item_type' => 'service_charge',
             ]);
 
-            // Cập nhật tổng tiền invoice
-            $newTotal = $invoice->invoiceItems()->sum('total_line');
-            $invoice->update(['total_amount' => $newTotal]);
+            // Cập nhật tổng tiền invoice (chỉ tính các item chưa thanh toán)
+            $invoice->recalculateTotalAmount();
+            
+            // Refresh invoice để có total_amount mới nhất
+            $invoice->refresh();
 
             DB::commit();
+            
+            // Load lại invoice với items để trả về đúng total_amount
+            $invoice->load('invoiceItems.damageImages');
+            
+            Log::info('InvoiceController@addService: Service added', [
+                'invoice_id' => $invoice->id,
+                'service_id' => $request->service_id,
+                'is_paid' => $isPaid,
+                'total_line' => $totalLine,
+                'invoice_total_amount' => $invoice->total_amount,
+                'description' => $description,
+            ]);
 
             return response()->json([
                 'success' => true,
                 'message' => 'Đã thêm dịch vụ vào hóa đơn.',
                 'data' => [
                     'item' => $item,
-                    'invoice' => $invoice->fresh(['invoiceItems']),
+                    'invoice' => $invoice,
                 ],
             ]);
         } catch (\Illuminate\Validation\ValidationException $e) {
@@ -849,7 +885,7 @@ class InvoiceController extends Controller
 
             DB::beginTransaction();
 
-            $invoice = Invoice::with('invoiceItems')->findOrFail($id);
+            $invoice = Invoice::with('invoiceItems.damageImages')->findOrFail($id);
 
             // Kiểm tra invoice chưa được thanh toán
             if ($invoice->status === 'paid') {
@@ -875,8 +911,8 @@ class InvoiceController extends Controller
                 'item_type' => 'damage_fee',
             ]);
 
-            // Cập nhật tổng tiền invoice
-            $newTotal = $invoice->invoiceItems()->sum('total_line');
+            // Cập nhật tổng tiền invoice (chỉ tính các item chưa thanh toán)
+            $newTotal = $this->calculateInvoiceTotal($invoice);
             $invoice->update(['total_amount' => $newTotal]);
 
             // Trừ stock của supply nếu cần
@@ -901,7 +937,7 @@ class InvoiceController extends Controller
                 'message' => 'Đã thêm thiệt hại vào hóa đơn.',
                 'data' => [
                     'item' => $item,
-                    'invoice' => $invoice->fresh(['invoiceItems']),
+                    'invoice' => $invoice->fresh(['invoiceItems.damageImages']),
                 ],
             ]);
         } catch (\Illuminate\Validation\ValidationException $e) {
@@ -934,7 +970,7 @@ class InvoiceController extends Controller
         try {
             DB::beginTransaction();
 
-            $invoice = Invoice::with('invoiceItems')->findOrFail($id);
+            $invoice = Invoice::with('invoiceItems.damageImages')->findOrFail($id);
 
             // Kiểm tra invoice chưa được thanh toán
             if ($invoice->status === 'paid') {
@@ -949,16 +985,15 @@ class InvoiceController extends Controller
 
             $item->delete();
 
-            // Cập nhật tổng tiền invoice
-            $newTotal = $invoice->invoiceItems()->sum('total_line');
-            $invoice->update(['total_amount' => $newTotal]);
+            // Cập nhật tổng tiền invoice (chỉ tính các item chưa thanh toán)
+            $invoice->recalculateTotalAmount();
 
             DB::commit();
 
             return response()->json([
                 'success' => true,
                 'message' => 'Đã xóa item khỏi hóa đơn.',
-                'data' => $invoice->fresh(['invoiceItems']),
+                'data' => $invoice->fresh(['invoiceItems.damageImages']),
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
@@ -1326,7 +1361,7 @@ class InvoiceController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Hóa đơn đã được cập nhật',
-                'data' => $invoice->load(['bookingOrder', 'invoiceItems'])
+                'data' => $invoice->load(['bookingOrder', 'invoiceItems.damageImages'])
             ]);
         } catch (\Exception $e) {
             return response()->json([
@@ -1876,7 +1911,7 @@ class InvoiceController extends Controller
         try {
             DB::beginTransaction();
 
-            $originalInvoice = Invoice::with('invoiceItems')->findOrFail($id);
+            $originalInvoice = Invoice::with('invoiceItems.damageImages')->findOrFail($id);
 
             // Validate all items belong to this invoice
             $itemIds = $request->items_for_new_invoice;
@@ -2005,7 +2040,7 @@ class InvoiceController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Hóa đơn đã được gộp thành công',
-                'data' => $targetInvoice->fresh()->load('invoiceItems')
+                'data' => $targetInvoice->fresh()->load('invoiceItems.damageImages')
             ]);
         } catch (\Exception $e) {
             DB::rollBack();

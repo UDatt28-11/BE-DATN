@@ -353,6 +353,7 @@ class BookingOrderController extends Controller
                         $with[] = 'invoices';
                         $with[] = 'invoices.payments';
                         $with[] = 'invoices.invoiceItems';
+                        $with[] = 'invoices.invoiceItems.damageImages';
                     } elseif ($include === 'promotions') {
                         $with[] = 'promotions:id,code,description';
                     }
@@ -386,6 +387,7 @@ class BookingOrderController extends Controller
                     'invoices',
                     'invoices.payments',
                     'invoices.invoiceItems',
+                    'invoices.invoiceItems.damageImages',
                     'promotions:id,code,description'
                 ];
             }
@@ -2654,7 +2656,9 @@ class BookingOrderController extends Controller
                 'guests.*.date_of_birth' => 'nullable|date',
                 'guests.*.identity_type' => 'required|in:cccd,passport',
                 'guests.*.identity_number' => 'required|string|max:50',
-                'guests.*.identity_image' => 'nullable|image|mimes:jpeg,png,jpg|max:5120',
+                'guests.*.identity_image' => 'nullable|image|mimes:jpeg,png,jpg|max:5120', // Tương thích ngược
+                'guests.*.identity_images' => 'required_without:guests.*.identity_image|array|min:1', // Bắt buộc nếu không có identity_image, tối thiểu 1 ảnh
+                'guests.*.identity_images.*' => 'required|image|mimes:jpeg,png,jpg|max:5120',
                 'guests.*.booking_detail_id' => 'required|exists:booking_details,id',
                 'notes' => 'nullable|string|max:1000',
             ]);
@@ -2697,24 +2701,199 @@ class BookingOrderController extends Controller
                     }
                 }
 
-                // Upload identity image nếu có
-                $identityImageUrl = null;
+                // Upload identity images nếu có (hỗ trợ nhiều ảnh: mặt trước, mặt sau)
+                $identityImageUrl = null; // Giữ lại để tương thích ngược
                 $fileKey = "guests.{$index}.identity_image";
-                if ($request->hasFile($fileKey)) {
-                    $file = $request->file($fileKey);
-                    $identityImageUrl = $this->storeIdentityImage($file);
+                $filesKey = "guests.{$index}.identity_images";
+                
+                // Upload nhiều ảnh (mới)
+                $uploadedImages = [];
+                
+                // Debug: Log tất cả files trong request
+                $allFiles = $request->allFiles();
+                Log::info('BookingOrderController@checkInDirect - All files in request', [
+                    'guest_index' => $index,
+                    'all_files_keys' => array_keys($allFiles),
+                    'guests_structure' => isset($allFiles['guests']) ? array_keys($allFiles['guests']) : 'not_set',
+                    'guest_files' => isset($allFiles['guests'][$index]) ? array_keys($allFiles['guests'][$index]) : 'not_set',
+                ]);
+                
+                // Kiểm tra nhiều cách để lấy files
+                $files = null;
+                
+                // Cách 1: Kiểm tra với key chuẩn Laravel
+                if ($request->hasFile($filesKey)) {
+                    $files = $request->file($filesKey);
+                    Log::info('Found files via hasFile()', ['key' => $filesKey, 'count' => is_array($files) ? count($files) : 1]);
                 }
+                
+                // Cách 2: Kiểm tra trực tiếp từ allFiles()
+                if (!$files && isset($allFiles['guests'][$index]['identity_images'])) {
+                    $files = $allFiles['guests'][$index]['identity_images'];
+                    Log::info('Found files via allFiles() direct access', ['count' => is_array($files) ? count($files) : 1]);
+                }
+                
+                // Cách 3: Duyệt qua tất cả files để tìm
+                if (!$files) {
+                    foreach ($allFiles as $key => $value) {
+                        if ($key === 'guests' && is_array($value) && isset($value[$index])) {
+                            if (isset($value[$index]['identity_images'])) {
+                                $files = $value[$index]['identity_images'];
+                                Log::info('Found files via iteration', ['count' => is_array($files) ? count($files) : 1]);
+                                break;
+                            }
+                        }
+                    }
+                }
+                
+                // Xử lý files nếu tìm thấy
+                if ($files) {
+                    if (!is_array($files)) {
+                        $files = [$files];
+                    }
+                    
+                    Log::info('Processing files', [
+                        'files_count' => count($files),
+                        'files_types' => array_map(function($f) {
+                            return $f instanceof \Illuminate\Http\UploadedFile ? 'UploadedFile' : gettype($f);
+                        }, $files),
+                    ]);
+                    
+                    foreach ($files as $fileIndex => $file) {
+                        if ($file && ($file instanceof \Illuminate\Http\UploadedFile)) {
+                            if ($file->isValid()) {
+                                try {
+                                    Log::info('Uploading identity image', [
+                                        'guest_index' => $index,
+                                        'file_index' => $fileIndex,
+                                        'original_name' => $file->getClientOriginalName(),
+                                        'size' => $file->getSize(),
+                                    ]);
+                                    
+                                    $imageUrl = $this->storeIdentityImage($file);
+                                    $uploadedImages[] = [
+                                        'image_url' => $imageUrl,
+                                        'side' => $fileIndex === 0 ? 'front' : ($fileIndex === 1 ? 'back' : 'other'),
+                                        'order' => $fileIndex,
+                                    ];
+                                    
+                                    Log::info('Identity image uploaded successfully', [
+                                        'guest_index' => $index,
+                                        'file_index' => $fileIndex,
+                                        'image_url' => $imageUrl,
+                                    ]);
+                                } catch (\Exception $e) {
+                                    Log::error('Failed to upload identity image', [
+                                        'guest_index' => $index,
+                                        'file_index' => $fileIndex,
+                                        'error' => $e->getMessage(),
+                                        'trace' => $e->getTraceAsString(),
+                                    ]);
+                                }
+                            } else {
+                                Log::warning('File is not valid', [
+                                    'guest_index' => $index,
+                                    'file_index' => $fileIndex,
+                                    'error' => $file->getError(),
+                                ]);
+                            }
+                        } else {
+                            Log::warning('File is not UploadedFile instance', [
+                                'guest_index' => $index,
+                                'file_index' => $fileIndex,
+                                'file_type' => gettype($file),
+                            ]);
+                        }
+                    }
+                    
+                    // Lấy ảnh đầu tiên làm identity_image_url để tương thích ngược
+                    if (!empty($uploadedImages)) {
+                        $identityImageUrl = $uploadedImages[0]['image_url'];
+                    }
+                } 
+                // Fallback: Upload 1 ảnh (tương thích ngược)
+                else if ($request->hasFile($fileKey)) {
+                    $file = $request->file($fileKey);
+                    if ($file && $file->isValid()) {
+                        try {
+                            Log::info('Uploading single identity image', [
+                                'guest_index' => $index,
+                                'original_name' => $file->getClientOriginalName(),
+                            ]);
+                            
+                            $identityImageUrl = $this->storeIdentityImage($file);
+                            $uploadedImages[] = [
+                                'image_url' => $identityImageUrl,
+                                'side' => 'front',
+                                'order' => 0,
+                            ];
+                        } catch (\Exception $e) {
+                            Log::error('Failed to upload single identity image', [
+                                'guest_index' => $index,
+                                'error' => $e->getMessage(),
+                            ]);
+                        }
+                    }
+                } else {
+                    Log::warning('No identity images found in request', [
+                        'guest_index' => $index,
+                        'file_key' => $fileKey,
+                        'files_key' => $filesKey,
+                    ]);
+                }
+                
+                // Debug log tổng kết
+                Log::info('BookingOrderController@checkInDirect - Identity images processing summary', [
+                    'guest_index' => $index,
+                    'has_file_key' => $request->hasFile($fileKey),
+                    'has_files_key' => $request->hasFile($filesKey),
+                    'uploaded_images_count' => count($uploadedImages),
+                    'identity_image_url' => $identityImageUrl ?? 'null',
+                ]);
 
                 // Tạo CheckedInGuest record
-                \App\Models\CheckedInGuest::create([
+                $checkedInGuest = \App\Models\CheckedInGuest::create([
                     'booking_details_id' => $bookingDetail->id,
                     'full_name' => $guestData['full_name'],
                     'date_of_birth' => $guestData['date_of_birth'] ?? null,
                     'identity_type' => $guestData['identity_type'],
                     'identity_number' => $guestData['identity_number'],
-                    'identity_image_url' => $identityImageUrl,
+                    'identity_image_url' => $identityImageUrl, // Giữ lại để tương thích ngược
                     'check_in_time' => now(),
                 ]);
+
+                // Lưu nhiều ảnh vào bảng identity_images
+                if (!empty($uploadedImages)) {
+                    foreach ($uploadedImages as $imageData) {
+                        try {
+                            \App\Models\IdentityImage::create([
+                                'checked_in_guest_id' => $checkedInGuest->id,
+                                'image_url' => $imageData['image_url'],
+                                'side' => $imageData['side'],
+                                'order' => $imageData['order'],
+                            ]);
+                            Log::info('IdentityImage created successfully', [
+                                'checked_in_guest_id' => $checkedInGuest->id,
+                                'image_url' => $imageData['image_url'],
+                                'side' => $imageData['side'],
+                            ]);
+                        } catch (\Exception $e) {
+                            Log::error('Failed to create IdentityImage', [
+                                'checked_in_guest_id' => $checkedInGuest->id,
+                                'image_url' => $imageData['image_url'] ?? 'N/A',
+                                'error' => $e->getMessage(),
+                                'trace' => $e->getTraceAsString(),
+                            ]);
+                            // Không throw exception để không rollback toàn bộ transaction
+                            // Nhưng log lại để debug
+                        }
+                    }
+                } else {
+                    Log::warning('No identity images to save', [
+                        'checked_in_guest_id' => $checkedInGuest->id ?? 'N/A',
+                        'guest_index' => $index,
+                    ]);
+                }
 
                 if (!in_array($bookingDetail->id, $checkedInDetailIds)) {
                     $checkedInDetailIds[] = $bookingDetail->id;
@@ -2944,7 +3123,7 @@ class BookingOrderController extends Controller
             $booking = BookingOrder::with([
                 'details.room',
                 'details.bookingServices.service', // Load approved services
-                'invoices.invoiceItems', // Load invoice items
+                'invoices.invoiceItems.damageImages', // Load invoice items with damage images
             ])->findOrFail($id);
 
             // Kiểm tra booking có thuộc về user hiện tại không
@@ -3156,6 +3335,7 @@ class BookingOrderController extends Controller
                 'detail.bookingOrder:id,order_code,customer_name,customer_phone',
                 'detail.room:id,name,room_type_id',
                 'detail.room.roomType:id,name',
+                'identityImages',
             ])
             ->whereHas('detail.bookingOrder', function($q) {
                 // Chỉ lấy guests từ booking đã check-in (không bị hủy)
@@ -3195,6 +3375,16 @@ class BookingOrderController extends Controller
                 $detail = $guest->detail;
                 $booking = $detail->bookingOrder ?? null;
                 $room = $detail->room ?? null;
+                
+                // Load identity images
+                $identityImages = $guest->identityImages->map(function($img) {
+                    return [
+                        'id' => $img->id,
+                        'image_url' => $img->image_url,
+                        'side' => $img->side,
+                        'order' => $img->order,
+                    ];
+                })->toArray();
 
                 return [
                     'id' => $guest->id,
@@ -3202,7 +3392,8 @@ class BookingOrderController extends Controller
                     'date_of_birth' => $guest->date_of_birth?->format('Y-m-d'),
                     'identity_type' => $guest->identity_type,
                     'identity_number' => $guest->identity_number,
-                    'identity_image_url' => $guest->identity_image_url,
+                    'identity_image_url' => $guest->identity_image_url, // Giữ lại để tương thích ngược
+                    'identity_images' => $identityImages, // Nhiều ảnh
                     'check_in_time' => $guest->check_in_time?->toISOString(),
                     'booking' => $booking ? [
                         'id' => $booking->id,
@@ -3248,24 +3439,45 @@ class BookingOrderController extends Controller
     }
 
     /**
-     * Store identity image to private bucket
+     * Store identity image to S3 (same bucket as room images)
      */
     private function storeIdentityImage($file): string
     {
-        $filename = 'identity_' . time() . '_' . \Illuminate\Support\Str::random(10) . '.' . $file->getClientOriginalExtension();
-        
-        // Upload to private bucket (s3_private disk) if configured
-        if (config('filesystems.disks.s3_private.bucket')) {
-            $path = $file->storeAs('identity_images', $filename, 's3_private');
-            
-            // For private bucket, return the path
-            // The path can be used later to generate signed URL if needed for viewing
-            return $path;
+        try {
+            $directory = 'identity_images';
+
+            // Generate unique filename to avoid overwriting
+            $extension = $file->getClientOriginalExtension();
+            $filename = \Illuminate\Support\Str::uuid() . '.' . $extension;
+
+            // Store file to S3 (publicly readable or via configured URL)
+            $path = Storage::disk('s3')->putFileAs($directory, $file, $filename);
+
+            if (!$path) {
+                throw new \Exception('File không được lưu lên S3.');
+            }
+
+            // Generate public URL using S3 disk configuration
+            $url = Storage::disk('s3')->url($path);
+
+            Log::info('BookingOrderController@storeIdentityImage - File uploaded to S3 successfully', [
+                'original_name' => $file->getClientOriginalName(),
+                'stored_path' => $path,
+                'full_url' => $url,
+            ]);
+
+            // Return full URL (same as room images)
+            return $url;
+        } catch (\Exception $e) {
+            Log::error('BookingOrderController@storeIdentityImage failed (S3)', [
+                'original_name' => $file->getClientOriginalName() ?? 'unknown',
+                'error' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+            throw new \Exception('Lỗi khi tải file ảnh giấy tờ lên S3: ' . $e->getMessage());
         }
-        
-        // Fallback to public disk if s3_private is not configured
-        $path = $file->storeAs('identity_images', $filename, 'public');
-        return Storage::url($path);
     }
 
     /**
@@ -4043,6 +4255,32 @@ class BookingOrderController extends Controller
                 'booking_id' => 'sometimes|exists:booking_orders,id',
             ]);
 
+            // Tự động tạo checkout request cho các booking đã check-in nhưng chưa có checkout request
+            // Tìm các booking_detail đã check-in nhưng chưa có checkout request pending
+            $checkedInDetails = \App\Models\BookingDetail::where('status', 'checked_in')
+                ->whereHas('bookingOrder', function($q) {
+                    $q->whereIn('status', ['checked_in', 'partially_checked_in', 'partially_checked_out']);
+                })
+                ->with('bookingOrder')
+                ->get();
+
+            // Lọc các detail chưa có checkout request pending
+            $detailsWithoutCheckoutRequest = $checkedInDetails->filter(function($detail) {
+                $existing = \App\Models\CheckoutRequest::where('booking_detail_id', $detail->id)
+                    ->where('status', 'pending')
+                    ->exists();
+                return !$existing;
+            });
+
+            // Nhóm theo booking_order_id để tạo checkout request
+            $bookingsToProcess = $detailsWithoutCheckoutRequest->groupBy('booking_order_id');
+            foreach ($bookingsToProcess as $bookingId => $details) {
+                $booking = \App\Models\BookingOrder::find($bookingId);
+                if ($booking) {
+                    $this->createPendingCheckoutRequestsForBooking($booking);
+                }
+            }
+
             $perPage = (int) ($request->get('per_page', 15));
 
             $query = \App\Models\CheckoutRequest::with([
@@ -4248,7 +4486,9 @@ class BookingOrderController extends Controller
             $damageItems = [];
             
             if ($request->has('damaged_supplies') && !empty($request->damaged_supplies)) {
-                foreach ($request->damaged_supplies as $damagedItem) {
+                $allFiles = $request->allFiles();
+                
+                foreach ($request->damaged_supplies as $index => $damagedItem) {
                     $supply = \App\Models\Supply::findOrFail($damagedItem['supply_id']);
                     $quantity = (int) $damagedItem['quantity'];
                     $unitPrice = $damagedItem['unit_price'] ?? $supply->unit_price;
@@ -4256,7 +4496,7 @@ class BookingOrderController extends Controller
                     $notes = $damagedItem['notes'] ?? '';
 
                     // Tạo InvoiceItem cho thiệt hại
-                    $invoiceItemModel::create([
+                    $invoiceItem = $invoiceItemModel::create([
                         'invoice_id' => $invoice->id,
                         'description' => "Thiệt hại vật tư: {$supply->name}" . ($notes ? " - {$notes}" : ''),
                         'quantity' => $quantity,
@@ -4264,6 +4504,53 @@ class BookingOrderController extends Controller
                         'total_line' => $totalLine,
                         'item_type' => 'damage_fee',
                     ]);
+
+                    // Xử lý upload ảnh minh chứng thiệt hại
+                    $damageImagesKey = "damaged_supplies.{$index}.damage_images";
+                    $damageImages = [];
+                    
+                    // Tìm files từ request
+                    if (isset($allFiles['damaged_supplies'][$index]['damage_images'])) {
+                        $files = $allFiles['damaged_supplies'][$index]['damage_images'];
+                        if (!is_array($files)) {
+                            $files = [$files];
+                        }
+                        
+                        foreach ($files as $fileIndex => $file) {
+                            if ($file && $file->isValid()) {
+                                try {
+                                    $directory = 'damage_images';
+                                    $extension = $file->getClientOriginalExtension();
+                                    $filename = \Illuminate\Support\Str::uuid() . '.' . $extension;
+                                    $path = Storage::disk('s3')->putFileAs($directory, $file, $filename);
+                                    
+                                    if ($path) {
+                                        $url = Storage::disk('s3')->url($path);
+                                        
+                                        // Tạo DamageImage record
+                                        \App\Models\DamageImage::create([
+                                            'invoice_item_id' => $invoiceItem->id,
+                                            'image_url' => $url,
+                                            'order' => $fileIndex,
+                                        ]);
+                                        
+                                        $damageImages[] = $url;
+                                        
+                                        Log::info('Damage image uploaded successfully', [
+                                            'invoice_item_id' => $invoiceItem->id,
+                                            'supply_id' => $supply->id,
+                                            'image_url' => $url,
+                                        ]);
+                                    }
+                                } catch (\Exception $e) {
+                                    Log::error('Error uploading damage image', [
+                                        'invoice_item_id' => $invoiceItem->id,
+                                        'error' => $e->getMessage(),
+                                    ]);
+                                }
+                            }
+                        }
+                    }
 
                     // Ghi log vào supply_logs
                     \App\Models\SupplyLog::create([
@@ -4285,6 +4572,7 @@ class BookingOrderController extends Controller
                         'unit_price' => $unitPrice,
                         'total' => $totalLine,
                         'notes' => $notes,
+                        'images' => $damageImages,
                     ];
                 }
                 
@@ -4307,7 +4595,56 @@ class BookingOrderController extends Controller
             }
 
             $finalAmount = max(0, $totalAmount);
-            $invoice->update(['total_amount' => $finalAmount]);
+            
+            // Xử lý trạng thái invoice và booking dựa trên finalAmount
+            if ($finalAmount == 0) {
+                // Nếu tổng tiền = 0 (đã trừ hết tiền cọc, không có phát sinh)
+                // → Tự động đánh dấu là 'paid' vì không còn gì phải thanh toán
+                $invoice->update([
+                    'total_amount' => $finalAmount,
+                    'status' => 'paid',
+                ]);
+                
+                // Cập nhật booking payment_status thành 'paid'
+                $booking->refresh();
+                $booking->update([
+                    'payment_status' => 'paid',
+                ]);
+                
+                // Nếu tất cả phòng đã checkout, cập nhật status thành 'completed'
+                if ($newStatus === 'checked_out') {
+                    $booking->update([
+                        'status' => 'completed',
+                    ]);
+                }
+            } else {
+                // Nếu tổng tiền > 0 (có phát sinh cần thanh toán)
+                // → Đặt invoice về 'pending' để chờ thanh toán
+                $invoice->update([
+                    'total_amount' => $finalAmount,
+                    'status' => 'pending',
+                ]);
+                
+                // Đảm bảo booking payment_status không tự động thành 'paid' sau checkout
+                // Vì còn phát sinh chưa thanh toán
+                $booking->refresh();
+                $totalPaidForInvoice = $invoice->payments()
+                    ->whereIn('status', ['success', 'paid'])
+                    ->sum('amount');
+                
+                // Nếu tổng đã thanh toán < invoice.total_amount, thì không phải 'paid'
+                if ($totalPaidForInvoice < $finalAmount) {
+                    // Chuyển về 'partial' vì còn phát sinh chưa thanh toán
+                    $booking->update([
+                        'payment_status' => 'partial',
+                    ]);
+                } else {
+                    // Nếu đã thanh toán đầy đủ, giữ 'paid'
+                    $booking->update([
+                        'payment_status' => 'paid',
+                    ]);
+                }
+            }
 
             // Cập nhật checkout request
             $checkoutRequest->update([
@@ -4335,7 +4672,7 @@ class BookingOrderController extends Controller
                     'total_damage_fee' => $totalDamageFee,
                     'items' => $damageItems,
                 ],
-                'invoice' => $invoice->fresh(['invoiceItems']),
+                'invoice' => $invoice->fresh(['invoiceItems.damageImages']),
             ]);
         } catch (\Illuminate\Validation\ValidationException $e) {
             DB::rollBack();

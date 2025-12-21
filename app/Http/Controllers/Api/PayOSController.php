@@ -667,18 +667,13 @@ class PayOSController extends Controller
                         ]);
                     }
 
-                    // Tính lại invoice total_amount từ tất cả invoice items
-                    $allItems = InvoiceItem::where('invoice_id', $invoice->id)->get();
-                    $newTotalAmount = max(0, $allItems->sum('total_line'));
+                    // Tính lại invoice total_amount (chỉ tính các item chưa thanh toán)
+                    $invoice->recalculateTotalAmount();
                     
                     Log::info('PayOS webhook: Recalculating invoice total', [
                         'invoice_id' => $invoice->id,
-                        'items_count' => $allItems->count(),
-                        'items_sum' => $allItems->sum('total_line'),
-                        'new_total_amount' => $newTotalAmount,
+                        'new_total_amount' => $invoice->total_amount,
                     ]);
-                    
-                    $invoice->update(['total_amount' => $newTotalAmount]);
 
                     // Cập nhật invoice status
                     if ($bookingPaymentStatus === 'paid') {

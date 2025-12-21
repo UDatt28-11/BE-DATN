@@ -117,6 +117,28 @@ class Invoice extends Model
     }
 
     /**
+     * Tính tổng tiền hóa đơn (chỉ tính các item chưa thanh toán)
+     * Các item có "[Đã thanh toán]" trong description sẽ không được tính vào total_amount
+     */
+    public function calculateTotalAmount(): float
+    {
+        return (float) $this->invoiceItems()
+            ->whereRaw("description NOT LIKE '%[Đã thanh toán]%'")
+            ->sum('total_line');
+    }
+
+    /**
+     * Cập nhật total_amount dựa trên các item chưa thanh toán
+     */
+    public function recalculateTotalAmount(): void
+    {
+        $calculatedTotal = $this->calculateTotalAmount();
+        $this->update(['total_amount' => $calculatedTotal]);
+        // Refresh để có giá trị mới
+        $this->refresh();
+    }
+
+    /**
      * Get invoice_status attribute (mapped from status)
      * Frontend expects invoice_status: 'draft' | 'sent' | 'viewed' | 'paid' | 'cancelled'
      */
