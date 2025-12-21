@@ -13,11 +13,16 @@ class Message extends Model
         'content',
         'read_at',
         'is_hidden',
+        'message_type',
+        'ai_provider',
+        'ai_model',
+        'metadata',
     ];
 
     protected $casts = [
         'read_at' => 'datetime',
         'is_hidden' => 'boolean',
+        'metadata' => 'array',
     ];
 
     // Relationships
