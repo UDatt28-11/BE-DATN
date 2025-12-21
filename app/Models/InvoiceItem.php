@@ -28,6 +28,11 @@ class InvoiceItem extends Model
         return $this->belongsTo(Invoice::class);
     }
 
+    public function damageImages()
+    {
+        return $this->hasMany(DamageImage::class);
+    }
+
     // Scopes
     public function scopePenalties($query)
     {

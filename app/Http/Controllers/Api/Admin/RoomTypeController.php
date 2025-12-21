@@ -13,6 +13,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Exception;
@@ -352,6 +353,11 @@ class RoomTypeController extends Controller
         }
         unset($validatedData['service_ids']);
 
+        // Đảm bảo status luôn là 'active' khi tạo mới (để hiển thị ở client)
+        if (!isset($validatedData['status']) || empty($validatedData['status'])) {
+            $validatedData['status'] = 'active';
+        }
+
         $roomType = RoomType::create($validatedData);
 
         // Gán dịch vụ cho loại phòng (sync luôn, kể cả mảng rỗng để clear)
@@ -367,7 +373,18 @@ class RoomTypeController extends Controller
                 'room_type_id' => $roomType->id,
                 'name' => $roomType->name,
                 'property_id' => $roomType->property_id,
+                'status' => $roomType->status,
             ]);
+
+            // Xóa cache để client thấy loại phòng mới ngay lập tức
+            try {
+                Cache::flush(); // Xóa toàn bộ cache để đảm bảo client thấy loại phòng mới
+            } catch (\Exception $e) {
+                Log::warning('Failed to clear cache after creating room type', [
+                    'room_type_id' => $roomType->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
 
             return response()->json([
                 'success' => true,
@@ -486,7 +503,18 @@ class RoomTypeController extends Controller
             Log::info('RoomType updated', [
                 'room_type_id' => $roomType->id,
                 'name' => $roomType->name,
+                'status' => $roomType->status,
             ]);
+
+            // Xóa cache để client thấy thay đổi ngay lập tức
+            try {
+                Cache::flush(); // Xóa toàn bộ cache để đảm bảo client thấy thay đổi
+            } catch (\Exception $e) {
+                Log::warning('Failed to clear cache after updating room type', [
+                    'room_type_id' => $roomType->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
 
             return response()->json([
                 'success' => true,

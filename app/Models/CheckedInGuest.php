@@ -5,6 +5,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class CheckedInGuest extends Model
 {
@@ -16,7 +17,7 @@ class CheckedInGuest extends Model
         'date_of_birth',
         'identity_type',
         'identity_number',
-        'identity_image_url',
+        'identity_image_url', // Giữ lại để tương thích ngược
         'check_in_time',
     ];
 
@@ -28,6 +29,11 @@ class CheckedInGuest extends Model
     public function detail(): BelongsTo
     {
         return $this->belongsTo(BookingDetail::class, 'booking_details_id');
+    }
+
+    public function identityImages(): HasMany
+    {
+        return $this->hasMany(IdentityImage::class, 'checked_in_guest_id')->orderBy('order');
     }
 }
 

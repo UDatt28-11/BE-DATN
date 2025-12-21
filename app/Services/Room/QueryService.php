@@ -15,8 +15,35 @@ class QueryService
         $page = (int) ($q['page'] ?? 1);
         $perPage = (int) ($q['per_page'] ?? self::DEFAULT_PER_PAGE);
         
+        // Load booking details nếu có check_in parameter
+        $withRelations = ['property:id,name', 'roomType:id,name', 'roomType.images', 'amenities:id,name', 'verifier:id,full_name'];
+        if (!empty($q['check_in']) || !empty($q['check_out'])) {
+            // Load booking details với filter theo ngày
+            $checkIn = $q['check_in'] ?? $q['check_out'] ?? null;
+            $checkOut = $q['check_out'] ?? $q['check_in'] ?? null;
+            
+            $withRelations['bookingDetails'] = function($query) use ($checkIn, $checkOut) {
+                $query->select('id', 'room_id', 'booking_order_id', 'check_in_date', 'check_out_date', 'status');
+                
+                // Filter booking details có overlap với ngày đã chọn
+                if ($checkIn && $checkOut) {
+                    $query->where(function($q) use ($checkIn, $checkOut) {
+                        // Booking detail có overlap nếu: check_in_date <= checkOut AND check_out_date >= checkIn
+                        $q->whereDate('check_in_date', '<=', $checkOut)
+                          ->whereDate('check_out_date', '>=', $checkIn)
+                          ->whereIn('status', ['confirmed', 'checked_in']); // Chỉ lấy booking đã confirm hoặc đang check-in
+                    });
+                } elseif ($checkIn) {
+                    // Nếu chỉ có check_in, lấy booking có ngày đó nằm trong khoảng check_in_date và check_out_date
+                    $query->whereDate('check_in_date', '<=', $checkIn)
+                          ->whereDate('check_out_date', '>=', $checkIn)
+                          ->whereIn('status', ['confirmed', 'checked_in']);
+                }
+            };
+        }
+        
         $query = Room::query()
-            ->with(['property:id,name', 'roomType:id,name', 'roomType.images', 'amenities:id,name', 'verifier:id,full_name']);
+            ->with($withRelations);
 
         // Filter by property_id
         if (!empty($q['property_id'])) {
@@ -59,7 +86,7 @@ class QueryService
         $paginator = $query->paginate($perPage, ['*'], 'page', $page);
 
         // Serialize rooms to ensure relationships are properly formatted
-        $roomsData = collect($paginator->items())->map(function($room) {
+        $roomsData = collect($paginator->items())->map(function($room) use ($q) {
             $roomArray = $room->toArray();
             
             // Ensure roomType is properly serialized with images
@@ -98,6 +125,21 @@ class QueryService
                 ];
             } else {
                 $roomArray['property'] = null;
+            }
+            
+            // Thêm booking details nếu có
+            if ($room->relationLoaded('bookingDetails') && $room->bookingDetails) {
+                $roomArray['booking_details'] = $room->bookingDetails->map(function($detail) {
+                    return [
+                        'id' => $detail->id,
+                        'booking_order_id' => $detail->booking_order_id,
+                        'check_in_date' => $detail->check_in_date?->format('Y-m-d'),
+                        'check_out_date' => $detail->check_out_date?->format('Y-m-d'),
+                        'status' => $detail->status,
+                    ];
+                })->values()->toArray();
+            } else {
+                $roomArray['booking_details'] = [];
             }
             
             return $roomArray;
