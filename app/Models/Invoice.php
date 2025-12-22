@@ -19,7 +19,7 @@ class Invoice extends Model
         'refund_amount',
         'refund_policy_id',
         'refund_date',
-        'calculation_method',
+        // 'calculation_method', // Cột này không tồn tại trong database
     ];
 
     protected $casts = [
@@ -71,9 +71,9 @@ class Invoice extends Model
         return $this->hasMany(SplitInvoice::class, 'original_invoice_id');
     }
 
-    public function splitFrom(): BelongsTo
+    public function splitFrom(): \Illuminate\Database\Eloquent\Relations\HasOne
     {
-        return $this->belongsTo(SplitInvoice::class, 'id', 'new_invoice_id');
+        return $this->hasOne(SplitInvoice::class, 'new_invoice_id', 'id');
     }
 
     // Scopes
