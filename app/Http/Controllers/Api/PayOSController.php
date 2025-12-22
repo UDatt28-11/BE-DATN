@@ -137,10 +137,11 @@ class PayOSController extends Controller
                     
                     foreach ($booking->details as $detail) {
                         if ($detail->room) {
-                            // Calculate nights
-                            $checkIn = \Carbon\Carbon::parse($detail->check_in_date);
-                            $checkOut = \Carbon\Carbon::parse($detail->check_out_date);
-                            $nights = max(1, $checkOut->diffInDays($checkIn));
+                            // Calculate nights - đảm bảo tính chính xác số đêm
+                            $checkIn = \Carbon\Carbon::parse($detail->check_in_date)->startOfDay();
+                            $checkOut = \Carbon\Carbon::parse($detail->check_out_date)->startOfDay();
+                            // Tính số đêm: checkOut - checkIn (luôn dương)
+                            $nights = max(1, abs($checkOut->diffInDays($checkIn)));
 
                             $roomPrice = ($detail->room->price_per_night ?? 0) * $nights;
 
@@ -157,17 +158,51 @@ class PayOSController extends Controller
                     }
 
                     // Trừ tiền cọc đã thanh toán (nếu có) - trường hợp đã thanh toán trước đó
+                    // Tách thành nhiều dòng theo từng phòng
                     $paidAmount = $booking->paid_amount ?? 0;
                     if ($paidAmount > 0) {
-                        InvoiceItem::create([
-                            'invoice_id' => $invoice->id,
-                            'description' => 'Tiền cọc đã thanh toán',
-                            'quantity' => 1,
-                            'unit_price' => -$paidAmount, // Giá trị âm để trừ
-                            'total_line' => -$paidAmount, // Giá trị âm để trừ
-                            'item_type' => 'deposit',
-                        ]);
-                        $totalAmount -= $paidAmount;
+                        // Tính tổng giá phòng và giá từng phòng
+                        $totalRoomPriceForDeposit = 0;
+                        $roomPricesForDeposit = [];
+                        foreach ($booking->details as $detail) {
+                            if ($detail->room) {
+                                // Calculate nights - đảm bảo tính chính xác số đêm
+                                $checkIn = \Carbon\Carbon::parse($detail->check_in_date)->startOfDay();
+                                $checkOut = \Carbon\Carbon::parse($detail->check_out_date)->startOfDay();
+                                $nights = max(1, $checkOut->diffInDays($checkIn, false));
+                                $roomPrice = ($detail->room->price_per_night ?? 0) * $nights;
+                                $roomPricesForDeposit[$detail->id] = $roomPrice;
+                                $totalRoomPriceForDeposit += $roomPrice;
+                            }
+                        }
+                        
+                        // Phân bổ tiền cọc theo tỷ lệ giá phòng
+                        $depositRatio = $totalRoomPriceForDeposit > 0 ? ($paidAmount / $totalRoomPriceForDeposit) : 0;
+                        
+                        foreach ($booking->details as $detail) {
+                            if (!isset($roomPricesForDeposit[$detail->id])) continue;
+                            
+                            $roomPrice = $roomPricesForDeposit[$detail->id];
+                            $roomName = $detail->room->name ?? '';
+                            
+                            // Phân bổ tiền cọc theo tỷ lệ giá phòng
+                            $roomDeposit = round($roomPrice * $depositRatio, 2);
+                            
+                            if ($roomDeposit > 0) {
+                                // Tính phần trăm tiền cọc so với giá phòng để hiển thị
+                                $depositPercentage = $roomPrice > 0 ? round(($roomDeposit / $roomPrice) * 100, 1) : 0;
+                                InvoiceItem::create([
+                                    'invoice_id' => $invoice->id,
+                                    'booking_detail_id' => $detail->id,
+                                    'description' => "Tiền cọc đã thanh toán - Phòng {$roomName} ({$depositPercentage}% giá phòng)",
+                                    'quantity' => 1,
+                                    'unit_price' => -$roomDeposit,
+                                    'total_line' => -$roomDeposit,
+                                    'item_type' => 'deposit',
+                                ]);
+                                $totalAmount -= $roomDeposit;
+                            }
+                        }
                     }
 
                     // Đảm bảo total_amount không âm
@@ -581,10 +616,25 @@ class PayOSController extends Controller
                         $newPaidAmount = $booking->total_amount;
                     }
 
+                    // Lưu status cũ để log
+                    $oldStatus = $booking->status;
+                    
                     $booking->update([
                         'paid_amount' => $newPaidAmount,
                         'payment_status' => $bookingPaymentStatus,
-                        'status' => 'confirmed',
+                        'status' => 'confirmed', // QUAN TRỌNG: Luôn chuyển sang confirmed sau khi thanh toán cọc
+                    ]);
+                    
+                    // Refresh để lấy giá trị mới nhất
+                    $booking->refresh();
+                    
+                    Log::info('PayOS webhook: Booking status updated to confirmed (deposit payment)', [
+                        'booking_id' => $booking->id,
+                        'old_status' => $oldStatus,
+                        'new_status' => $booking->status,
+                        'payment_status' => $booking->payment_status,
+                        'paid_amount' => $booking->paid_amount,
+                        'payment_amount' => $payment->amount,
                     ]);
 
                     // Đảm bảo invoice có invoice items cho tiền phòng (nếu chưa có)
@@ -598,9 +648,10 @@ class PayOSController extends Controller
                         
                         foreach ($booking->details as $detail) {
                             if ($detail->room) {
-                                $checkIn = \Carbon\Carbon::parse($detail->check_in_date);
-                                $checkOut = \Carbon\Carbon::parse($detail->check_out_date);
-                                $nights = max(1, $checkOut->diffInDays($checkIn));
+                                // Calculate nights - đảm bảo tính chính xác số đêm
+                                $checkIn = \Carbon\Carbon::parse($detail->check_in_date)->startOfDay();
+                                $checkOut = \Carbon\Carbon::parse($detail->check_out_date)->startOfDay();
+                                $nights = max(1, $checkOut->diffInDays($checkIn, false));
                                 $roomPrice = ($detail->room->price_per_night ?? 0) * $nights;
 
                                 InvoiceItem::create([
@@ -616,55 +667,78 @@ class PayOSController extends Controller
                     }
 
                     // Kiểm tra xem đã có InvoiceItem cho deposit chưa
-                    $existingDepositItem = InvoiceItem::where('invoice_id', $invoice->id)
+                    $hasDepositItem = InvoiceItem::where('invoice_id', $invoice->id)
                         ->where('item_type', 'deposit')
-                        ->first();
+                        ->exists();
 
                     Log::info('PayOS webhook: Checking deposit item', [
                         'invoice_id' => $invoice->id,
-                        'has_existing_deposit' => $existingDepositItem ? true : false,
+                        'has_existing_deposit' => $hasDepositItem,
                         'payment_amount' => $payment->amount,
                         'new_paid_amount' => $newPaidAmount,
                     ]);
 
-                    if (!$existingDepositItem) {
-                        // Tạo InvoiceItem cho deposit (giá trị âm để trừ vào tổng tiền)
+                    if (!$hasDepositItem) {
+                        // Load booking details để tính tiền cọc cho từng phòng
+                        $booking->load('details.room');
+                        
+                        // Tính tổng giá phòng và giá từng phòng
+                        $totalRoomPrice = 0;
+                        $roomPrices = [];
+                        foreach ($booking->details as $detail) {
+                            if ($detail->room) {
+                                // Calculate nights - đảm bảo tính chính xác số đêm
+                                $checkIn = \Carbon\Carbon::parse($detail->check_in_date)->startOfDay();
+                                $checkOut = \Carbon\Carbon::parse($detail->check_out_date)->startOfDay();
+                                $nights = max(1, $checkOut->diffInDays($checkIn, false));
+                                $roomPrice = ($detail->room->price_per_night ?? 0) * $nights;
+                                $roomPrices[$detail->id] = $roomPrice;
+                                $totalRoomPrice += $roomPrice;
+                            }
+                        }
+                        
+                        // Tạo deposit items cho từng phòng - phân bổ theo tỷ lệ giá phòng
+                        // Tính tỷ lệ tiền cọc thực tế user đã thanh toán so với tổng giá phòng
+                        $depositRatio = $totalRoomPrice > 0 ? ($newPaidAmount / $totalRoomPrice) : 0;
+                        
                         try {
-                            $depositItem = InvoiceItem::create([
-                                'invoice_id' => $invoice->id,
-                                'description' => 'Tiền cọc đã thanh toán (PayOS)',
-                                'quantity' => 1,
-                                'unit_price' => -$payment->amount, // Giá trị âm để trừ
-                                'total_line' => -$payment->amount, // Giá trị âm để trừ
-                                'item_type' => 'deposit',
-                            ]);
+                            foreach ($booking->details as $detail) {
+                                if (!isset($roomPrices[$detail->id])) continue;
+                                
+                                $roomPrice = $roomPrices[$detail->id];
+                                $roomName = $detail->room->name ?? '';
+                                
+                                // Phân bổ tiền cọc theo tỷ lệ giá phòng
+                                $roomDeposit = round($roomPrice * $depositRatio, 2);
+                                
+                                if ($roomDeposit > 0) {
+                                    // Tính phần trăm tiền cọc so với giá phòng để hiển thị
+                                    $depositPercentage = $roomPrice > 0 ? round(($roomDeposit / $roomPrice) * 100, 1) : 0;
+                                    InvoiceItem::create([
+                                        'invoice_id' => $invoice->id,
+                                        'booking_detail_id' => $detail->id, // Đảm bảo gán booking_detail_id
+                                        'description' => "Tiền cọc đã thanh toán (PayOS) - Phòng {$roomName} ({$depositPercentage}% giá phòng)",
+                                        'quantity' => 1,
+                                        'unit_price' => -$roomDeposit,
+                                        'total_line' => -$roomDeposit,
+                                        'item_type' => 'deposit',
+                                    ]);
+                                }
+                            }
                             
-                            Log::info('PayOS webhook: Deposit item created successfully', [
-                                'deposit_item_id' => $depositItem->id,
+                            Log::info('PayOS webhook: Deposit items created per room', [
                                 'invoice_id' => $invoice->id,
-                                'amount' => -$payment->amount,
+                                'total_deposit' => $newPaidAmount,
+                                'deposit_ratio' => $depositRatio,
                             ]);
                         } catch (\Exception $e) {
-                            Log::error('PayOS webhook: Failed to create deposit item', [
+                            Log::error('PayOS webhook: Failed to create deposit items', [
                                 'invoice_id' => $invoice->id,
                                 'error' => $e->getMessage(),
                                 'trace' => $e->getTraceAsString(),
                             ]);
                             throw $e; // Re-throw để rollback transaction
                         }
-                    } else {
-                        // Nếu đã có deposit item, cập nhật nó với tổng số tiền đã trả
-                        $existingDepositItem->update([
-                            'description' => 'Tiền cọc đã thanh toán (PayOS)',
-                            'unit_price' => -$newPaidAmount,
-                            'total_line' => -$newPaidAmount,
-                        ]);
-                        
-                        Log::info('PayOS webhook: Deposit item updated', [
-                            'deposit_item_id' => $existingDepositItem->id,
-                            'invoice_id' => $invoice->id,
-                            'new_amount' => -$newPaidAmount,
-                        ]);
                     }
 
                     // Tính lại invoice total_amount (chỉ tính các item chưa thanh toán)
@@ -684,8 +758,8 @@ class PayOSController extends Controller
                         'invoice_id' => $invoice->id,
                         'payment_amount' => $payment->amount,
                         'new_paid_amount' => $newPaidAmount,
-                        'new_total_amount' => $newTotalAmount,
-                        'invoice_items_count' => $allItems->count(),
+                        'new_total_amount' => $invoice->total_amount,
+                        'invoice_items_count' => InvoiceItem::where('invoice_id', $invoice->id)->count(),
                     ]);
                 }
             }

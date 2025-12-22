@@ -223,18 +223,26 @@ Route::get('payment/redirect', function (Request $request) {
             $booking = BookingOrder::find($bookingId);
             
             if ($booking) {
+                Log::info('Payment redirect: Processing redirect for booking', [
+                    'booking_id' => $booking->id,
+                    'booking_status' => $booking->status,
+                    'payment_status' => $booking->payment_status,
+                    'type' => $type,
+                ]);
+                
                 // Tìm payment gần nhất của booking này
                 $invoice = $booking->invoices()->first();
                 if ($invoice) {
-                    $payment = $invoice->payments()
-                        ->whereIn('status', ['success', 'paid'])
-                        ->latest()
-                        ->first();
-                    
                     // Tìm payment gần nhất (có thể là pending nếu webhook chưa được gọi)
                     $latestPayment = $invoice->payments()
                         ->latest()
                         ->first();
+                    
+                    Log::info('Payment redirect: Found invoice and payment', [
+                        'invoice_id' => $invoice->id,
+                        'has_payment' => $latestPayment ? true : false,
+                        'payment_status' => $latestPayment ? $latestPayment->status : null,
+                    ]);
                     
                     // Nếu có payment và user quay lại từ PayOS success, cập nhật payment status
                     if ($latestPayment && $latestPayment->status === 'pending') {
@@ -253,63 +261,137 @@ Route::get('payment/redirect', function (Request $request) {
                         ->whereIn('status', ['success', 'paid'])
                         ->sum('amount');
                     
+                    Log::info('Payment redirect: Calculated total paid amount', [
+                        'total_paid_amount' => $totalPaidAmount,
+                        'booking_total_amount' => $booking->total_amount,
+                    ]);
+                    
                     // Nếu có payment thành công, luôn cập nhật booking và đảm bảo deposit item
                     if ($totalPaidAmount > 0) {
                         DB::beginTransaction();
                         try {
-                            // Cập nhật booking paid_amount và payment_status
-                            $newPaidAmount = min($totalPaidAmount, $booking->total_amount);
-                            $bookingPaymentStatus = 'partial';
+                            // Kiểm tra xem đây là thanh toán cọc hay thanh toán invoice sau checkout
+                            // Lưu ý: Kiểm tra status TRƯỚC KHI cập nhật, vì webhook có thể đã cập nhật status = 'confirmed'
+                            $originalBookingStatus = $booking->status;
+                            $isCheckoutPayment = in_array($originalBookingStatus, ['checked_out', 'partially_checked_out', 'completed']);
                             
-                            if ($newPaidAmount >= $booking->total_amount) {
-                                $bookingPaymentStatus = 'paid';
-                            }
+                            Log::info('Payment redirect: Processing payment', [
+                                'booking_id' => $booking->id,
+                                'original_booking_status' => $originalBookingStatus,
+                                'is_checkout_payment' => $isCheckoutPayment,
+                                'total_paid_amount' => $totalPaidAmount,
+                            ]);
                             
-                            // Chỉ cập nhật status nếu chưa confirmed
-                            $updateData = [
-                                'paid_amount' => $newPaidAmount,
-                                'payment_status' => $bookingPaymentStatus,
-                            ];
-                            
-                            if ($booking->status !== 'confirmed') {
-                                $updateData['status'] = 'confirmed';
-                            }
-                            
-                            $booking->update($updateData);
-                            
-                            // Đảm bảo invoice có deposit item (luôn kiểm tra và tạo nếu chưa có)
-                            $hasDepositItem = InvoiceItem::where('invoice_id', $invoice->id)
-                                ->where('item_type', 'deposit')
-                                ->exists();
-                            
-                            if (!$hasDepositItem && $newPaidAmount > 0) {
-                                InvoiceItem::create([
-                                    'invoice_id' => $invoice->id,
-                                    'description' => 'Tiền cọc đã thanh toán (PayOS)',
-                                    'quantity' => 1,
-                                    'unit_price' => -$newPaidAmount,
-                                    'total_line' => -$newPaidAmount,
-                                    'item_type' => 'deposit',
+                            if ($isCheckoutPayment) {
+                                // THANH TOÁN INVOICE SAU CHECKOUT: không cần cập nhật booking status
+                                // Chỉ cập nhật invoice status nếu đã thanh toán đầy đủ
+                                if ($totalPaidAmount >= $invoice->total_amount) {
+                                    $invoice->update(['status' => 'paid']);
+                                }
+                            } else {
+                                // THANH TOÁN CỌC (DEPOSIT): cập nhật booking status và payment_status
+                                $newPaidAmount = min($totalPaidAmount, $booking->total_amount);
+                                $bookingPaymentStatus = 'partial';
+                                
+                                if ($newPaidAmount >= $booking->total_amount) {
+                                    $bookingPaymentStatus = 'paid';
+                                }
+                                
+                                // Cập nhật booking: chuyển từ 'pending' sang 'confirmed' sau khi thanh toán cọc thành công
+                                // QUAN TRỌNG: Luôn cập nhật status = 'confirmed' cho thanh toán cọc, bất kể status hiện tại là gì
+                                $updateData = [
+                                    'paid_amount' => $newPaidAmount,
+                                    'payment_status' => $bookingPaymentStatus,
+                                    'status' => 'confirmed', // Đảm bảo chuyển sang confirmed sau khi thanh toán cọc
+                                ];
+                                
+                                // Refresh booking trước khi update để đảm bảo có dữ liệu mới nhất
+                                $booking->refresh();
+                                
+                                $booking->update($updateData);
+                                
+                                // Refresh lại sau khi update để lấy giá trị mới nhất
+                                $booking->refresh();
+                                
+                                Log::info('Payment redirect: Booking status updated to confirmed', [
+                                    'booking_id' => $booking->id,
+                                    'old_status' => $originalBookingStatus,
+                                    'new_status' => $booking->status, // Lấy từ refresh
+                                    'payment_status' => $booking->payment_status,
+                                    'paid_amount' => $booking->paid_amount,
                                 ]);
+                                
+                                // Đảm bảo invoice có deposit items (tách thành nhiều dòng theo từng phòng)
+                                $hasDepositItem = InvoiceItem::where('invoice_id', $invoice->id)
+                                    ->where('item_type', 'deposit')
+                                    ->exists();
+                                
+                                if (!$hasDepositItem && $newPaidAmount > 0) {
+                                // Load booking details để tính tiền cọc cho từng phòng
+                                $booking->load('details.room');
+                                
+                                // Tính tổng giá phòng và giá từng phòng
+                                $totalRoomPrice = 0;
+                                $roomPrices = [];
+                                foreach ($booking->details as $detail) {
+                                    if ($detail->room) {
+                                        // Calculate nights - đảm bảo tính chính xác số đêm
+                                        $checkIn = \Carbon\Carbon::parse($detail->check_in_date)->startOfDay();
+                                        $checkOut = \Carbon\Carbon::parse($detail->check_out_date)->startOfDay();
+                                        $nights = max(1, $checkOut->diffInDays($checkIn, false));
+                                        $roomPrice = ($detail->room->price_per_night ?? 0) * $nights;
+                                        $roomPrices[$detail->id] = $roomPrice;
+                                        $totalRoomPrice += $roomPrice;
+                                    }
+                                }
+                                
+                                // Tạo deposit items cho từng phòng - phân bổ theo tỷ lệ giá phòng
+                                // Tính tỷ lệ tiền cọc thực tế user đã thanh toán so với tổng giá phòng
+                                $depositRatio = $totalRoomPrice > 0 ? ($newPaidAmount / $totalRoomPrice) : 0;
+                                
+                                foreach ($booking->details as $detail) {
+                                    if (!isset($roomPrices[$detail->id])) continue;
+                                    
+                                    $roomPrice = $roomPrices[$detail->id];
+                                    $roomName = $detail->room->name ?? '';
+                                    
+                                    // Phân bổ tiền cọc theo tỷ lệ giá phòng
+                                    $roomDeposit = round($roomPrice * $depositRatio, 2);
+                                    
+                                    if ($roomDeposit > 0) {
+                                        // Tính phần trăm tiền cọc so với giá phòng để hiển thị
+                                        $depositPercentage = $roomPrice > 0 ? round(($roomDeposit / $roomPrice) * 100, 1) : 0;
+                                        InvoiceItem::create([
+                                            'invoice_id' => $invoice->id,
+                                            'booking_detail_id' => $detail->id, // Đảm bảo gán booking_detail_id
+                                            'description' => "Tiền cọc đã thanh toán (PayOS) - Phòng {$roomName} ({$depositPercentage}% giá phòng)",
+                                            'quantity' => 1,
+                                            'unit_price' => -$roomDeposit,
+                                            'total_line' => -$roomDeposit,
+                                            'item_type' => 'deposit',
+                                        ]);
+                                    }
+                                }
                                 
                                 // Tính lại invoice total
                                 $allItems = InvoiceItem::where('invoice_id', $invoice->id)->get();
                                 $newTotalAmount = max(0, $allItems->sum('total_line'));
                                 $invoice->update(['total_amount' => $newTotalAmount]);
                                 
-                                Log::info('Payment redirect: Deposit item created', [
+                                Log::info('Payment redirect: Deposit items created per room', [
                                     'booking_id' => $booking->id,
                                     'invoice_id' => $invoice->id,
-                                    'deposit_amount' => -$newPaidAmount,
+                                    'total_deposit' => $newPaidAmount,
                                 ]);
+                                }
                             }
                             
                             DB::commit();
                             
-                            Log::info('Payment redirect: Booking updated', [
+                            Log::info('Payment redirect: Transaction committed successfully', [
                                 'booking_id' => $booking->id,
-                                'paid_amount' => $newPaidAmount,
-                                'has_deposit_item' => $hasDepositItem,
+                                'booking_status' => $booking->fresh()->status,
+                                'payment_status' => $booking->fresh()->payment_status,
                             ]);
                         } catch (\Exception $e) {
                             DB::rollBack();
@@ -672,6 +754,7 @@ Route::middleware(['auth:sanctum', 'role:staff,admin'])->prefix('staff')->group(
     Route::get('/check-in/list', [\App\Http\Controllers\Api\Staff\CheckInOutController::class, 'getCheckInList']);
     Route::get('/check-in/{id}', [\App\Http\Controllers\Api\Staff\CheckInOutController::class, 'getCheckInDetails']);
     Route::post('/check-in/{id}', [\App\Http\Controllers\Api\Staff\CheckInOutController::class, 'checkIn']);
+    Route::get('/check-in/available-rooms/{bookingDetailId}', [\App\Http\Controllers\Api\Staff\CheckInOutController::class, 'getAvailableRoomsForChange']);
     Route::get('/check-out/list', [\App\Http\Controllers\Api\Staff\CheckInOutController::class, 'getCheckOutList']);
     Route::get('/check-out/{id}', [\App\Http\Controllers\Api\Staff\CheckInOutController::class, 'getCheckOutDetails']);
     Route::get('/check-out/{id}/supplies', [\App\Http\Controllers\Api\Staff\CheckInOutController::class, 'getSuppliesForCheckout']);
