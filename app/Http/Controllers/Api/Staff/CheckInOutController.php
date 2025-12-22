@@ -521,7 +521,9 @@ class CheckInOutController extends Controller
 
             // Xử lý vật tư bị hỏng (nếu có)
             if ($request->has('damaged_supplies') && !empty($request->damaged_supplies)) {
-                foreach ($request->damaged_supplies as $damagedItem) {
+                $allFiles = $request->allFiles();
+                
+                foreach ($request->damaged_supplies as $index => $damagedItem) {
                     $supply = Supply::findOrFail($damagedItem['supply_id']);
                     $quantity = (int) $damagedItem['quantity'];
                     $unitPrice = $damagedItem['unit_price'] ?? $supply->unit_price;
@@ -529,7 +531,7 @@ class CheckInOutController extends Controller
                     $notes = $damagedItem['notes'] ?? '';
 
                     // Tạo InvoiceItem cho thiệt hại
-                    InvoiceItem::create([
+                    $invoiceItem = InvoiceItem::create([
                         'invoice_id' => $invoice->id,
                         'description' => "Thiệt hại vật tư: {$supply->name}" . ($notes ? " - {$notes}" : ''),
                         'quantity' => $quantity,
@@ -537,6 +539,52 @@ class CheckInOutController extends Controller
                         'total_line' => $totalLine,
                         'item_type' => 'damage_fee',
                     ]);
+
+                    // Xử lý upload ảnh minh chứng thiệt hại
+                    $damageImages = [];
+                    
+                    // Tìm files từ request
+                    if (isset($allFiles['damaged_supplies'][$index]['damage_images'])) {
+                        $files = $allFiles['damaged_supplies'][$index]['damage_images'];
+                        if (!is_array($files)) {
+                            $files = [$files];
+                        }
+                        
+                        foreach ($files as $fileIndex => $file) {
+                            if ($file && $file->isValid()) {
+                                try {
+                                    $directory = 'damage_images';
+                                    $extension = $file->getClientOriginalExtension();
+                                    $filename = \Illuminate\Support\Str::uuid() . '.' . $extension;
+                                    $path = Storage::disk('s3')->putFileAs($directory, $file, $filename);
+                                    
+                                    if ($path) {
+                                        $url = Storage::disk('s3')->url($path);
+                                        
+                                        // Tạo DamageImage record
+                                        \App\Models\DamageImage::create([
+                                            'invoice_item_id' => $invoiceItem->id,
+                                            'image_url' => $url,
+                                            'order' => $fileIndex,
+                                        ]);
+                                        
+                                        $damageImages[] = $url;
+                                        
+                                        Log::info('Damage image uploaded successfully', [
+                                            'invoice_item_id' => $invoiceItem->id,
+                                            'supply_id' => $supply->id,
+                                            'image_url' => $url,
+                                        ]);
+                                    }
+                                } catch (\Exception $e) {
+                                    Log::error('Error uploading damage image', [
+                                        'invoice_item_id' => $invoiceItem->id,
+                                        'error' => $e->getMessage(),
+                                    ]);
+                                }
+                            }
+                        }
+                    }
 
                     // Ghi log vào supply_logs
                     SupplyLog::create([
@@ -561,6 +609,7 @@ class CheckInOutController extends Controller
                         'unit_price' => $unitPrice,
                         'total' => $totalLine,
                         'notes' => $notes,
+                        'images' => $damageImages,
                     ];
                 }
 

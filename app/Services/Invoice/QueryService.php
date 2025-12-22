@@ -32,9 +32,15 @@ class QueryService
             }
         }
 
-        // Search by invoice_number
+        // Search by id or booking_order_id (invoice_number không tồn tại trong database)
         if (!empty($q['search'])) {
-            $query->where('invoice_number', 'like', '%' . $q['search'] . '%');
+            $searchTerm = $q['search'];
+            $query->where(function($q) use ($searchTerm) {
+                $q->where('id', 'like', '%' . $searchTerm . '%')
+                  ->orWhereHas('bookingOrder', function($query) use ($searchTerm) {
+                      $query->where('order_code', 'like', '%' . $searchTerm . '%');
+                  });
+            });
         }
 
         // Filter by date range (created_at)

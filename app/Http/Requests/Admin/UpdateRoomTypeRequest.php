@@ -23,7 +23,7 @@ class UpdateRoomTypeRequest extends FormRequest
         
         // Chỉ validate image_file nếu nó thực sự được gửi lên (có file)
         if ($this->hasFile('image_file')) {
-            $rules['image_file'] = 'required|image|mimes:jpeg,png,jpg,gif|max:2048';
+            $rules['image_file'] = 'required|image|mimes:jpeg,png,jpg,gif,webp|max:2048';
         }
         
         return $rules;

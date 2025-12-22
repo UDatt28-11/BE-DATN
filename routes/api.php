@@ -596,6 +596,7 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
         Route::delete('/{id}', [InvoiceController::class, 'destroy']);
         Route::post('/merge', [InvoiceController::class, 'mergeInvoices']);
         Route::post('/{id}/split', [InvoiceController::class, 'splitInvoice']);
+        Route::post('/{id}/split-by-rooms', [InvoiceController::class, 'splitInvoiceByRooms']);
         Route::post('/{id}/apply-discount', [InvoiceController::class, 'applyDiscount']);
         Route::delete('/{id}/discounts/{discountId}', [InvoiceController::class, 'removeDiscount'])
             ->whereNumber('id')->whereNumber('discountId');
