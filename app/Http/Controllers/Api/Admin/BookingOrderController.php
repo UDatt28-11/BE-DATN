@@ -2735,12 +2735,16 @@ class BookingOrderController extends Controller
                     Log::info('Found files via allFiles() direct access', ['count' => is_array($files) ? count($files) : 1]);
                 }
                 
-                // Cách 3: Duyệt qua tất cả files để tìm
+                // Cách 3: Duyệt qua tất cả files để tìm (hỗ trợ cả format [index] và [])
                 if (!$files) {
                     foreach ($allFiles as $key => $value) {
                         if ($key === 'guests' && is_array($value) && isset($value[$index])) {
                             if (isset($value[$index]['identity_images'])) {
                                 $files = $value[$index]['identity_images'];
+                                // Nếu là array với index cụ thể, chuyển thành array tuần tự
+                                if (is_array($files)) {
+                                    $files = array_values($files); // Re-index array để đảm bảo tuần tự
+                                }
                                 Log::info('Found files via iteration', ['count' => is_array($files) ? count($files) : 1]);
                                 break;
                             }
@@ -2866,34 +2870,45 @@ class BookingOrderController extends Controller
 
                 // Lưu nhiều ảnh vào bảng identity_images
                 if (!empty($uploadedImages)) {
+                    $savedCount = 0;
                     foreach ($uploadedImages as $imageData) {
                         try {
                             \App\Models\IdentityImage::create([
                                 'checked_in_guest_id' => $checkedInGuest->id,
                                 'image_url' => $imageData['image_url'],
-                                'side' => $imageData['side'],
-                                'order' => $imageData['order'],
+                                'side' => $imageData['side'] ?? 'front',
+                                'order' => $imageData['order'] ?? 0,
                             ]);
+                            $savedCount++;
                             Log::info('IdentityImage created successfully', [
                                 'checked_in_guest_id' => $checkedInGuest->id,
                                 'image_url' => $imageData['image_url'],
-                                'side' => $imageData['side'],
+                                'side' => $imageData['side'] ?? 'front',
+                                'order' => $imageData['order'] ?? 0,
                             ]);
                         } catch (\Exception $e) {
                             Log::error('Failed to create IdentityImage', [
                                 'checked_in_guest_id' => $checkedInGuest->id,
                                 'image_url' => $imageData['image_url'] ?? 'N/A',
+                                'side' => $imageData['side'] ?? 'N/A',
+                                'order' => $imageData['order'] ?? 'N/A',
                                 'error' => $e->getMessage(),
                                 'trace' => $e->getTraceAsString(),
                             ]);
-                            // Không throw exception để không rollback toàn bộ transaction
-                            // Nhưng log lại để debug
+                            // Throw exception để rollback transaction nếu không lưu được ảnh
+                            throw new \Exception('Không thể lưu ảnh giấy tờ vào database: ' . $e->getMessage());
                         }
                     }
+                    Log::info('Identity images saved to database', [
+                        'checked_in_guest_id' => $checkedInGuest->id,
+                        'total_uploaded' => count($uploadedImages),
+                        'total_saved' => $savedCount,
+                    ]);
                 } else {
                     Log::warning('No identity images to save', [
                         'checked_in_guest_id' => $checkedInGuest->id ?? 'N/A',
                         'guest_index' => $index,
+                        'has_identity_image_url' => !empty($identityImageUrl),
                     ]);
                 }
 
