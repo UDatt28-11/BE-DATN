@@ -2173,6 +2173,8 @@ class BookingOrderController extends Controller
             $request->validate([
                 'guests' => 'required|array|min:1',
                 'guests.*.full_name' => 'required|string|max:255',
+                'guests.*.email' => 'nullable|email|max:255',
+                'guests.*.phone_number' => 'nullable|string|max:20',
                 'guests.*.date_of_birth' => 'nullable|date',
                 'guests.*.identity_type' => 'required|in:cccd,passport',
                 'guests.*.identity_number' => 'required|string|max:50',
@@ -2226,6 +2228,8 @@ class BookingOrderController extends Controller
                     'booking_order_id' => $booking->id,
                     'booking_detail_id' => $bookingDetail->id,
                     'full_name' => $guestData['full_name'],
+                    'email' => $guestData['email'] ?? null,
+                    'phone_number' => $guestData['phone_number'] ?? null,
                     'date_of_birth' => $guestData['date_of_birth'] ?? null,
                     'identity_type' => $guestData['identity_type'],
                     'identity_number' => $guestData['identity_number'],
@@ -2481,6 +2485,8 @@ class BookingOrderController extends Controller
             \App\Models\CheckedInGuest::create([
                 'booking_details_id' => $checkInRequest->booking_detail_id,
                 'full_name' => $checkInRequest->full_name,
+                'email' => $checkInRequest->email ?? null,
+                'phone_number' => $checkInRequest->phone_number ?? null,
                 'date_of_birth' => $checkInRequest->date_of_birth,
                 'identity_type' => $checkInRequest->identity_type,
                 'identity_number' => $checkInRequest->identity_number,

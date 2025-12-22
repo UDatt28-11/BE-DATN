@@ -14,6 +14,8 @@ class CheckedInGuest extends Model
     protected $fillable = [
         'booking_details_id',
         'full_name',
+        'email',
+        'phone_number',
         'date_of_birth',
         'identity_type',
         'identity_number',
