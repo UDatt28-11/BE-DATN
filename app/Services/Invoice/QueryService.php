@@ -14,7 +14,7 @@ class QueryService
         $perPage = (int) ($q['per_page'] ?? 15);
         
         $query = Invoice::query()
-            ->with(['bookingOrder', 'invoiceItems']);
+            ->with(['bookingOrder', 'invoiceItems', 'splitFrom', 'splitInvoices']);
 
         // Filter by status
         if (!empty($q['status'])) {
