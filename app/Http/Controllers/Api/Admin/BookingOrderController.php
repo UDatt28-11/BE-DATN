@@ -2719,12 +2719,29 @@ class BookingOrderController extends Controller
                 
                 // Debug: Log tất cả files trong request
                 $allFiles = $request->allFiles();
+                $allInput = $request->all();
+                
                 Log::info('BookingOrderController@checkInDirect - All files in request', [
                     'guest_index' => $index,
                     'all_files_keys' => array_keys($allFiles),
                     'guests_structure' => isset($allFiles['guests']) ? array_keys($allFiles['guests']) : 'not_set',
                     'guest_files' => isset($allFiles['guests'][$index]) ? array_keys($allFiles['guests'][$index]) : 'not_set',
+                    'request_method' => $request->method(),
+                    'content_type' => $request->header('Content-Type'),
+                    'has_guests_in_input' => isset($allInput['guests']),
+                    'guests_count_in_input' => isset($allInput['guests']) && is_array($allInput['guests']) ? count($allInput['guests']) : 0,
                 ]);
+                
+                // Log chi tiết cấu trúc guests nếu có
+                if (isset($allInput['guests']) && is_array($allInput['guests'])) {
+                    foreach ($allInput['guests'] as $gIndex => $gData) {
+                        Log::info('Guest data structure', [
+                            'guest_index' => $gIndex,
+                            'keys' => is_array($gData) ? array_keys($gData) : 'not_array',
+                            'has_identity_images' => isset($gData['identity_images']),
+                        ]);
+                    }
+                }
                 
                 // Kiểm tra nhiều cách để lấy files
                 $files = null;
@@ -2743,15 +2760,135 @@ class BookingOrderController extends Controller
                 
                 // Cách 3: Duyệt qua tất cả files để tìm (hỗ trợ cả format [index] và [])
                 if (!$files) {
+                    // Log chi tiết cấu trúc để debug
+                    Log::info('BookingOrderController@checkInDirect - Detailed file structure', [
+                        'all_files_keys' => array_keys($allFiles),
+                        'has_guests' => isset($allFiles['guests']),
+                        'guests_is_array' => isset($allFiles['guests']) && is_array($allFiles['guests']),
+                        'guests_keys' => isset($allFiles['guests']) && is_array($allFiles['guests']) ? array_keys($allFiles['guests']) : 'N/A',
+                        'target_index' => $index,
+                        'has_target_guest' => isset($allFiles['guests'][$index]),
+                        'target_guest_keys' => isset($allFiles['guests'][$index]) && is_array($allFiles['guests'][$index]) ? array_keys($allFiles['guests'][$index]) : 'N/A',
+                    ]);
+                    
                     foreach ($allFiles as $key => $value) {
-                        if ($key === 'guests' && is_array($value) && isset($value[$index])) {
-                            if (isset($value[$index]['identity_images'])) {
-                                $files = $value[$index]['identity_images'];
-                                // Nếu là array với index cụ thể, chuyển thành array tuần tự
-                                if (is_array($files)) {
-                                    $files = array_values($files); // Re-index array để đảm bảo tuần tự
+                        if ($key === 'guests' && is_array($value)) {
+                            // Kiểm tra với index cụ thể
+                            if (isset($value[$index]) && is_array($value[$index])) {
+                                // Kiểm tra identity_images
+                                if (isset($value[$index]['identity_images'])) {
+                                    $files = $value[$index]['identity_images'];
+                                    // Nếu là array với index cụ thể, chuyển thành array tuần tự
+                                    if (is_array($files)) {
+                                        $files = array_values($files); // Re-index array để đảm bảo tuần tự
+                                    }
+                                    Log::info('Found files via iteration with index', [
+                                        'count' => is_array($files) ? count($files) : 1,
+                                        'files_structure' => is_array($files) ? array_map(function($f) {
+                                            return $f instanceof \Illuminate\Http\UploadedFile ? 'UploadedFile' : gettype($f);
+                                        }, $files) : gettype($files),
+                                    ]);
+                                    break;
                                 }
-                                Log::info('Found files via iteration', ['count' => is_array($files) ? count($files) : 1]);
+                            }
+                            
+                            // Thử tìm với string key (Laravel có thể parse "0" thành string)
+                            foreach ($value as $guestIndex => $guestData) {
+                                if (is_array($guestData) && isset($guestData['identity_images'])) {
+                                    // Kiểm tra xem có phải guest này không (so sánh với index hoặc booking_detail_id)
+                                    $isTargetGuest = false;
+                                    if (is_numeric($guestIndex) && (int)$guestIndex === $index) {
+                                        $isTargetGuest = true;
+                                    } elseif (isset($guestData['booking_detail_id']) && isset($guestData['booking_detail_id'])) {
+                                        // So sánh booking_detail_id nếu có
+                                        $isTargetGuest = ($guestData['booking_detail_id'] == $guestData['booking_detail_id']);
+                                    }
+                                    
+                                    if ($isTargetGuest) {
+                                        $files = $guestData['identity_images'];
+                                        if (is_array($files)) {
+                                            $files = array_values($files);
+                                        }
+                                        Log::info('Found files via iteration with guestIndex', [
+                                            'guest_index' => $guestIndex,
+                                            'count' => is_array($files) ? count($files) : 1,
+                                        ]);
+                                        break 2; // Break cả 2 vòng lặp
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Cách 4: Thử truy cập trực tiếp với dot notation từ request
+                if (!$files) {
+                    $dotNotationKey = "guests.{$index}.identity_images";
+                    try {
+                        $files = $request->file($dotNotationKey);
+                        if ($files) {
+                            Log::info('Found files via dot notation', [
+                                'key' => $dotNotationKey,
+                                'count' => is_array($files) ? count($files) : 1,
+                            ]);
+                        }
+                    } catch (\Exception $e) {
+                        Log::warning('Failed to get files via dot notation', [
+                            'key' => $dotNotationKey,
+                            'error' => $e->getMessage(),
+                        ]);
+                    }
+                }
+                
+                // Cách 5: Thử truy cập với array notation (Laravel có thể parse FormData thành array)
+                if (!$files) {
+                    try {
+                        // Thử với array notation
+                        $arrayKey = ['guests', $index, 'identity_images'];
+                        $files = data_get($allFiles, implode('.', $arrayKey));
+                        
+                        if ($files) {
+                            if (!is_array($files)) {
+                                $files = [$files];
+                            }
+                            Log::info('Found files via array notation', [
+                                'key' => implode('.', $arrayKey),
+                                'count' => count($files),
+                            ]);
+                        }
+                    } catch (\Exception $e) {
+                        Log::warning('Failed to get files via array notation', [
+                            'error' => $e->getMessage(),
+                        ]);
+                    }
+                }
+                
+                // Cách 6: Duyệt tất cả files và tìm theo pattern
+                if (!$files) {
+                    // Tìm tất cả files có chứa "identity_images" trong key
+                    foreach ($allFiles as $key => $value) {
+                        if (strpos($key, 'identity_images') !== false) {
+                            Log::info('Found potential identity_images key', [
+                                'key' => $key,
+                                'value_type' => gettype($value),
+                            ]);
+                            
+                            // Nếu là array, thử lấy phần tử đầu tiên
+                            if (is_array($value)) {
+                                $firstValue = reset($value);
+                                if ($firstValue instanceof \Illuminate\Http\UploadedFile) {
+                                    $files = array_values($value);
+                                    Log::info('Found files via pattern matching', [
+                                        'key' => $key,
+                                        'count' => count($files),
+                                    ]);
+                                    break;
+                                }
+                            } elseif ($value instanceof \Illuminate\Http\UploadedFile) {
+                                $files = [$value];
+                                Log::info('Found single file via pattern matching', [
+                                    'key' => $key,
+                                ]);
                                 break;
                             }
                         }

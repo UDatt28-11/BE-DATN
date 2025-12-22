@@ -490,14 +490,30 @@ class InvoiceController extends Controller
             'status' => 'paid'
         ]);
 
-        // Cập nhật booking order status thành completed nếu đã checkout và thanh toán
+        // Cập nhật booking order status - CHỈ completed khi TẤT CẢ invoices đã thanh toán
         if ($invoice->bookingOrder) {
             $booking = $invoice->bookingOrder;
             if (in_array($booking->status, ['checked_out', 'partially_checked_out'])) {
-                $booking->update([
-                    'status' => 'completed',
-                    'payment_method' => $request->payment_method ?? $booking->payment_method,
-                ]);
+                // Kiểm tra tất cả invoices của booking đã được thanh toán chưa
+                $allInvoices = Invoice::where('booking_order_id', $booking->id)->get();
+                $allInvoicesPaid = $allInvoices->every(function ($inv) {
+                    return $inv->status === 'paid';
+                });
+                
+                if ($allInvoicesPaid) {
+                    // CHỈ khi TẤT CẢ invoices đã thanh toán, mới đặt thành completed
+                    $booking->update([
+                        'status' => 'completed',
+                        'payment_status' => 'paid',
+                        'payment_method' => $request->payment_method ?? $booking->payment_method,
+                    ]);
+                } else {
+                    // Nếu còn invoices chưa thanh toán, giữ status và đặt payment_status là partial
+                    $booking->update([
+                        'payment_status' => 'partial',
+                        'payment_method' => $request->payment_method ?? $booking->payment_method,
+                    ]);
+                }
             }
         }
 
@@ -533,13 +549,28 @@ class InvoiceController extends Controller
                 'status' => 'paid',
             ]);
 
-            // Cập nhật booking order status thành completed nếu đã checkout
+            // Cập nhật booking order status - CHỈ completed khi TẤT CẢ invoices đã thanh toán
             if ($invoice->bookingOrder) {
                 $booking = $invoice->bookingOrder;
                 if (in_array($booking->status, ['checked_out', 'partially_checked_out'])) {
-                    $booking->update([
-                        'status' => 'completed',
-                    ]);
+                    // Kiểm tra tất cả invoices của booking đã được thanh toán chưa
+                    $allInvoices = Invoice::where('booking_order_id', $booking->id)->get();
+                    $allInvoicesPaid = $allInvoices->every(function ($inv) {
+                        return $inv->status === 'paid';
+                    });
+                    
+                    if ($allInvoicesPaid) {
+                        // CHỈ khi TẤT CẢ invoices đã thanh toán, mới đặt thành completed
+                        $booking->update([
+                            'status' => 'completed',
+                            'payment_status' => 'paid',
+                        ]);
+                    } else {
+                        // Nếu còn invoices chưa thanh toán, giữ status và đặt payment_status là partial
+                        $booking->update([
+                            'payment_status' => 'partial',
+                        ]);
+                    }
                 }
             }
 
@@ -631,13 +662,30 @@ class InvoiceController extends Controller
                 ]);
             }
 
-            // Cập nhật booking order
+            // Cập nhật booking order - CHỈ completed khi TẤT CẢ invoices đã thanh toán
             if ($invoice->bookingOrder) {
                 $booking = $invoice->bookingOrder;
-                $booking->update([
-                    'payment_method' => $request->payment_method,
-                    'status' => 'completed', // Hoàn thành sau khi thanh toán
-                ]);
+                
+                // Kiểm tra tất cả invoices của booking đã được thanh toán chưa
+                $allInvoices = Invoice::where('booking_order_id', $booking->id)->get();
+                $allInvoicesPaid = $allInvoices->every(function ($inv) {
+                    return $inv->status === 'paid';
+                });
+                
+                if ($allInvoicesPaid) {
+                    // CHỈ khi TẤT CẢ invoices đã thanh toán, mới đặt thành completed
+                    $booking->update([
+                        'payment_method' => $request->payment_method,
+                        'status' => 'completed',
+                        'payment_status' => 'paid',
+                    ]);
+                } else {
+                    // Nếu còn invoices chưa thanh toán, giữ status và đặt payment_status là partial
+                    $booking->update([
+                        'payment_method' => $request->payment_method,
+                        'payment_status' => 'partial',
+                    ]);
+                }
             }
 
             DB::commit();
@@ -2292,24 +2340,32 @@ class InvoiceController extends Controller
                     'item_type' => 'room_charge',
                 ]);
 
-                // 2. Tạo service charge items từ bookingServices của phòng này
+                // 2. Copy service charge items từ hóa đơn gốc (giữ nguyên trạng thái "đã thanh toán" nếu có)
+                // Lấy service items từ hóa đơn gốc có booking_detail_id của phòng này
+                $serviceItems = $originalInvoice->invoiceItems()
+                    ->where('booking_detail_id', $detail->id)
+                    ->where('item_type', 'service_charge')
+                    ->get();
+                
                 $servicePrice = 0;
-                foreach ($detail->bookingServices as $bookingService) {
-                    $service = $bookingService->service;
-                    $actualPrice = $bookingService->actual_price ?? $bookingService->price_at_booking ?? $service->price ?? 0;
-                    $actualQuantity = $bookingService->actual_quantity ?? $bookingService->quantity ?? 1;
-                    $serviceItemPrice = $actualPrice * $actualQuantity;
-                    $servicePrice += $serviceItemPrice;
-
+                foreach ($serviceItems as $originalServiceItem) {
+                    // Copy service item từ hóa đơn gốc (bao gồm cả description có "[Đã thanh toán]" nếu có)
                     InvoiceItem::create([
                         'invoice_id' => $newInvoice->id,
-                        'booking_detail_id' => $detail->id, // Đảm bảo gán đúng booking_detail_id
-                        'description' => "Dịch vụ: {$service->name} - Phòng {$roomName} (SL: {$actualQuantity})",
-                        'quantity' => $actualQuantity,
-                        'unit_price' => $actualPrice,
-                        'total_line' => $serviceItemPrice,
+                        'booking_detail_id' => $detail->id,
+                        'description' => $originalServiceItem->description, // Giữ nguyên description (có thể có "[Đã thanh toán]")
+                        'quantity' => $originalServiceItem->quantity,
+                        'unit_price' => $originalServiceItem->unit_price,
+                        'total_line' => $originalServiceItem->total_line,
                         'item_type' => 'service_charge',
                     ]);
+                    
+                    // Chỉ cộng vào servicePrice nếu chưa thanh toán (không có "[Đã thanh toán]" trong description)
+                    // Lưu ý: total_amount sẽ được tính lại bằng calculateTotalAmount() sau, nên không cần cộng ở đây
+                    // Nhưng vẫn tính để theo dõi (nếu cần)
+                    if (!str_contains($originalServiceItem->description, '[Đã thanh toán]')) {
+                        $servicePrice += $originalServiceItem->total_line ?? 0;
+                    }
                 }
 
                 // 3. Tạo damage fee items từ invoice items có booking_detail_id của phòng này
@@ -2389,8 +2445,9 @@ class InvoiceController extends Controller
                     ]);
                 }
 
-                // Tính lại total_amount dựa trên tất cả invoice items
-                $calculatedTotal = $newInvoice->invoiceItems()->sum('total_line');
+                // Tính lại total_amount dựa trên các invoice items chưa thanh toán
+                // Sử dụng calculateTotalAmount() để tự động bỏ qua items có "[Đã thanh toán]"
+                $calculatedTotal = $newInvoice->calculateTotalAmount();
                 $newInvoice->update(['total_amount' => max(0, $calculatedTotal)]);
                 
                 // Refresh invoice để có dữ liệu mới nhất
