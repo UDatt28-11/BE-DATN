@@ -95,6 +95,106 @@ class CheckInOutController extends Controller
     }
 
     /**
+     * Get available rooms for room change (cùng loại phòng, available, gần nhau)
+     */
+    public function getAvailableRoomsForChange(Request $request, string $bookingDetailId): JsonResponse
+    {
+        try {
+            $bookingDetail = BookingDetail::with('room.roomType')->findOrFail($bookingDetailId);
+            
+            if (!$bookingDetail->room || !$bookingDetail->room->roomType) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Không tìm thấy thông tin loại phòng.',
+                ], 404);
+            }
+            
+            $roomTypeId = $bookingDetail->room->roomType->id;
+            $currentFloor = $bookingDetail->room->floor_number ?? 0;
+            $booking = $bookingDetail->bookingOrder;
+            
+            // Lấy danh sách phòng cùng loại, available, không phải phòng hiện tại
+            $availableRooms = Room::where('room_type_id', $roomTypeId)
+                ->where('status', 'available')
+                ->where('id', '!=', $bookingDetail->room_id)
+                ->when(\Illuminate\Support\Facades\Schema::hasColumn('rooms', 'verification_status'), function($q) {
+                    $q->where('verification_status', 'verified');
+                })
+                ->orderBy('floor_number', 'asc') // Ưu tiên cùng tầng
+                ->orderBy('name', 'asc')
+                ->get();
+            
+            // Lấy danh sách phòng đã được đặt trong booking này (để đề xuất phòng gần nhau)
+            $otherBookingDetails = $booking->details()
+                ->where('id', '!=', $bookingDetailId)
+                ->with('room')
+                ->get();
+            
+            $otherRooms = $otherBookingDetails->pluck('room')->filter();
+            $otherFloors = $otherRooms->pluck('floor_number')->filter()->unique()->toArray();
+            
+            // Tính điểm ưu tiên: cùng tầng với phòng khác trong booking = điểm cao hơn
+            $roomsWithPriority = $availableRooms->map(function($room) use ($currentFloor, $otherFloors) {
+                $priority = 0;
+                
+                // Ưu tiên cùng tầng với phòng hiện tại
+                if ($room->floor_number == $currentFloor) {
+                    $priority += 100;
+                }
+                
+                // Ưu tiên cùng tầng với phòng khác trong booking
+                if (in_array($room->floor_number, $otherFloors)) {
+                    $priority += 50;
+                }
+                
+                // Ưu tiên tầng gần (chênh lệch ít)
+                $floorDiff = abs($room->floor_number - $currentFloor);
+                $priority += max(0, 20 - $floorDiff * 5);
+                
+                return [
+                    'id' => $room->id,
+                    'name' => $room->name,
+                    'floor_number' => $room->floor_number,
+                    'floor_category' => $room->floor_category,
+                    'price_per_night' => $room->price_per_night,
+                    'priority' => $priority,
+                ];
+            })->sortByDesc('priority')->values();
+            
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'current_room' => [
+                        'id' => $bookingDetail->room->id,
+                        'name' => $bookingDetail->room->name,
+                        'floor_number' => $bookingDetail->room->floor_number,
+                    ],
+                    'available_rooms' => $roomsWithPriority,
+                    'other_rooms_in_booking' => $otherRooms->map(function($room) {
+                        return [
+                            'id' => $room->id,
+                            'name' => $room->name,
+                            'floor_number' => $room->floor_number,
+                        ];
+                    })->values(),
+                ],
+            ]);
+        } catch (\Exception $e) {
+            Log::error('CheckInOutController@getAvailableRoomsForChange failed', [
+                'booking_detail_id' => $bookingDetailId,
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi lấy danh sách phòng.',
+            ], 500);
+        }
+    }
+
+    /**
      * Get booking details for check-in
      */
     public function getCheckInDetails(string $id): JsonResponse
@@ -174,7 +274,12 @@ class CheckInOutController extends Controller
                 'guests.*.identity_type' => 'required|in:cccd,passport',
                 'guests.*.identity_number' => 'required|string|max:50',
                 'guests.*.identity_image' => 'nullable|image|mimes:jpeg,png,jpg|max:5120', // 5MB
+                'guests.*.identity_images' => 'nullable|array',
+                'guests.*.identity_images.*' => 'nullable|image|mimes:jpeg,png,jpg|max:5120',
                 'guests.*.booking_detail_id' => 'required|exists:booking_details,id',
+                'room_changes' => 'nullable|array',
+                'room_changes.*.booking_detail_id' => 'required|exists:booking_details,id',
+                'room_changes.*.new_room_id' => 'required|exists:rooms,id',
                 'notes' => 'nullable|string|max:1000',
             ]);
 
@@ -203,6 +308,110 @@ class CheckInOutController extends Controller
 
             // Lưu danh sách booking_detail_id đã có guests check-in
             $checkedInDetailIds = [];
+
+            // Xử lý thay đổi phòng nếu có
+            if ($request->has('room_changes') && is_array($request->room_changes)) {
+                foreach ($request->room_changes as $roomChange) {
+                    if (isset($roomChange['booking_detail_id']) && isset($roomChange['new_room_id'])) {
+                        $bookingDetail = BookingDetail::findOrFail($roomChange['booking_detail_id']);
+                        
+                        // Kiểm tra booking detail thuộc về booking order này
+                        if ($bookingDetail->booking_order_id != $booking->id) {
+                            throw new \Exception('Booking detail không thuộc về booking order này.');
+                        }
+                        
+                        // Kiểm tra phòng mới có cùng room_type_id không
+                        $newRoom = Room::findOrFail($roomChange['new_room_id']);
+                        $oldRoom = $bookingDetail->room;
+                        
+                        if ($oldRoom && $oldRoom->room_type_id != $newRoom->room_type_id) {
+                            DB::rollBack();
+                            return response()->json([
+                                'success' => false,
+                                'message' => 'Không thể thay đổi phòng. Phòng mới phải cùng loại phòng.',
+                            ], 400);
+                        }
+                        
+                        // Kiểm tra phòng mới có available không
+                        if ($newRoom->status !== 'available') {
+                            DB::rollBack();
+                            return response()->json([
+                                'success' => false,
+                                'message' => "Phòng {$newRoom->name} không khả dụng. Trạng thái: {$newRoom->status}",
+                            ], 400);
+                        }
+                        
+                        // Tính giá phòng mới
+                        $checkIn = \Carbon\Carbon::parse($bookingDetail->check_in_date);
+                        $checkOut = \Carbon\Carbon::parse($bookingDetail->check_out_date);
+                        $nights = max(1, $checkOut->diffInDays($checkIn));
+                        $newRoomPrice = ($newRoom->price_per_night ?? 0) * $nights;
+                        $oldRoomPrice = ($oldRoom->price_per_night ?? 0) * $nights;
+                        
+                        // Cập nhật room_id trong booking_detail
+                        $bookingDetail->update(['room_id' => $newRoom->id]);
+                        
+                        // Cập nhật invoice items nếu có
+                        $invoice = $booking->invoices()->first();
+                        if ($invoice) {
+                            // 1. Cập nhật room_charge items
+                            $roomChargeItems = $invoice->invoiceItems()
+                                ->where('booking_detail_id', $bookingDetail->id)
+                                ->where('item_type', 'room_charge')
+                                ->get();
+                            
+                            foreach ($roomChargeItems as $item) {
+                                $item->update([
+                                    'description' => str_replace($oldRoom->name, $newRoom->name, $item->description),
+                                    'unit_price' => $newRoom->price_per_night ?? 0,
+                                    'total_line' => $newRoomPrice,
+                                ]);
+                            }
+                            
+                            // 2. Tính lại tiền cọc theo giá phòng mới và policy
+                            $newRoomDeposit = 0;
+                            if ($newRoomPrice < 1000000) {
+                                $newRoomDeposit = $newRoomPrice; // 100% giá phòng
+                            } else {
+                                $newRoomDeposit = $newRoomPrice * 0.5; // 50% giá phòng
+                            }
+                            $newRoomDeposit = round($newRoomDeposit, 2);
+                            
+                            // 3. Cập nhật deposit items
+                            $depositItems = $invoice->invoiceItems()
+                                ->where('booking_detail_id', $bookingDetail->id)
+                                ->where('item_type', 'deposit')
+                                ->get();
+                            
+                            foreach ($depositItems as $depositItem) {
+                                $depositPercentage = $newRoomPrice < 1000000 ? '100%' : '50%';
+                                $depositItem->update([
+                                    'description' => "Tiền cọc đã thanh toán - Phòng {$newRoom->name} ({$depositPercentage} giá phòng)",
+                                    'unit_price' => -$newRoomDeposit,
+                                    'total_line' => -$newRoomDeposit,
+                                ]);
+                            }
+                            
+                            // 4. Tính lại total_amount của invoice
+                            $invoice->refresh();
+                            $newTotalAmount = $invoice->invoiceItems()->sum('total_line');
+                            $invoice->update(['total_amount' => max(0, $newTotalAmount)]);
+                            
+                            Log::info('CheckInOutController@checkIn - Room changed and invoice updated', [
+                                'booking_detail_id' => $bookingDetail->id,
+                                'old_room_id' => $oldRoom->id,
+                                'new_room_id' => $newRoom->id,
+                                'old_room_price' => $oldRoomPrice,
+                                'new_room_price' => $newRoomPrice,
+                                'old_deposit' => $depositItems->sum(fn($item) => abs($item->getOriginal('total_line'))),
+                                'new_deposit' => $newRoomDeposit,
+                                'invoice_id' => $invoice->id,
+                                'new_total_amount' => $newTotalAmount,
+                            ]);
+                        }
+                    }
+                }
+            }
 
             // Xử lý từng guest
             foreach ($request->guests as $index => $guestData) {

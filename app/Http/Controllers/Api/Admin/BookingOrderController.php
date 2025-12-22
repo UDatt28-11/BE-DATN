@@ -1158,15 +1158,17 @@ class BookingOrderController extends Controller
                 
                 foreach ($order->details as $detail) {
                     if ($detail->room) {
-                        // Calculate nights
-                        $checkIn = \Carbon\Carbon::parse($detail->check_in_date);
-                        $checkOut = \Carbon\Carbon::parse($detail->check_out_date);
-                        $nights = max(1, $checkOut->diffInDays($checkIn));
+                        // Calculate nights - đảm bảo tính chính xác số đêm
+                        $checkIn = \Carbon\Carbon::parse($detail->check_in_date)->startOfDay();
+                        $checkOut = \Carbon\Carbon::parse($detail->check_out_date)->startOfDay();
+                        // Tính số đêm: checkOut - checkIn (luôn dương)
+                        $nights = max(1, abs($checkOut->diffInDays($checkIn)));
 
                         $roomPrice = ($detail->room->price_per_night ?? 0) * $nights;
 
                         \App\Models\InvoiceItem::create([
                             'invoice_id' => $invoice->id,
+                            'booking_detail_id' => $detail->id, // Đảm bảo gán booking_detail_id
                             'description' => "Phòng {$detail->room->name} - {$nights} đêm",
                             'quantity' => 1,
                             'unit_price' => $detail->room->price_per_night ?? 0,
@@ -3197,10 +3199,11 @@ class BookingOrderController extends Controller
             if (!$hasRoomCharges) {
                 foreach ($booking->details as $detail) {
                     if ($detail->room) {
-                        // Calculate nights
-                        $checkIn = \Carbon\Carbon::parse($detail->check_in_date);
-                        $checkOut = \Carbon\Carbon::parse($detail->check_out_date);
-                        $nights = max(1, $checkOut->diffInDays($checkIn));
+                        // Calculate nights - đảm bảo tính chính xác số đêm
+                        $checkIn = \Carbon\Carbon::parse($detail->check_in_date)->startOfDay();
+                        $checkOut = \Carbon\Carbon::parse($detail->check_out_date)->startOfDay();
+                        // Tính số đêm: checkOut - checkIn (luôn dương)
+                        $nights = max(1, abs($checkOut->diffInDays($checkIn)));
 
                         $roomPrice = ($detail->room->price_per_night ?? 0) * $nights;
 
@@ -4406,10 +4409,21 @@ class BookingOrderController extends Controller
                 'notes' => $request->notes ?? $booking->notes,
             ]);
 
-            // Tạo hoặc cập nhật invoice
-            $invoice = $booking->invoices()->first();
             $invoiceModel = \App\Models\Invoice::class;
             $invoiceItemModel = \App\Models\InvoiceItem::class;
+            
+            // Tạo hoặc cập nhật invoice
+            // Ưu tiên: nếu booking đã được tách hóa đơn theo phòng, tìm hóa đơn ứng với booking_detail hiện tại
+            $invoice = $booking->invoices()
+                ->whereHas('splitFrom', function ($q) use ($bookingDetail) {
+                    $q->where('booking_detail_id', $bookingDetail->id);
+                })
+                ->first();
+
+            // Nếu chưa có hóa đơn tách cho phòng này, fallback về hóa đơn đầu tiên của booking
+            if (!$invoice) {
+                $invoice = $booking->invoices()->first();
+            }
             
             if (!$invoice) {
                 $invoice = $invoiceModel::create([
@@ -4431,13 +4445,16 @@ class BookingOrderController extends Controller
 
             // Thêm room charge nếu chưa có
             if (!$hasRoomCharge && $bookingDetail->room) {
-                $checkIn = \Carbon\Carbon::parse($bookingDetail->check_in_date);
-                $checkOut = \Carbon\Carbon::parse($bookingDetail->check_out_date);
-                $nights = max(1, $checkOut->diffInDays($checkIn));
+                // Calculate nights - đảm bảo tính chính xác số đêm
+                $checkIn = \Carbon\Carbon::parse($bookingDetail->check_in_date)->startOfDay();
+                $checkOut = \Carbon\Carbon::parse($bookingDetail->check_out_date)->startOfDay();
+                // Tính số đêm: checkOut - checkIn (luôn dương)
+                $nights = max(1, abs($checkOut->diffInDays($checkIn)));
                 $roomPrice = ($bookingDetail->room->price_per_night ?? 0) * $nights;
 
                 $invoiceItemModel::create([
                     'invoice_id' => $invoice->id,
+                    'booking_detail_id' => $bookingDetail->id,
                     'description' => "Phòng {$bookingDetail->room->name} - {$nights} đêm",
                     'quantity' => 1,
                     'unit_price' => $bookingDetail->room->price_per_night ?? 0,
@@ -4498,6 +4515,7 @@ class BookingOrderController extends Controller
                     // Tạo InvoiceItem cho thiệt hại
                     $invoiceItem = $invoiceItemModel::create([
                         'invoice_id' => $invoice->id,
+                        'booking_detail_id' => $bookingDetail->id,
                         'description' => "Thiệt hại vật tư: {$supply->name}" . ($notes ? " - {$notes}" : ''),
                         'quantity' => $quantity,
                         'unit_price' => $unitPrice,
