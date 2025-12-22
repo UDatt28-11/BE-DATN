@@ -438,6 +438,7 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
     Route::get('amenities/history', [AmenityController::class, 'history']);
     Route::post('amenities/{id}/restore', [AmenityController::class, 'restore'])->whereNumber('id');
     Route::delete('amenities/{id}/force', [AmenityController::class, 'forceDelete'])->whereNumber('id');
+    Route::patch('amenities/{id}/toggle-status', [AmenityController::class, 'toggleStatus'])->whereNumber('id');
     Route::apiResource('amenities', AmenityController::class);
 
     // ========================================

@@ -620,6 +620,70 @@ class AmenityController extends Controller
     }
 
     /**
+     * Toggle status of an amenity (active/inactive)
+     *
+     * @OA\Patch(
+     *     path="/api/admin/amenities/{id}/toggle-status",
+     *     operationId="toggleAmenityStatus",
+     *     tags={"Amenities"},
+     *     summary="Toggle trạng thái tiện ích",
+     *     description="Đổi trạng thái tiện ích giữa hoạt động và không hoạt động",
+     *     security={{"bearerAuth":{}}},
+     *     @OA\Parameter(
+     *         name="id",
+     *         in="path",
+     *         required=true,
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Đổi trạng thái thành công",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="success", type="boolean", example=true),
+     *             @OA\Property(property="message", type="string"),
+     *             @OA\Property(property="data", ref="#/components/schemas/Amenity")
+     *         )
+     *     ),
+     *     @OA\Response(response=404, description="Không tìm thấy tiện ích")
+     * )
+     */
+    public function toggleStatus(int $id): JsonResponse
+    {
+        try {
+            $amenity = Amenity::findOrFail($id);
+            
+            $this->authorize('update', $amenity);
+            
+            $newStatus = $amenity->status === 'active' ? 'inactive' : 'active';
+            $amenity->status = $newStatus;
+            $amenity->save();
+
+            $statusText = $newStatus === 'active' ? 'hoạt động' : 'không hoạt động';
+
+            return response()->json([
+                'success' => true,
+                'message' => "Đã chuyển trạng thái tiện ích sang {$statusText}.",
+                'data' => new AmenityResource($amenity->load('property:id,name')),
+            ]);
+        } catch (ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Không tìm thấy tiện ích.',
+            ], 404);
+        } catch (\Exception $e) {
+            Log::error('AmenityController@toggleStatus failed', [
+                'amenity_id' => $id,
+                'message' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Có lỗi xảy ra khi đổi trạng thái tiện ích: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
      * Store uploaded file to S3 with unique filename
      *
      * @param \Illuminate\Http\UploadedFile $file

@@ -67,19 +67,11 @@ class ServiceController extends Controller
                 ]);
             }
             
-            // Chỉ lấy services có status = 'active' (nếu có cột status)
-            if (Schema::hasColumn('services', 'status')) {
-                $query->where('status', 'active');
-            }
-            
             // Debug log để kiểm tra query
             if ($request->has('room_type_id')) {
                 $totalBeforeFilter = Service::query();
                 if ($request->has('property_id')) {
                     $totalBeforeFilter->where('property_id', $request->property_id);
-                }
-                if (Schema::hasColumn('services', 'status')) {
-                    $totalBeforeFilter->where('status', 'active');
                 }
                 
                 Log::info('ServiceController@index: Filtering by room_type_id', [
