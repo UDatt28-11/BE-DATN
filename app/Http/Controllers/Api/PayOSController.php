@@ -169,7 +169,8 @@ class PayOSController extends Controller
                                 // Calculate nights - đảm bảo tính chính xác số đêm
                                 $checkIn = \Carbon\Carbon::parse($detail->check_in_date)->startOfDay();
                                 $checkOut = \Carbon\Carbon::parse($detail->check_out_date)->startOfDay();
-                                $nights = max(1, $checkOut->diffInDays($checkIn, false));
+                                // Tính số đêm: checkOut - checkIn (luôn dương)
+                                $nights = max(1, abs($checkOut->diffInDays($checkIn)));
                                 $roomPrice = ($detail->room->price_per_night ?? 0) * $nights;
                                 $roomPricesForDeposit[$detail->id] = $roomPrice;
                                 $totalRoomPriceForDeposit += $roomPrice;
@@ -651,7 +652,8 @@ class PayOSController extends Controller
                                 // Calculate nights - đảm bảo tính chính xác số đêm
                                 $checkIn = \Carbon\Carbon::parse($detail->check_in_date)->startOfDay();
                                 $checkOut = \Carbon\Carbon::parse($detail->check_out_date)->startOfDay();
-                                $nights = max(1, $checkOut->diffInDays($checkIn, false));
+                                // Tính số đêm: checkOut - checkIn (luôn dương)
+                                $nights = max(1, abs($checkOut->diffInDays($checkIn)));
                                 $roomPrice = ($detail->room->price_per_night ?? 0) * $nights;
 
                                 InvoiceItem::create([
@@ -702,14 +704,14 @@ class PayOSController extends Controller
                         $depositRatio = $totalRoomPrice > 0 ? ($newPaidAmount / $totalRoomPrice) : 0;
                         
                         try {
-                            foreach ($booking->details as $detail) {
-                                if (!isset($roomPrices[$detail->id])) continue;
-                                
-                                $roomPrice = $roomPrices[$detail->id];
-                                $roomName = $detail->room->name ?? '';
-                                
-                                // Phân bổ tiền cọc theo tỷ lệ giá phòng
-                                $roomDeposit = round($roomPrice * $depositRatio, 2);
+                        foreach ($booking->details as $detail) {
+                            if (!isset($roomPrices[$detail->id])) continue;
+                            
+                            $roomPrice = $roomPrices[$detail->id];
+                            $roomName = $detail->room->name ?? '';
+                            
+                            // Phân bổ tiền cọc theo tỷ lệ giá phòng (dựa trên số tiền user đã thanh toán)
+                            $roomDeposit = round($roomPrice * $depositRatio, 2);
                                 
                                 if ($roomDeposit > 0) {
                                     // Tính phần trăm tiền cọc so với giá phòng để hiển thị

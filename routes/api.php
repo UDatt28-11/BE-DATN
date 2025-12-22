@@ -338,7 +338,8 @@ Route::get('payment/redirect', function (Request $request) {
                                         // Calculate nights - đảm bảo tính chính xác số đêm
                                         $checkIn = \Carbon\Carbon::parse($detail->check_in_date)->startOfDay();
                                         $checkOut = \Carbon\Carbon::parse($detail->check_out_date)->startOfDay();
-                                        $nights = max(1, $checkOut->diffInDays($checkIn, false));
+                                        // Tính số đêm: checkOut - checkIn (luôn dương)
+                                        $nights = max(1, abs($checkOut->diffInDays($checkIn)));
                                         $roomPrice = ($detail->room->price_per_night ?? 0) * $nights;
                                         $roomPrices[$detail->id] = $roomPrice;
                                         $totalRoomPrice += $roomPrice;
