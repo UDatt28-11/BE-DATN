@@ -186,13 +186,15 @@ class ReviewController extends Controller
                 ], 401);
             }
 
-            // Check if user already reviewed this booking
+            // Check if booking_detail already has a review (mỗi phòng chỉ được đánh giá một lần)
             $bookingDetail = BookingDetail::findOrFail($validated['booking_details_id']);
 
-            if (Review::hasUserReviewedBooking($userId, $bookingDetail->id)) {
+            // Kiểm tra xem booking_detail_id đã có review chưa (không phân biệt user)
+            $existingReview = Review::where('booking_details_id', $bookingDetail->id)->first();
+            if ($existingReview) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Bạn đã đánh giá lần này rồi'
+                    'message' => 'Phòng này đã được đánh giá rồi. Mỗi phòng chỉ được đánh giá một lần.'
                 ], 400);
             }
 

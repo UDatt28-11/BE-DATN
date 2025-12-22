@@ -209,6 +209,10 @@ class QueryService
                 $relations[] = 'details.bookingServices';
                 $relations[] = 'details.bookingServices.service';
             }
+            // Load review nếu có trong include
+            if (in_array('details.review', $include, true)) {
+                $relations[] = 'details.review';
+            }
         }
         
         // Load check-in requests nếu có trong include
