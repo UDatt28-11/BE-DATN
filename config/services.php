@@ -75,4 +75,21 @@ return [
         'locale' => 'vn',
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | AI Chat Configuration
+    |--------------------------------------------------------------------------
+    |
+    | Configuration for AI chat service (OpenAI, Claude, etc.)
+    |
+    */
+    'ai' => [
+        'provider' => env('AI_PROVIDER', 'openai'), // 'openai', 'claude', 'gemini'
+        'api_key' => env('AI_API_KEY', ''),
+        'model' => env('AI_MODEL', 'gpt-4o-mini'), // 'gpt-4o-mini', 'gpt-4o', 'claude-3-haiku', etc.
+        'max_tokens' => env('AI_MAX_TOKENS', 1000),
+        'temperature' => env('AI_TEMPERATURE', 0.7),
+        'enabled' => env('AI_CHAT_ENABLED', true),
+    ],
+
 ];

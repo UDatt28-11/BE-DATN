@@ -8,13 +8,21 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Conversation extends Model
 {
-    protected $fillable = [];
+    protected $fillable = [
+        'type',
+        'session_id',
+        'context_data',
+    ];
+
+    protected $casts = [
+        'context_data' => 'array',
+    ];
 
     // Relationships
     public function participants(): BelongsToMany
     {
-        return $this->belongsToMany(User::class, 'conversation_participants', 'conversation_id', 'user_id')
-            ->withTimestamps();
+        return $this->belongsToMany(User::class, 'conversation_participants', 'conversation_id', 'user_id');
+        // Note: Removed ->withTimestamps() because conversation_participants table doesn't have timestamps columns
     }
 
     public function messages(): HasMany

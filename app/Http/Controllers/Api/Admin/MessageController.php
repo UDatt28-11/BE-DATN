@@ -27,8 +27,19 @@ class MessageController extends Controller
         try {
             $user = $request->user();
 
-            // Check if user is participant
-            if (!$conversation->participants->contains('id', $user->id) && !$user->isAdmin()) {
+            // Check if user is participant or admin
+            // For AI conversations (type = 'user_to_ai'), admin can always view
+            $canView = false;
+            if ($user->isAdmin()) {
+                $canView = true; // Admin can view all conversations
+            } elseif ($conversation->type === 'user_to_ai' && $conversation->session_id) {
+                // Guest AI conversations - check by session_id if needed
+                $canView = true; // For now, allow viewing AI conversations
+            } elseif ($conversation->participants->contains('id', $user->id)) {
+                $canView = true;
+            }
+
+            if (!$canView) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Bạn không có quyền xem tin nhắn này.',
@@ -46,7 +57,7 @@ class MessageController extends Controller
 
             $query = Message::query()
                 ->where('conversation_id', $conversation->id)
-                ->with('sender:id,full_name,email,avatar_url')
+                ->with('sender:id,full_name,email,avatar_url,role')
                 ->visible() // Chỉ hiển thị messages chưa bị ẩn
                 ->latest();
 
@@ -100,8 +111,17 @@ class MessageController extends Controller
         try {
             $user = $request->user();
 
-            // Check if user is participant
-            if (!$conversation->participants->contains('id', $user->id) && !$user->isAdmin()) {
+            // Check if user can send message
+            // Admin can send messages to any conversation
+            // For AI conversations, admin can reply
+            $canSend = false;
+            if ($user->isAdmin()) {
+                $canSend = true; // Admin can send to all conversations
+            } elseif ($conversation->participants->contains('id', $user->id)) {
+                $canSend = true;
+            }
+
+            if (!$canSend) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Bạn không có quyền gửi tin nhắn trong cuộc hội thoại này.',
@@ -119,6 +139,7 @@ class MessageController extends Controller
                 'conversation_id' => $conversation->id,
                 'sender_id' => $user->id,
                 'content' => $validatedData['content'],
+                'message_type' => 'user', // Admin messages are still user type, but sender role identifies them as admin
             ]);
 
             // Update conversation updated_at
@@ -133,7 +154,7 @@ class MessageController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Gửi tin nhắn thành công',
-                'data' => new MessageResource($message->load('sender:id,full_name,email,avatar_url')),
+                'data' => new MessageResource($message->load('sender:id,full_name,email,avatar_url,role')),
             ], 201);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json([
@@ -175,7 +196,7 @@ class MessageController extends Controller
 
             return response()->json([
                 'success' => true,
-                'data' => new MessageResource($message->load('sender:id,full_name,email,avatar_url')),
+                'data' => new MessageResource($message->load('sender:id,full_name,email,avatar_url,role')),
             ]);
         } catch (ModelNotFoundException $e) {
             return response()->json([
@@ -227,7 +248,7 @@ class MessageController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Cập nhật tin nhắn thành công',
-                'data' => new MessageResource($message->load('sender:id,full_name,email,avatar_url')),
+                'data' => new MessageResource($message->load('sender:id,full_name,email,avatar_url,role')),
             ]);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json([
@@ -322,7 +343,7 @@ class MessageController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Đánh dấu tin nhắn đã đọc thành công',
-                'data' => new MessageResource($message->load('sender:id,full_name,email,avatar_url')),
+                'data' => new MessageResource($message->load('sender:id,full_name,email,avatar_url,role')),
             ]);
         } catch (\Exception $e) {
             Log::error('MessageController@markAsRead failed', [
@@ -363,7 +384,7 @@ class MessageController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Ẩn tin nhắn thành công',
-                'data' => new MessageResource($message->load('sender:id,full_name,email,avatar_url')),
+                'data' => new MessageResource($message->load('sender:id,full_name,email,avatar_url,role')),
             ]);
         } catch (Exception $e) {
             Log::error('MessageController@hide failed', [
@@ -404,7 +425,7 @@ class MessageController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Bỏ ẩn tin nhắn thành công',
-                'data' => new MessageResource($message->load('sender:id,full_name,email,avatar_url')),
+                'data' => new MessageResource($message->load('sender:id,full_name,email,avatar_url,role')),
             ]);
         } catch (Exception $e) {
             Log::error('MessageController@unhide failed', [
