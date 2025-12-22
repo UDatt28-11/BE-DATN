@@ -38,6 +38,7 @@ class AmenityResource extends JsonResource
             'type' => $this->type,
             'category' => $this->category ?? 'facility', // Default to 'facility' if not set
             'icon_url' => $this->icon_url,
+            'status' => $this->status ?? 'active', // Default to 'active' if not set
             'property' => $this->whenLoaded('property', function () {
                 return [
                     'id' => $this->property->id,

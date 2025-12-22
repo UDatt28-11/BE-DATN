@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class ConversationController extends Controller
 {
@@ -37,19 +38,45 @@ class ConversationController extends Controller
             $perPage = (int) ($request->get('per_page', self::DEFAULT_PER_PAGE));
             $user = $request->user();
 
-            $query = Conversation::query()
-                ->whereHas('participants', function ($q) use ($user) {
-                    $q->where('user_id', $user->id);
-                })
-                ->with(['participants:id,full_name,email,avatar_url', 'messages' => function ($q) {
-                    $q->visible()->latest()->limit(1);
+            // For admin: show all conversations including AI conversations
+            if ($user->isAdmin()) {
+                $query = Conversation::query()
+                    ->with('participants');
+
+                // Load latest message separately to avoid issues
+                // Note: sender_id can be null for AI messages
+                $query->with(['messages' => function ($q) {
+                    $q->visible()->latest()->limit(1)
+                        ->with('sender:id,full_name,email,avatar_url,role');
                 }]);
 
-            // Filter by user_id (for admin)
-            if ($request->has('user_id') && $user->isAdmin()) {
-                $query->whereHas('participants', function ($q) use ($request) {
-                    $q->where('user_id', $request->user_id);
-                });
+                // Filter by type (user_to_user or user_to_ai) - only if type column exists
+                if ($request->has('type') && $request->type && Schema::hasColumn('conversations', 'type')) {
+                    $query->where('type', $request->type);
+                }
+
+                // Filter by user_id
+                if ($request->has('user_id')) {
+                    $query->whereHas('participants', function ($q) use ($request) {
+                        $q->where('user_id', $request->user_id);
+                    });
+                }
+
+                // Filter by session_id (for guest AI conversations)
+                if ($request->has('session_id')) {
+                    $query->where('session_id', $request->session_id);
+                }
+            } else {
+                // For non-admin: only show their own conversations
+                $query = Conversation::query()
+                    ->whereHas('participants', function ($q) use ($user) {
+                        $q->where('user_id', $user->id);
+                    })
+                    ->with('participants')
+                    ->with(['messages' => function ($q) {
+                        $q->visible()->latest()->limit(1)
+                            ->with('sender:id,full_name,email,avatar_url,role');
+                    }]);
             }
 
             // Sort by latest message
@@ -60,7 +87,33 @@ class ConversationController extends Controller
 
             // Add unread count for each conversation
             $conversations->getCollection()->transform(function ($conversation) use ($user) {
-                $conversation->unread_count = $conversation->getUnreadCount($user->id);
+                try {
+                    // Check if type column exists and conversation type is user_to_ai without participants
+                    $hasTypeColumn = Schema::hasColumn('conversations', 'type');
+                    $isGuestAI = $hasTypeColumn && 
+                                 ($conversation->type === 'user_to_ai' || $conversation->type === null) && 
+                                 $conversation->participants->isEmpty();
+                    
+                    if ($isGuestAI) {
+                        // Count unread messages from non-admin users (for guest AI conversations)
+                        $conversation->unread_count = $conversation->messages()
+                            ->where('sender_id', '!=', $user->id)
+                            ->whereNull('read_at')
+                            ->visible()
+                            ->count();
+                    } else {
+                        // For conversations with participants, use getUnreadCount
+                        // This handles both user_to_user and user_to_ai with participants
+                        $conversation->unread_count = $conversation->getUnreadCount($user->id);
+                    }
+                } catch (\Exception $e) {
+                    Log::warning('Error calculating unread count', [
+                        'conversation_id' => $conversation->id,
+                        'error' => $e->getMessage(),
+                        'trace' => $e->getTraceAsString(),
+                    ]);
+                    $conversation->unread_count = 0;
+                }
                 return $conversation;
             });
 
@@ -87,11 +140,14 @@ class ConversationController extends Controller
                 'message' => $e->getMessage(),
                 'file' => $e->getFile(),
                 'line' => $e->getLine(),
+                'trace' => $e->getTraceAsString(),
+                'user_id' => $request->user()?->id,
             ]);
 
             return response()->json([
                 'success' => false,
                 'message' => 'Có lỗi xảy ra khi lấy danh sách cuộc hội thoại.',
+                'error' => config('app.debug') ? $e->getMessage() : null,
             ], 500);
         }
     }
@@ -137,7 +193,9 @@ class ConversationController extends Controller
                 return response()->json([
                     'success' => true,
                     'message' => 'Cuộc hội thoại đã tồn tại',
-                    'data' => new ConversationResource($existingConversation->load('participants:id,full_name,email,avatar_url')),
+                    'data' => new ConversationResource($existingConversation->load(['participants' => function ($q) {
+                        $q->select('id', 'full_name', 'email', 'avatar_url');
+                    }])),
                 ], 200);
             }
 
@@ -157,7 +215,9 @@ class ConversationController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Tạo cuộc hội thoại thành công',
-                'data' => new ConversationResource($conversation->load('participants:id,full_name,email,avatar_url')),
+                'data' => new ConversationResource($conversation->load(['participants' => function ($q) {
+                    $q->select('id', 'full_name', 'email', 'avatar_url');
+                }])),
             ], 201);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json([
@@ -197,9 +257,14 @@ class ConversationController extends Controller
             }
 
             $conversation->load([
-                'participants:id,full_name,email,avatar_url',
+                'participants' => function ($q) {
+                    $q->select('id', 'full_name', 'email', 'avatar_url');
+                },
                 'messages' => function ($q) {
-                    $q->visible()->latest()->limit(1)->with('sender:id,full_name,email,avatar_url');
+                    $q->visible()->latest()->limit(1)
+                        ->with(['sender' => function ($senderQuery) {
+                            $senderQuery->select('id', 'full_name', 'email', 'avatar_url');
+                        }]);
                 }
             ]);
 

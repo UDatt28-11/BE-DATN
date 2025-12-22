@@ -53,6 +53,7 @@ use App\Http\Controllers\Api\User\VoucherController as UserVoucherController;
 use App\Http\Controllers\Api\Staff\BookingController as StaffBookingController;
 use App\Http\Controllers\Api\PayOSController;
 use App\Http\Controllers\Api\VNPayController;
+use App\Http\Controllers\Api\ChatController;
 
 // === MODELS & FACADES FOR PAYMENT REDIRECT ===
 use App\Models\BookingOrder;
@@ -520,6 +521,7 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
     Route::get('amenities/history', [AmenityController::class, 'history']);
     Route::post('amenities/{id}/restore', [AmenityController::class, 'restore'])->whereNumber('id');
     Route::delete('amenities/{id}/force', [AmenityController::class, 'forceDelete'])->whereNumber('id');
+    Route::patch('amenities/{id}/toggle-status', [AmenityController::class, 'toggleStatus'])->whereNumber('id');
     Route::apiResource('amenities', AmenityController::class);
 
     // ========================================
@@ -737,6 +739,12 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
     // 💬 CONVERSATIONS MANAGEMENT (Quản lý Hội thoại)
     // ========================================
     Route::apiResource('conversations', ConversationController::class);
+    
+    // Messages for conversations (admin can view and reply)
+    Route::prefix('conversations/{conversation}/messages')->group(function () {
+        Route::get('/', [MessageController::class, 'index']);
+        Route::post('/', [MessageController::class, 'store']);
+    });
 
     // ========================================
     // 💸 PAYOUTS MANAGEMENT (Quản lý Thanh toán chủ nhà)
@@ -1164,6 +1172,22 @@ Route::get('/rooms/{id}/comments', [RoomController::class, 'roomComments'])->whe
 
 // API danh sách rooms public (không cần auth)
 Route::get('/rooms', [RoomController::class, 'indexPublic']);
+
+// ==================================================================
+// 25. AI CHAT (PUBLIC + PROTECTED)
+// ==================================================================
+// AI Chat routes - cho phép cả guest và authenticated users
+Route::prefix('chat')->group(function () {
+    // Public routes (guest có thể dùng với session_id)
+    Route::get('conversation', [ChatController::class, 'getConversation']);
+    Route::post('send-message', [ChatController::class, 'sendMessage']);
+    Route::get('messages', [ChatController::class, 'getMessages']);
+    
+    // Protected routes (user đã đăng nhập)
+    Route::middleware('auth:sanctum')->group(function () {
+        Route::post('clear-history', [ChatController::class, 'clearHistory']);
+    });
+});
 
 // ==================================================================
 // 24. TEST: LẤY USER HIỆN TẠI (XÓA TRƯỚC DEPLOY)
