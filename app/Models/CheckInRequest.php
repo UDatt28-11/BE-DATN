@@ -11,6 +11,8 @@ class CheckInRequest extends Model
         'booking_order_id',
         'booking_detail_id',
         'full_name',
+        'email',
+        'phone_number',
         'date_of_birth',
         'identity_type',
         'identity_number',

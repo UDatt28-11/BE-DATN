@@ -270,6 +270,8 @@ class CheckInOutController extends Controller
             $request->validate([
                 'guests' => 'required|array|min:1',
                 'guests.*.full_name' => 'required|string|max:255',
+                'guests.*.email' => 'nullable|email|max:255',
+                'guests.*.phone_number' => 'nullable|string|max:20',
                 'guests.*.date_of_birth' => 'nullable|date',
                 'guests.*.identity_type' => 'required|in:cccd,passport',
                 'guests.*.identity_number' => 'required|string|max:50',
@@ -461,6 +463,8 @@ class CheckInOutController extends Controller
                 CheckedInGuest::create([
                     'booking_details_id' => $bookingDetail->id,
                     'full_name' => $guestData['full_name'],
+                    'email' => $guestData['email'] ?? null,
+                    'phone_number' => $guestData['phone_number'] ?? null,
                     'date_of_birth' => $guestData['date_of_birth'] ?? null,
                     'identity_type' => $guestData['identity_type'],
                     'identity_number' => $guestData['identity_number'],

@@ -361,9 +361,29 @@ class InvoiceController extends Controller
                         $with[] = 'bookingOrder';
                     } elseif ($include === 'bookingOrder.guest') {
                         $with[] = 'bookingOrder.guest';
+                    } elseif ($include === 'bookingOrder.details') {
+                        $with[] = 'bookingOrder.details';
+                    } elseif ($include === 'bookingOrder.details.checkedInGuests' || $include === 'bookingOrder.details.guests') {
+                        // Cần load cả details và checkedInGuests
+                        $with[] = 'bookingOrder.details.checkedInGuests';
                     } elseif ($include === 'invoiceItems') {
                         $with[] = 'invoiceItems';
                         $with[] = 'invoiceItems.damageImages';
+                    } elseif ($include === 'payments') {
+                        $with[] = 'payments';
+                    }
+                }
+                
+                // Đảm bảo nếu có bookingOrder.details.checkedInGuests thì phải có bookingOrder và bookingOrder.details
+                if (in_array('bookingOrder.details.checkedInGuests', $includeArray) || in_array('bookingOrder.details.guests', $includeArray)) {
+                    if (!in_array('bookingOrder', $with)) {
+                        $with[] = 'bookingOrder';
+                    }
+                    if (!in_array('bookingOrder.details', $with)) {
+                        $with[] = 'bookingOrder.details';
+                    }
+                    if (!in_array('bookingOrder.details.checkedInGuests', $with)) {
+                        $with[] = 'bookingOrder.details.checkedInGuests';
                     }
                 }
             } else {
@@ -380,6 +400,26 @@ class InvoiceController extends Controller
             
             // Load invoice with relationships
             $invoice = Invoice::with($with)->findOrFail($id);
+            
+            // Debug: Log để kiểm tra dữ liệu checkedInGuests
+            if ($invoice->bookingOrder && $invoice->bookingOrder->details) {
+                foreach ($invoice->bookingOrder->details as $detail) {
+                    if ($detail->checkedInGuests) {
+                        \Log::info('InvoiceController@show - CheckedInGuests found', [
+                            'detail_id' => $detail->id,
+                            'guests_count' => $detail->checkedInGuests->count(),
+                            'guests' => $detail->checkedInGuests->map(function($guest) {
+                                return [
+                                    'id' => $guest->id,
+                                    'full_name' => $guest->full_name,
+                                    'email' => $guest->email,
+                                    'phone_number' => $guest->phone_number,
+                                ];
+                            })->toArray(),
+                        ]);
+                    }
+                }
+            }
 
             return response()->json([
                 'success' => true,
