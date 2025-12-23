@@ -490,14 +490,30 @@ class InvoiceController extends Controller
             'status' => 'paid'
         ]);
 
-        // Cập nhật booking order status thành completed nếu đã checkout và thanh toán
+        // Cập nhật booking order status - CHỈ completed khi TẤT CẢ invoices đã thanh toán
         if ($invoice->bookingOrder) {
             $booking = $invoice->bookingOrder;
             if (in_array($booking->status, ['checked_out', 'partially_checked_out'])) {
-                $booking->update([
-                    'status' => 'completed',
-                    'payment_method' => $request->payment_method ?? $booking->payment_method,
-                ]);
+                // Kiểm tra tất cả invoices của booking đã được thanh toán chưa
+                $allInvoices = Invoice::where('booking_order_id', $booking->id)->get();
+                $allInvoicesPaid = $allInvoices->every(function ($inv) {
+                    return $inv->status === 'paid';
+                });
+                
+                if ($allInvoicesPaid) {
+                    // CHỈ khi TẤT CẢ invoices đã thanh toán, mới đặt thành completed
+                    $booking->update([
+                        'status' => 'completed',
+                        'payment_status' => 'paid',
+                        'payment_method' => $request->payment_method ?? $booking->payment_method,
+                    ]);
+                } else {
+                    // Nếu còn invoices chưa thanh toán, giữ status và đặt payment_status là partial
+                    $booking->update([
+                        'payment_status' => 'partial',
+                        'payment_method' => $request->payment_method ?? $booking->payment_method,
+                    ]);
+                }
             }
         }
 
@@ -533,13 +549,28 @@ class InvoiceController extends Controller
                 'status' => 'paid',
             ]);
 
-            // Cập nhật booking order status thành completed nếu đã checkout
+            // Cập nhật booking order status - CHỈ completed khi TẤT CẢ invoices đã thanh toán
             if ($invoice->bookingOrder) {
                 $booking = $invoice->bookingOrder;
                 if (in_array($booking->status, ['checked_out', 'partially_checked_out'])) {
-                    $booking->update([
-                        'status' => 'completed',
-                    ]);
+                    // Kiểm tra tất cả invoices của booking đã được thanh toán chưa
+                    $allInvoices = Invoice::where('booking_order_id', $booking->id)->get();
+                    $allInvoicesPaid = $allInvoices->every(function ($inv) {
+                        return $inv->status === 'paid';
+                    });
+                    
+                    if ($allInvoicesPaid) {
+                        // CHỈ khi TẤT CẢ invoices đã thanh toán, mới đặt thành completed
+                        $booking->update([
+                            'status' => 'completed',
+                            'payment_status' => 'paid',
+                        ]);
+                    } else {
+                        // Nếu còn invoices chưa thanh toán, giữ status và đặt payment_status là partial
+                        $booking->update([
+                            'payment_status' => 'partial',
+                        ]);
+                    }
                 }
             }
 
@@ -631,13 +662,30 @@ class InvoiceController extends Controller
                 ]);
             }
 
-            // Cập nhật booking order
+            // Cập nhật booking order - CHỈ completed khi TẤT CẢ invoices đã thanh toán
             if ($invoice->bookingOrder) {
                 $booking = $invoice->bookingOrder;
-                $booking->update([
-                    'payment_method' => $request->payment_method,
-                    'status' => 'completed', // Hoàn thành sau khi thanh toán
-                ]);
+                
+                // Kiểm tra tất cả invoices của booking đã được thanh toán chưa
+                $allInvoices = Invoice::where('booking_order_id', $booking->id)->get();
+                $allInvoicesPaid = $allInvoices->every(function ($inv) {
+                    return $inv->status === 'paid';
+                });
+                
+                if ($allInvoicesPaid) {
+                    // CHỈ khi TẤT CẢ invoices đã thanh toán, mới đặt thành completed
+                    $booking->update([
+                        'payment_method' => $request->payment_method,
+                        'status' => 'completed',
+                        'payment_status' => 'paid',
+                    ]);
+                } else {
+                    // Nếu còn invoices chưa thanh toán, giữ status và đặt payment_status là partial
+                    $booking->update([
+                        'payment_method' => $request->payment_method,
+                        'payment_status' => 'partial',
+                    ]);
+                }
             }
 
             DB::commit();
@@ -2243,6 +2291,36 @@ class InvoiceController extends Controller
             $depositAmount = $bookingOrder->deposit_amount ?? 0;
             $paidAmount = $bookingOrder->paid_amount ?? 0;
 
+            // Tính voucher discount cho từng phòng theo tỷ lệ giá phòng
+            // Công thức: Voucher_phòng = Voucher_tổng × (Giá_phòng / Tổng_Tiền_trước_chiết_khấu)
+            // Xử lý rounding: phòng cuối cùng sẽ chịu phần dư để đảm bảo tổng voucher khớp chính xác
+            $voucherDiscounts = [];
+            $totalVoucherDistributed = 0;
+            
+            if ($voucherAmount > 0 && $totalRoomPrice > 0) {
+                $detailCount = $bookingDetails->count();
+                $lastIndex = $detailCount - 1;
+                
+                foreach ($bookingDetails as $index => $detail) {
+                    $roomPrice = $roomPrices[$detail->id] ?? 0;
+                    
+                    if ($index === $lastIndex) {
+                        // Phòng cuối cùng: chịu phần dư để đảm bảo tổng voucher khớp chính xác
+                        $voucherDiscounts[$detail->id] = $voucherAmount - $totalVoucherDistributed;
+                    } else {
+                        // Các phòng khác: tính theo tỷ lệ và round
+                        $voucherDiscount = round(($roomPrice / $totalRoomPrice) * $voucherAmount, 2);
+                        $voucherDiscounts[$detail->id] = $voucherDiscount;
+                        $totalVoucherDistributed += $voucherDiscount;
+                    }
+                }
+            } else {
+                // Không có voucher hoặc tổng giá phòng = 0
+                foreach ($bookingDetails as $detail) {
+                    $voucherDiscounts[$detail->id] = 0;
+                }
+            }
+
             // Tạo hóa đơn mới cho từng phòng
             // LƯU Ý: Hóa đơn gốc sẽ được GIỮ NGUYÊN, không xóa items, không cancelled
             $splitInvoices = [];
@@ -2251,10 +2329,8 @@ class InvoiceController extends Controller
                 $roomPrice = $roomPrices[$detail->id] ?? 0;
                 $roomName = $detail->room->name ?? '';
 
-                // Phân bổ voucher theo tỷ lệ giá phòng (theo info.text)
-                $voucherDiscount = $totalRoomPrice > 0 
-                    ? round(($roomPrice / $totalRoomPrice) * $voucherAmount, 2)
-                    : 0;
+                // Lấy voucher discount đã tính cho phòng này
+                $voucherDiscount = $voucherDiscounts[$detail->id] ?? 0;
 
                 // Tính tiền cọc theo từng phòng dựa trên giá phòng và policy
                 // Policy: < 1,000,000 VND = 100% cọc, >= 1,000,000 VND = 50% cọc
@@ -2275,6 +2351,13 @@ class InvoiceController extends Controller
                     'discount_amount' => $voucherDiscount,
                 ]);
 
+                // ============================================
+                // TẠO INVOICE ITEMS CHO HÓA ĐƠN MỚI
+                // Tất cả items phải có:
+                // - invoice_id = $newInvoice->id (ID của hóa đơn mới được tách)
+                // - booking_detail_id = $detail->id (ID của phòng thuộc hóa đơn được tách ra)
+                // ============================================
+
                 // 1. Tạo room charge item
                 // Calculate nights - đảm bảo tính chính xác số đêm
                 $checkIn = \Carbon\Carbon::parse($detail->check_in_date)->startOfDay();
@@ -2283,8 +2366,8 @@ class InvoiceController extends Controller
                 $nights = max(1, abs($checkOut->diffInDays($checkIn)));
                 
                 InvoiceItem::create([
-                    'invoice_id' => $newInvoice->id,
-                    'booking_detail_id' => $detail->id,
+                    'invoice_id' => $newInvoice->id, // ✅ ID của hóa đơn mới
+                    'booking_detail_id' => $detail->id, // ✅ ID của phòng này
                     'description' => "Phòng {$roomName} - {$nights} đêm",
                     'quantity' => 1,
                     'unit_price' => $detail->room->price_per_night ?? 0,
@@ -2292,24 +2375,32 @@ class InvoiceController extends Controller
                     'item_type' => 'room_charge',
                 ]);
 
-                // 2. Tạo service charge items từ bookingServices của phòng này
+                // 2. Copy service charge items từ hóa đơn gốc (giữ nguyên trạng thái "đã thanh toán" nếu có)
+                // Lấy service items từ hóa đơn gốc có booking_detail_id của phòng này
+                $serviceItems = $originalInvoice->invoiceItems()
+                    ->where('booking_detail_id', $detail->id)
+                    ->where('item_type', 'service_charge')
+                    ->get();
+                
                 $servicePrice = 0;
-                foreach ($detail->bookingServices as $bookingService) {
-                    $service = $bookingService->service;
-                    $actualPrice = $bookingService->actual_price ?? $bookingService->price_at_booking ?? $service->price ?? 0;
-                    $actualQuantity = $bookingService->actual_quantity ?? $bookingService->quantity ?? 1;
-                    $serviceItemPrice = $actualPrice * $actualQuantity;
-                    $servicePrice += $serviceItemPrice;
-
+                foreach ($serviceItems as $originalServiceItem) {
+                    // Copy service item từ hóa đơn gốc (bao gồm cả description có "[Đã thanh toán]" nếu có)
                     InvoiceItem::create([
-                        'invoice_id' => $newInvoice->id,
-                        'booking_detail_id' => $detail->id, // Đảm bảo gán đúng booking_detail_id
-                        'description' => "Dịch vụ: {$service->name} - Phòng {$roomName} (SL: {$actualQuantity})",
-                        'quantity' => $actualQuantity,
-                        'unit_price' => $actualPrice,
-                        'total_line' => $serviceItemPrice,
+                        'invoice_id' => $newInvoice->id, // ✅ ID của hóa đơn mới
+                        'booking_detail_id' => $detail->id, // ✅ ID của phòng này
+                        'description' => $originalServiceItem->description, // Giữ nguyên description (có thể có "[Đã thanh toán]")
+                        'quantity' => $originalServiceItem->quantity,
+                        'unit_price' => $originalServiceItem->unit_price,
+                        'total_line' => $originalServiceItem->total_line,
                         'item_type' => 'service_charge',
                     ]);
+                    
+                    // Chỉ cộng vào servicePrice nếu chưa thanh toán (không có "[Đã thanh toán]" trong description)
+                    // Lưu ý: total_amount sẽ được tính lại bằng calculateTotalAmount() sau, nên không cần cộng ở đây
+                    // Nhưng vẫn tính để theo dõi (nếu cần)
+                    if (!str_contains($originalServiceItem->description, '[Đã thanh toán]')) {
+                        $servicePrice += $originalServiceItem->total_line ?? 0;
+                    }
                 }
 
                 // 3. Tạo damage fee items từ invoice items có booking_detail_id của phòng này
@@ -2324,8 +2415,8 @@ class InvoiceController extends Controller
                     
                     // Tạo mới damage item (không di chuyển từ hóa đơn gốc)
                     $newDamageItem = InvoiceItem::create([
-                        'invoice_id' => $newInvoice->id,
-                        'booking_detail_id' => $detail->id, // Đảm bảo gán đúng booking_detail_id
+                        'invoice_id' => $newInvoice->id, // ✅ ID của hóa đơn mới
+                        'booking_detail_id' => $detail->id, // ✅ ID của phòng này
                         'description' => $damageItem->description,
                         'quantity' => $damageItem->quantity,
                         'unit_price' => $damageItem->unit_price,
@@ -2345,10 +2436,20 @@ class InvoiceController extends Controller
 
                 // 4. Thêm item voucher discount nếu có (phân bổ theo tỷ lệ giá phòng)
                 if ($voucherDiscount > 0) {
+                    // Tính phần trăm voucher của phòng này so với tổng voucher
+                    $voucherPercentage = $voucherAmount > 0 
+                        ? round(($voucherDiscount / $voucherAmount) * 100, 2) 
+                        : 0;
+                    
+                    // Tính phần trăm giá phòng này so với tổng giá phòng
+                    $roomPricePercentage = $totalRoomPrice > 0 
+                        ? round(($roomPrice / $totalRoomPrice) * 100, 2) 
+                        : 0;
+                    
                     InvoiceItem::create([
-                        'invoice_id' => $newInvoice->id,
-                        'booking_detail_id' => $detail->id,
-                        'description' => 'Giảm giá voucher (phân bổ theo giá phòng)',
+                        'invoice_id' => $newInvoice->id, // ✅ ID của hóa đơn mới
+                        'booking_detail_id' => $detail->id, // ✅ ID của phòng này
+                        'description' => "Giảm giá voucher (phân bổ theo giá phòng: {$roomPricePercentage}% tổng bill)",
                         'quantity' => 1,
                         'unit_price' => -$voucherDiscount,
                         'total_line' => -$voucherDiscount,
@@ -2367,8 +2468,8 @@ class InvoiceController extends Controller
                     // Nếu đã có deposit item với booking_detail_id, sử dụng giá trị đó
                     $roomDeposit = abs($originalDepositItem->total_line ?? 0);
                     InvoiceItem::create([
-                        'invoice_id' => $newInvoice->id,
-                        'booking_detail_id' => $detail->id,
+                        'invoice_id' => $newInvoice->id, // ✅ ID của hóa đơn mới
+                        'booking_detail_id' => $detail->id, // ✅ ID của phòng này
                         'description' => "Tiền cọc đã thanh toán - Phòng {$roomName}",
                         'quantity' => 1,
                         'unit_price' => -$roomDeposit,
@@ -2379,8 +2480,8 @@ class InvoiceController extends Controller
                     // Nếu chưa có, tính theo giá phòng và policy
                     $depositPercentage = $roomPrice < 1000000 ? '100%' : '50%';
                     InvoiceItem::create([
-                        'invoice_id' => $newInvoice->id,
-                        'booking_detail_id' => $detail->id,
+                        'invoice_id' => $newInvoice->id, // ✅ ID của hóa đơn mới
+                        'booking_detail_id' => $detail->id, // ✅ ID của phòng này
                         'description' => "Tiền cọc đã thanh toán - Phòng {$roomName} ({$depositPercentage} giá phòng)",
                         'quantity' => 1,
                         'unit_price' => -$roomDeposit,
@@ -2389,8 +2490,9 @@ class InvoiceController extends Controller
                     ]);
                 }
 
-                // Tính lại total_amount dựa trên tất cả invoice items
-                $calculatedTotal = $newInvoice->invoiceItems()->sum('total_line');
+                // Tính lại total_amount dựa trên các invoice items chưa thanh toán
+                // Sử dụng calculateTotalAmount() để tự động bỏ qua items có "[Đã thanh toán]"
+                $calculatedTotal = $newInvoice->calculateTotalAmount();
                 $newInvoice->update(['total_amount' => max(0, $calculatedTotal)]);
                 
                 // Refresh invoice để có dữ liệu mới nhất

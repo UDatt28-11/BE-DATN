@@ -585,21 +585,50 @@ class PayOSController extends Controller
                     if ($totalPaidForInvoice >= $invoice->total_amount) {
                         $invoice->update(['status' => 'paid']);
                         
-                        // Cập nhật booking status thành completed
-                        if ($booking->status !== 'completed') {
-                            $booking->update(['status' => 'completed']);
-                        }
-                        
-                        // Cập nhật booking payment_status thành paid
-                        $booking->update(['payment_status' => 'paid']);
-                        
                         Log::info('PayOS webhook: Invoice payment completed', [
                             'invoice_id' => $invoice->id,
                             'booking_id' => $booking->id,
                             'total_paid' => $totalPaidForInvoice,
                             'invoice_total' => $invoice->total_amount,
                         ]);
+                        
+                        // KIỂM TRA TẤT CẢ INVOICES CỦA BOOKING ĐÃ ĐƯỢC THANH TOÁN CHƯA
+                        // Lấy tất cả invoices của booking (bao gồm cả hóa đơn gốc và các hóa đơn đã tách)
+                        $allInvoices = \App\Models\Invoice::where('booking_order_id', $booking->id)->get();
+                        $allInvoicesPaid = $allInvoices->every(function ($inv) {
+                            return $inv->status === 'paid';
+                        });
+                        
+                        if ($allInvoicesPaid) {
+                            // CHỈ KHI TẤT CẢ INVOICES ĐÃ ĐƯỢC THANH TOÁN, mới đặt booking thành completed
+                            if ($booking->status !== 'completed') {
+                                $booking->update(['status' => 'completed']);
+                            }
+                            
+                            // Cập nhật booking payment_status thành paid
+                            $booking->update(['payment_status' => 'paid']);
+                            
+                            Log::info('PayOS webhook: All invoices paid, booking status updated to completed', [
+                                'booking_id' => $booking->id,
+                                'total_invoices' => $allInvoices->count(),
+                                'all_paid' => true,
+                            ]);
+                        } else {
+                            // Nếu còn invoices chưa thanh toán, giữ booking ở trạng thái checked_out/partially_checked_out
+                            // và payment_status là partial
+                            $booking->update(['payment_status' => 'partial']);
+                            
+                            Log::info('PayOS webhook: Some invoices still unpaid, booking remains in checkout status', [
+                                'booking_id' => $booking->id,
+                                'total_invoices' => $allInvoices->count(),
+                                'paid_invoices' => $allInvoices->where('status', 'paid')->count(),
+                                'unpaid_invoices' => $allInvoices->where('status', '!=', 'paid')->count(),
+                            ]);
+                        }
                     } else {
+                        // Invoice chưa thanh toán đầy đủ
+                        $booking->update(['payment_status' => 'partial']);
+                        
                         Log::info('PayOS webhook: Invoice payment partial', [
                             'invoice_id' => $invoice->id,
                             'total_paid' => $totalPaidForInvoice,
